@@ -15,10 +15,19 @@ import { Daemon, DEFAULT_SOCKET_PATH } from '../daemon/server.js';
 import { RelayClient } from '../wrapper/client.js';
 import { generateAgentName } from '../utils/name-generator.js';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 dotenvConfig();
 
 const DEFAULT_DASHBOARD_PORT = process.env.AGENT_RELAY_DASHBOARD_PORT || '3888';
+
+// Read version from package.json
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const packageJsonPath = path.resolve(__dirname, '../../package.json');
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+const VERSION = packageJson.version;
 
 const program = new Command();
 
@@ -27,9 +36,9 @@ function pidFilePathForSocket(socketPath: string): string {
 }
 
 program
-  .name('relay')
+  .name('agent-relay')
   .description('Agent-to-agent messaging')
-  .version('0.1.0');
+  .version(VERSION, '-V, --version', 'Output the version number');
 
 // Default action = wrap agent
 program
@@ -207,6 +216,14 @@ program
     console.log('---');
     console.log(msg.body);
     await adapter.close?.();
+  });
+
+// version - Show version info
+program
+  .command('version')
+  .description('Show version information')
+  .action(() => {
+    console.log(`agent-relay v${VERSION}`);
   });
 
 program.parse();
