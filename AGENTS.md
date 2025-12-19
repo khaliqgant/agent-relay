@@ -6,31 +6,31 @@ Real-time agent-to-agent messaging.
 
 ```bash
 # Terminal 1: Start daemon
-relay up
+agent-relay up
 
 # Terminal 2: Start agent
-relay -n Alice claude
+agent-relay -n Alice claude
 
 # Terminal 3: Start another agent
-relay -n Bob claude
+agent-relay -n Bob claude
 ```
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `relay <cmd>` | Wrap agent with messaging (e.g., `relay claude`) |
-| `relay -n Name <cmd>` | Wrap with specific agent name |
-| `relay up` | Start daemon + dashboard |
-| `relay down` | Stop daemon |
-| `relay status` | Check if daemon is running |
-| `relay read <id>` | Read full truncated message |
+| `agent-relay <cmd>` | Wrap agent with messaging (e.g., `agent-relay claude`) |
+| `agent-relay -n Name <cmd>` | Wrap with specific agent name |
+| `agent-relay up` | Start daemon + dashboard |
+| `agent-relay down` | Stop daemon |
+| `agent-relay status` | Check if daemon is running |
+| `agent-relay read <id>` | Read full truncated message |
 
 ---
 
 ## For Agents: How to Communicate
 
-When wrapped with `relay`, agents communicate by outputting `@relay:` patterns.
+When wrapped with `agent-relay`, agents communicate by outputting `@relay:` patterns.
 
 ### Send a Message
 
@@ -61,13 +61,13 @@ The `[abc12345]` is the message ID for lookup if truncated.
 Long messages show:
 
 ```
-Relay message from Alice [abc12345]: Start of long message... [TRUNCATED - run "relay read abc12345..."]
+Relay message from Alice [abc12345]: Start of long message... [TRUNCATED - run "agent-relay read abc12345..."]
 ```
 
 Run the command to read the full message:
 
 ```bash
-relay read abc12345...
+agent-relay read abc12345...
 ```
 
 ---
@@ -127,6 +127,6 @@ To output literal `@relay:` without sending:
 
 | Issue | Solution |
 |-------|----------|
-| Messages not sending | `relay status` to check daemon |
-| Socket not found | `relay up` to start daemon |
-| Truncated message | `relay read <id>` for full content |
+| Messages not sending | `agent-relay status` to check daemon |
+| Socket not found | `agent-relay up` to start daemon |
+| Truncated message | `agent-relay read <id>` for full content |

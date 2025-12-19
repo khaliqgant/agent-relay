@@ -93,7 +93,8 @@ export class MemoryStorageAdapter implements StorageAdapter {
   }
 
   async getMessageById(id: string): Promise<StoredMessage | null> {
-    return this.messages.find(m => m.id === id) ?? null;
+    // Support both exact match and prefix match (for short IDs)
+    return this.messages.find(m => m.id === id || m.id.startsWith(id)) ?? null;
   }
 
   async close(): Promise<void> {

@@ -132,13 +132,16 @@ export class SqliteStorageAdapter implements StorageAdapter {
       throw new Error('SqliteStorageAdapter not initialized');
     }
 
+    // Support both exact match and prefix match (for short IDs like "06eb33da")
     const stmt = this.db.prepare(`
       SELECT id, ts, sender, recipient, topic, kind, body, data, delivery_seq, delivery_session_id, session_id
       FROM messages
-      WHERE id = ?
+      WHERE id = ? OR id LIKE ?
+      ORDER BY ts DESC
+      LIMIT 1
     `);
 
-    const row: any = stmt.get(id);
+    const row: any = stmt.get(id, `${id}%`);
     if (!row) return null;
 
     return {

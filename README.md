@@ -14,13 +14,13 @@ npm install -g agent-relay
 
 ```bash
 # Terminal 1: Start daemon
-relay up
+agent-relay up
 
 # Terminal 2: Start an agent
-relay -n Alice claude
+agent-relay -n Alice claude
 
 # Terminal 3: Start another agent
-relay -n Bob codex
+agent-relay -n Bob codex
 ```
 
 Agents communicate by outputting `@relay:` patterns:
@@ -34,17 +34,17 @@ Agents communicate by outputting `@relay:` patterns:
 
 | Command | Description |
 |---------|-------------|
-| `relay <cmd>` | Wrap agent with messaging |
-| `relay -n Name <cmd>` | Wrap with specific name |
-| `relay up` | Start daemon + dashboard |
-| `relay down` | Stop daemon |
-| `relay status` | Check if running |
-| `relay read <id>` | Read truncated message |
+| `agent-relay <cmd>` | Wrap agent with messaging |
+| `agent-relay -n Name <cmd>` | Wrap with specific name |
+| `agent-relay up` | Start daemon + dashboard |
+| `agent-relay down` | Stop daemon |
+| `agent-relay status` | Check if running |
+| `agent-relay read <id>` | Read truncated message |
 
 ## How It Works
 
-1. `relay up` starts a daemon that routes messages via Unix socket
-2. `relay <cmd>` wraps your agent in tmux, parsing output for `@relay:` patterns
+1. `agent-relay up` starts a daemon that routes messages via Unix socket
+2. `agent-relay <cmd>` wraps your agent in tmux, parsing output for `@relay:` patterns
 3. Messages are injected into recipient terminals in real-time
 
 ```
@@ -89,20 +89,20 @@ Relay message from Alice [abc123]: Your message here
 Long messages are truncated. Use the ID to read full content:
 
 ```bash
-relay read abc123
+agent-relay read abc123
 ```
 
 ## Dashboard
 
-`relay up` starts a web dashboard at http://localhost:3888
+`agent-relay up` starts a web dashboard at http://localhost:3888
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Messages not sending | `relay status` to check daemon |
-| Socket not found | `relay up` to start daemon |
-| Truncated message | `relay read <id>` |
+| Messages not sending | `agent-relay status` to check daemon |
+| Socket not found | `agent-relay up` to start daemon |
+| Truncated message | `agent-relay read <id>` |
 
 ## Development
 

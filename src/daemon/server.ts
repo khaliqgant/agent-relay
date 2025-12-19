@@ -18,6 +18,8 @@ export interface DaemonConfig extends ConnectionConfig {
   storageAdapter?: StorageAdapter;
   /** Storage configuration (type, path, url) */
   storageConfig?: StorageConfig;
+  /** Directory for team data (agents.json, etc.) */
+  teamDir?: string;
 }
 
 export const DEFAULT_SOCKET_PATH = '/tmp/agent-relay.sock';
@@ -42,8 +44,29 @@ export class Daemon {
     if (config.socketPath && !config.pidFilePath) {
       this.config.pidFilePath = `${config.socketPath}.pid`;
     }
+    // Default teamDir to same directory as socket
+    if (!this.config.teamDir) {
+      this.config.teamDir = path.dirname(this.config.socketPath);
+    }
     // Storage is initialized lazily in start() to support async createStorageAdapter
     this.server = net.createServer(this.handleConnection.bind(this));
+  }
+
+  /**
+   * Write current agents to agents.json for dashboard consumption.
+   */
+  private writeAgentsFile(): void {
+    if (!this.config.teamDir) return;
+    const agentsPath = path.join(this.config.teamDir, 'agents.json');
+    const agents = this.router.getAgents().map(name => ({
+      name,
+      connectedAt: new Date().toISOString(),
+    }));
+    try {
+      fs.writeFileSync(agentsPath, JSON.stringify({ agents }, null, 2));
+    } catch (err) {
+      console.error('[daemon] Failed to write agents.json:', err);
+    }
   }
 
   /**
@@ -157,6 +180,7 @@ export class Daemon {
       if (connection.agentName) {
         this.router.register(connection);
         console.log(`[daemon] Agent registered: ${connection.agentName}`);
+        this.writeAgentsFile();
       }
     };
 
@@ -164,12 +188,14 @@ export class Daemon {
       console.log(`[daemon] Connection closed: ${connection.agentName ?? connection.id}`);
       this.connections.delete(connection);
       this.router.unregister(connection);
+      this.writeAgentsFile();
     };
 
     connection.onError = (error: Error) => {
       console.error(`[daemon] Connection error: ${error.message}`);
       this.connections.delete(connection);
       this.router.unregister(connection);
+      this.writeAgentsFile();
     };
   }
 

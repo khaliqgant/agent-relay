@@ -151,7 +151,7 @@ agent-relay inbox-poll -n Reviewer -d DATA_DIR --clear
 Wait for Developer to request a code review.
 EOF
 
-# Replace DATA_DIR placeholder with actual path
+# Replace DATA_DIR tokens with the actual path
 sed -i.bak "s|DATA_DIR|$DATA_DIR|g" "$DATA_DIR/Architect/INSTRUCTIONS.md"
 sed -i.bak "s|DATA_DIR|$DATA_DIR|g" "$DATA_DIR/Developer/INSTRUCTIONS.md"
 sed -i.bak "s|DATA_DIR|$DATA_DIR|g" "$DATA_DIR/Reviewer/INSTRUCTIONS.md"

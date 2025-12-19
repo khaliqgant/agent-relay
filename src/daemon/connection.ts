@@ -132,8 +132,7 @@ export class Connection {
 
     // Check for session resume
     if (envelope.payload.session?.resume_token) {
-      // Session resume requested but session state storage is not implemented.
-      // Send RESUME_TOO_OLD error to inform client, then continue with new session.
+      // Resume tokens are not persisted; tell client to start a fresh session.
       this.sendError('RESUME_TOO_OLD', 'Session resume not yet supported; starting new session', false);
     }
 

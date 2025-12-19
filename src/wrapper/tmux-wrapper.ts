@@ -481,8 +481,8 @@ export class TmuxWrapper {
       // Short message ID for display (first 8 chars)
       const shortId = msg.messageId.substring(0, 8);
 
-      // Truncate long messages to avoid display issues
-      const maxLen = 500;
+      // Truncate very long messages to avoid display issues
+      const maxLen = 2000;
       let wasTruncated = false;
       if (sanitizedBody.length > maxLen) {
         sanitizedBody = sanitizedBody.substring(0, maxLen) + '...';
@@ -492,7 +492,7 @@ export class TmuxWrapper {
       // Always include message ID; add lookup hint if truncated
       const idTag = `[${shortId}]`;
       const truncationHint = wasTruncated
-        ? ` [TRUNCATED - run "relay read ${msg.messageId}"]`
+        ? ` [TRUNCATED - run "agent-relay read ${msg.messageId}"]`
         : '';
 
       // Gemini CLI interprets input as shell commands, so we need special handling

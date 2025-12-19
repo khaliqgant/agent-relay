@@ -11,7 +11,7 @@ Prepare agent-relay for public release on npm and GitHub with comprehensive docu
 
 Tasks:
 - [ ] Review and improve README.md
-  - Add GIF/video demo placeholder
+  - Add GIF/video demo of quick start usage
   - Improve quick start section
   - Add "Common Use Cases" section
 - [ ] Create docs/CONTRIBUTING.md

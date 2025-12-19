@@ -56,14 +56,35 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
   app.use(express.json());
 
   const getTeamData = () => {
+    // Try team.json first (file-based team mode)
     const teamPath = path.join(dataDir, 'team.json');
-    if (!fs.existsSync(teamPath)) return null;
-    try {
-      return JSON.parse(fs.readFileSync(teamPath, 'utf-8'));
-    } catch (e) {
-      console.error('Failed to read team.json', e);
-      return null;
+    if (fs.existsSync(teamPath)) {
+      try {
+        return JSON.parse(fs.readFileSync(teamPath, 'utf-8'));
+      } catch (e) {
+        console.error('Failed to read team.json', e);
+      }
     }
+
+    // Fall back to agents.json (daemon mode - live connected agents)
+    const agentsPath = path.join(dataDir, 'agents.json');
+    if (fs.existsSync(agentsPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+        // Convert agents.json format to team.json format
+        return {
+          agents: data.agents.map((a: { name: string; connectedAt?: string }) => ({
+            name: a.name,
+            role: 'Agent',
+            cli: 'unknown',
+          })),
+        };
+      } catch (e) {
+        console.error('Failed to read agents.json', e);
+      }
+    }
+
+    return null;
   };
 
   const parseInbox = (agentName: string): Message[] => {
@@ -216,7 +237,7 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
       if (fs.existsSync(dataDir)) {
           console.log(`Watching ${dataDir} for changes...`);
           fs.watch(dataDir, { recursive: true }, (eventType, filename) => {
-              if (filename && (filename.endsWith('inbox.md') || filename.endsWith('team.json'))) {
+              if (filename && (filename.endsWith('inbox.md') || filename.endsWith('team.json') || filename.endsWith('agents.json'))) {
                   // Debounce
                   if (fsWait) return;
                   fsWait = setTimeout(() => {
