@@ -202,7 +202,7 @@ export class OutputParser {
    * across chunks.
    */
   private parsePassThrough(data: string, commands: ParsedCommand[]): string {
-    // Simple approach: split data, check each line (complete or not), rebuild output
+   // Simple approach: split data, check each line (complete or not), rebuild output
     const lines = data.split('\n');
     const hasTrailingNewline = data.endsWith('\n');
 
@@ -229,7 +229,54 @@ export class OutputParser {
         // Only check complete lines for relay commands.
         const result = this.processLine(line);
         if (result.command) {
-          commands.push(result.command);
+          // Collect continuation lines (in the same chunk) so inline messages can span multiple lines.
+          let body = result.command.body;
+          const rawLines = [result.command.raw];
+          let consumed = 0;
+
+          while (i + 1 < lines.length) {
+            const nextIsLast = i + 1 === lines.length - 1;
+            const nextLine = lines[i + 1];
+
+            // Do not consume an incomplete trailing line (no newline terminator)
+            if (nextIsLast && !hasTrailingNewline) {
+              break;
+            }
+
+            const nextStripped = stripAnsi(nextLine);
+
+            // Stop at empty lines - they end the continuation
+            if (nextStripped.trim() === '') {
+              break;
+            }
+
+            // Stop if the next line starts another inline command, code fence, or block marker
+            if (
+              INLINE_RELAY.test(nextStripped) ||
+              INLINE_THINKING.test(nextStripped) ||
+              CODE_FENCE.test(nextStripped) ||
+              nextStripped.includes('[[RELAY]]') ||
+              BLOCK_END.test(nextStripped)
+            ) {
+              break;
+            }
+
+            // Only consume as continuation if the line is INDENTED (starts with whitespace)
+            // This handles TUI wrapping where continuation lines are indented
+            // Non-indented lines are regular output, not continuation
+            if (!/^[ \t]/.test(nextLine)) {
+              break;
+            }
+
+            consumed++;
+            i++; // Skip the consumed continuation line
+            body += '\n' + nextLine;
+            rawLines.push(nextLine);
+          }
+
+          commands.push({ ...result.command, body, raw: rawLines.join('\n') });
+          strippedCount += consumed + 1;
+          continue;
         }
         if (result.output !== null) {
           outputLines.push(result.output);

@@ -410,7 +410,9 @@ export class TmuxWrapper {
       // Always parse the FULL capture for @relay commands
       // This handles terminal UIs that rewrite content in place
       const cleanContent = this.stripAnsi(stdout);
-      const { commands } = this.parser.parse(cleanContent);
+      // Join continuation lines that TUIs split across multiple lines
+      const joinedContent = this.joinContinuationLines(cleanContent);
+      const { commands } = this.parser.parse(joinedContent);
 
       // Track last output time for injection timing
       if (stdout.length !== this.processedOutputLength) {
@@ -420,6 +422,7 @@ export class TmuxWrapper {
 
       // Send any commands found (deduplication handles repeats)
       for (const cmd of commands) {
+        this.logStderr(`Found relay command: to=${cmd.to} body=${cmd.body.substring(0, 50)}...`);
         this.sendRelayCommand(cmd);
       }
 
@@ -442,6 +445,63 @@ export class TmuxWrapper {
   }
 
   /**
+   * Join continuation lines after @relay commands.
+   * Claude Code and other TUIs insert real newlines in output, causing
+   * @relay messages to span multiple lines. This joins indented
+   * continuation lines back to the @relay line.
+   */
+  private joinContinuationLines(content: string): string {
+    const lines = content.split('\n');
+    const result: string[] = [];
+
+    // Pattern to detect @relay command line (with optional bullet prefix)
+    const relayPattern = /^(?:\s*(?:[>$%#→➜›»●•◦‣⁃\-*⏺◆◇○□■]\s*)*)?@relay:/;
+    // Pattern to detect a continuation line (starts with spaces, no bullet/command)
+    const continuationPattern = /^[ \t]+[^>$%#→➜›»●•◦‣⁃\-*⏺◆◇○□■@\s]/;
+    // Pattern to detect a new block/bullet (stops continuation)
+    const newBlockPattern = /^(?:\s*)?[>$%#→➜›»●•◦‣⁃\-*⏺◆◇○□■]/;
+
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Check if this is a @relay line
+      if (relayPattern.test(line)) {
+        let joined = line;
+        let j = i + 1;
+
+        // Look ahead for continuation lines
+        while (j < lines.length) {
+          const nextLine = lines[j];
+
+          // Empty line stops continuation
+          if (nextLine.trim() === '') break;
+
+          // New bullet/block stops continuation
+          if (newBlockPattern.test(nextLine)) break;
+
+          // Check if it looks like a continuation (indented text)
+          if (continuationPattern.test(nextLine)) {
+            // Join with space, trimming the indentation
+            joined += ' ' + nextLine.trim();
+            j++;
+          } else {
+            break;
+          }
+        }
+
+        result.push(joined);
+        i = j; // Skip the lines we joined
+      } else {
+        result.push(line);
+        i++;
+      }
+    }
+
+    return result.join('\n');
+  }
+
+  /**
    * Escape string for ANSI-C quoting ($'...')
    * This handles special characters more reliably than mixing quote styles
    */
@@ -461,12 +521,18 @@ export class TmuxWrapper {
     const msgHash = `${cmd.to}:${cmd.body}`;
 
     // Permanent dedup - never send the same message twice
-    if (this.sentMessageHashes.has(msgHash)) return;
+    if (this.sentMessageHashes.has(msgHash)) {
+      this.logStderr(`Skipping duplicate: ${cmd.to}`);
+      return;
+    }
 
+    this.logStderr(`Attempting to send to ${cmd.to}, client state: ${this.client.state}`);
     const success = this.client.sendMessage(cmd.to, cmd.body, cmd.kind, cmd.data);
     if (success) {
       this.sentMessageHashes.add(msgHash);
       this.logStderr(`→ ${cmd.to}: ${cmd.body.substring(0, 40)}...`);
+    } else {
+      this.logStderr(`Failed to send to ${cmd.to} (client state: ${this.client.state})`);
     }
   }
 

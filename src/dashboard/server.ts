@@ -254,22 +254,40 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
     }
   }
 
-  return new Promise((resolve, reject) => {
-      try {
-        server.listen(port, () => {
-            console.log(`Dashboard running at http://localhost:${port}`);
-            console.log(`Monitoring: ${dataDir}`);
-            // We do NOT resolve here to keep the process alive
-            // But we must resolve if the user sends SIGINT? 
-            // The main process handles SIGINT.
+  // Try to find an available port, starting from the requested port
+  const findAvailablePort = async (startPort: number, maxAttempts = 10): Promise<number> => {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const portToTry = startPort + attempt;
+      const isAvailable = await new Promise<boolean>((resolve) => {
+        const testServer = http.createServer();
+        testServer.once('error', () => resolve(false));
+        testServer.once('listening', () => {
+          testServer.close();
+          resolve(true);
         });
-        
-        server.on('error', (err) => {
-            console.error('Server error:', err);
-            reject(err);
-        });
-      } catch (e) {
-          reject(e);
+        testServer.listen(portToTry);
+      });
+
+      if (isAvailable) {
+        return portToTry;
       }
+      console.log(`Port ${portToTry} in use, trying ${portToTry + 1}...`);
+    }
+    throw new Error(`Could not find available port after trying ${startPort}-${startPort + maxAttempts - 1}`);
+  };
+
+  const availablePort = await findAvailablePort(port);
+
+  return new Promise((resolve, reject) => {
+    server.listen(availablePort, () => {
+      console.log(`Dashboard running at http://localhost:${availablePort}`);
+      console.log(`Monitoring: ${dataDir}`);
+      resolve();
+    });
+
+    server.on('error', (err) => {
+      console.error('Server error:', err);
+      reject(err);
+    });
   });
 }
