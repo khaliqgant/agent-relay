@@ -5,174 +5,105 @@
 
 Real-time agent-to-agent communication system. Enables AI agents (Claude, Codex, Gemini, etc.) running in separate terminals to communicate with sub-millisecond latency.
 
-## Installation
-
-### One-Line Install (Recommended)
+## Installation & Quick Start
 
 ```bash
+# Install
 curl -fsSL https://raw.githubusercontent.com/khaliqgant/agent-relay/main/install.sh | bash
-```
 
-This installs to `~/.agent-relay` and adds `agent-relay` to your PATH.
-
-### Install Options
-
-```bash
-# Custom install directory
-AGENT_RELAY_DIR=/opt/agent-relay curl -fsSL https://...install.sh | bash
-
-# Install and start daemon immediately
-AGENT_RELAY_START=true curl -fsSL https://...install.sh | bash
-
-# Quiet mode (for agents/scripts)
-AGENT_RELAY_QUIET=true curl -fsSL https://...install.sh | bash
-```
-
-### Manual Install
-
-```bash
-git clone https://github.com/khaliqgant/agent-relay.git
-cd agent-relay
-npm install
-npm run build
-```
-
-### Requirements
-
-- Node.js >= 18 (20+ recommended)
-- macOS or Linux (Unix domain sockets)
-
-## Troubleshooting
-
-### `node-pty` / native module errors
-
-If you see errors like `NODE_MODULE_VERSION ...` or `compiled against a different Node.js version`, rebuild native deps:
-
-```bash
-npm rebuild node-pty
-```
-
-### `listen EPERM: operation not permitted`
-
-If your environment restricts creating sockets under `/tmp` (some sandboxes/containers do), pick a socket path you can write to:
-
-```bash
-npx agent-relay start -f -s ./agent-relay.sock
-```
-
-## Why We Built This
-
-As AI agents become more capable, there's a growing need for them to collaborate in real-time. Imagine multiple agents working together on a codebase, coordinating tasks, or even playing games against each other—all without human intervention.
-
-**The problem:** How do you get agents running in separate terminal sessions to talk to each other seamlessly?
-
-## For Humans: When You’d Use agent-relay
-
-Use agent-relay when you want **fast, local, real-time coordination** between multiple CLI-based agents without adopting a larger framework.
-
-Common scenarios:
-- **Multi-terminal agent swarms** where each agent runs in its own terminal and needs to exchange messages quickly.
-- **Turn-based / tight-loop coordination** (games, schedulers, orchestrators) where polling latency becomes noticeable.
-- **“Wrap anything” workflows** where you don’t control the agent implementation but you can run it as a CLI process.
-
-Tradeoffs to know up front:
-- Local IPC only (Unix domain sockets); no cross-host networking.
-- Best-effort delivery today (no persistence/guaranteed retries yet).
-
-### Existing Solutions (and why they're great)
-
-We built agent-relay with deep respect for existing solutions that inspired this work:
-
-#### [mcp_agent_mail](https://github.com/Dicklesworthstone/mcp_agent_mail)
-A thoughtful MCP-based agent communication system. Great features like auto-generated agent names (AdjectiveNoun format), file reservations, and Git-backed message persistence. If you're already in the MCP ecosystem, this is an excellent choice.
-
-**Why choose agent-relay over mcp_agent_mail:** When you specifically want **low-latency, real-time, local IPC** and a **PTY wrapper** that can intercept output from *any* CLI agent without requiring MCP integration.
-
-**Why choose mcp_agent_mail instead:** When you want **message persistence/auditability**, **file reservations**, and a workflow already built around MCP-style tooling.
-
-#### [swarm-tools/swarm-mail](https://github.com/joelhooks/swarm-tools/tree/main/packages/swarm-mail)
-Part of the swarm-tools ecosystem, providing inter-agent messaging. Well-designed for swarm coordination patterns.
-
-**Why choose agent-relay over swarm-mail:** When you want **push-style delivery** and sub-second responsiveness; file-based polling can be great for robustness, but it’s not ideal for tight coordination loops.
-
-**Why choose swarm-mail instead:** When you prefer **filesystem-backed messaging** (easy inspection, simple operations) and millisecond-level latency isn’t a requirement.
-
-### Our Approach
-
-agent-relay takes a different path:
-- **Unix domain sockets** for sub-5ms latency
-- **PTY wrapper** that works with any CLI (Claude, Codex, Gemini, etc.)
-- **No protocol dependencies** - just wrap your command and go
-- **Pattern detection** in terminal output (`@relay:` syntax)
-- **Built-in game support** as a proof-of-concept for real-time coordination
-
-## Features
-
-- **Real-time messaging** via Unix domain sockets (<5ms latency)
-- **PTY wrapper** for any CLI agent (Claude Code, Codex CLI, Gemini CLI)
-- **Auto-generated agent names** (AdjectiveNoun format, like mcp_agent_mail)
-- **Best-effort delivery** with per-stream ordering (ACK protocol defined, reliability optional)
-- **Topic-based pub/sub** for game coordination and channels
-- **Hearts game engine** as proof-of-concept for multi-agent interaction (see `src/games/hearts.ts`)
-
-## Quick Start
-
-### Option 1: One-Line Install (Recommended)
-
-```bash
-# Install agent-relay
-curl -fsSL https://raw.githubusercontent.com/khaliqgant/agent-relay/main/install.sh | bash
+# Navigate to your project
+cd /path/to/your/project
 
 # Start the daemon
 agent-relay start -f
 
-# In another terminal, wrap an agent (name auto-generated)
+# In another terminal, wrap an agent
 agent-relay wrap "claude"
 # Output: Agent name: SilverMountain
 
-# In another terminal, wrap another agent
+# In a third terminal, wrap another agent
 agent-relay wrap "codex"
 # Output: Agent name: BlueFox
 ```
 
-### Option 2: From Source
+**Requirements:** Node.js 20+, macOS/Linux, tmux
 
+**From source:**
 ```bash
-git clone https://github.com/khaliqgant/agent-relay.git
-cd agent-relay
+git clone https://github.com/khaliqgant/agent-relay.git && cd agent-relay
 npm install && npm run build
-
-# Start the daemon
 npx agent-relay start -f
-
-# In another terminal, wrap an agent
-npx agent-relay wrap "claude"
 ```
 
-### Sending Messages Between Agents
+## When to Use agent-relay
 
-Once agents are wrapped, they can send messages to each other:
+Use agent-relay when you want **fast, local, real-time coordination** between multiple CLI-based agents.
+
+**Best for:**
+- Multi-terminal agent swarms needing quick message exchange
+- Turn-based coordination (games, schedulers, orchestrators)
+- "Wrap anything" workflows - works with any CLI agent
+
+**Tradeoffs:**
+- Local IPC only (Unix domain sockets); no cross-host networking
+- Best-effort delivery (persistence via SQLite, but no guaranteed retries yet)
+
+### How It Works
+
+1. **Start daemon** - Listens on a Unix socket, routes messages between agents
+2. **Wrap agents in tmux** - Each agent runs in a tmux session with output parsing
+3. **Pattern detection** - Agent outputs `@relay:AgentName message` to send
+4. **Message injection** - Incoming messages are typed into the agent's tmux session
+
+### Alternatives
+
+| Solution | Best For | Trade-off |
+|----------|----------|-----------|
+| **agent-relay** | Real-time, local, any CLI | Local only, requires tmux |
+| [mcp_agent_mail](https://github.com/Dicklesworthstone/mcp_agent_mail) | MCP ecosystem, persistence | Requires MCP integration |
+| [swarm-mail](https://github.com/joelhooks/swarm-tools) | Filesystem-backed, simple | Polling-based latency |
+
+## Features
+
+- **Tmux wrapper** - Wraps any CLI (Claude, Codex, Gemini) in a tmux session
+- **Project isolation** - Each project gets its own socket, database, and namespace
+- **Real-time messaging** - Unix domain sockets with <5ms latency
+- **Mouse scroll passthrough** - Scrolling works naturally in wrapped apps
+- **CLI type detection** - Special handling for Gemini, Claude, Codex
+- **Message persistence** - SQLite storage with `msg-read` for long messages
+- **Auto-generated names** - AdjectiveNoun format (SilverMountain, BlueFox)
+
+### Sending Messages
+
+Once agents are wrapped, they communicate via their terminal output:
 
 ```bash
-# Direct message (from agent terminal)
+# Agent outputs this to send a message
 @relay:BlueFox Hello from SilverMountain!
 
-# Broadcast to all agents
+# Broadcast to all
 @relay:* Anyone online?
 
-# Messages appear in recipient's terminal as:
-# [MSG] from SilverMountain: Hello from SilverMountain!
+# Recipient sees:
+# Relay message from SilverMountain: Hello from SilverMountain!
+```
+
+### Project Isolation
+
+Each project gets its own namespace (socket, database, team directory):
+
+```bash
+agent-relay project          # Show current project paths
+agent-relay project --list   # List all projects
 ```
 
 ### Enable Your Agents
 
-Copy [`AGENTS.md`](./AGENTS.md) to your project so AI agents know how to use agent-relay:
+Add agent-relay instructions to your project:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/khaliqgant/agent-relay/main/AGENTS.md > AGENTS.md
+curl -fsSL https://raw.githubusercontent.com/khaliqgant/agent-relay/main/CLAUDE.md > CLAUDE.md
 ```
-
-This file contains instructions that AI agents can read to learn how to send/receive messages.
 
 ## Common Use Cases
 
@@ -350,34 +281,22 @@ agent-relay wrap -n PlayerO "codex"
 - Background polling captures output and parses `@relay:` commands
 - Incoming messages are injected via `tmux send-keys`
 
+**Scrolling:** Mouse mode is enabled by default - scroll wheel passes through to the CLI app. Use `--no-mouse` to disable.
+
+**CLI-specific handling:**
+- **Gemini CLI** - Messages shown via echo to avoid command interpretation
+- **Claude/Codex** - Standard message injection
+
 **Tuning flags:**
-- `-q, --quiet` to silence debug logs (stderr)
-- `--log-interval <ms>` to throttle debug output
-- `--inject-idle-ms <ms>` to change the idle window before injecting messages (default 1500ms)
-- `--inject-retry-ms <ms>` to adjust how often we re-check for an idle window (default 500ms)
+- `-q, --quiet` - Silence debug logs
+- `--no-mouse` - Disable mouse passthrough
+- `--cli-type <type>` - Force CLI type (claude, codex, gemini, other)
+- `--inject-idle-ms <ms>` - Idle time before injecting (default 1500ms)
 
-**Legacy PTY mode:**
-If you need the old direct PTY mode, use the `--pty` flag:
+**Legacy modes:**
 ```bash
-agent-relay wrap --pty -n MyAgent "claude"
+agent-relay wrap --pty -n MyAgent "claude"  # Direct PTY mode
 ```
-
-**Scrolling in tmux:**
-
-By default, scroll wheel is sent to the application inside tmux. To scroll through history:
-
-1. **Enter copy mode**: Press `Ctrl+b` then `[`
-2. Scroll with arrow keys, Page Up/Down, or mouse wheel
-3. Press `q` to exit copy mode
-
-**Or enable mouse scrolling** (add to `~/.tmux.conf`):
-```bash
-set -g mouse on
-```
-
-Then reload: `tmux source-file ~/.tmux.conf`
-
-**Compatibility:** Works with any CLI that accepts text input (Claude, Codex, Gemini, etc.)
 
 ### File-Based Inbox Commands
 
@@ -452,25 +371,24 @@ agent-relay team-start -f team-config.json -d /tmp/my-team
 }
 ```
 
-### Supervisor Commands
+### Supervisor Commands (Advanced)
 
-For spawn-per-message agent management:
+The supervisor is for **spawn-per-message** workflows - spawning an agent process when a message arrives, then it exits. This is different from the tmux wrapper which keeps agents running continuously.
+
+**When to use supervisor:**
+- Agents that can't run continuously (batch processing)
+- Cost-conscious setups (no idle agents)
+- One-shot task processing
+
+**When to use tmux wrapper instead:**
+- Real-time collaboration
+- Interactive agents (Claude Code)
+- Continuous monitoring
 
 ```bash
-# Run the supervisor (foreground)
-agent-relay supervisor -d /tmp/relay -v
-
-# Run supervisor in background
-agent-relay supervisor -d /tmp/relay --detach
-
-# Check supervisor status
-agent-relay supervisor-status
-
-# Stop background supervisor
-agent-relay supervisor-stop
-
-# Register an agent with supervisor
-agent-relay register -n AgentName -c "claude" -d /tmp/relay
+agent-relay supervisor -d /tmp/relay --detach   # Start in background
+agent-relay register -n AgentName -c "claude"   # Register an agent
+agent-relay supervisor-status                    # Check status
 ```
 
 ### Dashboard
@@ -769,6 +687,63 @@ This project stands on the shoulders of giants:
 - **[swarm-tools](https://github.com/joelhooks/swarm-tools)** by Joel Hooks - Showed how swarm coordination patterns can enable powerful multi-agent workflows.
 
 If MCP integration or file-based persistence fits your use case better, we highly recommend checking out these projects.
+
+## Troubleshooting
+
+### `node-pty` / `better-sqlite3` native module errors
+
+If you see errors like `NODE_MODULE_VERSION ...` or `compiled against a different Node.js version`, rebuild native deps:
+
+```bash
+npm rebuild better-sqlite3
+npm rebuild node-pty
+```
+
+### `listen EPERM: operation not permitted`
+
+If your environment restricts creating sockets under `/tmp` (some sandboxes/containers do), pick a socket path you can write to:
+
+```bash
+agent-relay start -f -s ./agent-relay.sock
+```
+
+### Messages not appearing
+
+1. Check daemon is running: `agent-relay status`
+2. Check socket exists: `ls -la /tmp/agent-relay/<project-id>/relay.sock`
+3. Verify agents are using the same project paths: `agent-relay project`
+4. Restart daemon: `agent-relay stop && agent-relay start -f`
+
+### Scrolling not working in tmux
+
+By default, mouse mode is enabled for scroll passthrough. If scrolling still doesn't work:
+
+1. Check your terminal emulator settings (iTerm2, Terminal.app, etc.)
+2. Use `--no-mouse` flag to disable tmux mouse mode
+3. Use tmux copy mode: `Ctrl+b` then `[`, scroll with arrows, `q` to exit
+
+### Gemini CLI interpreting messages as commands
+
+Gemini CLI has special handling. If issues persist:
+
+```bash
+agent-relay wrap --cli-type gemini -n MyGemini "gemini-cli"
+```
+
+### Project paths confusion
+
+If agents can't find each other, they may be using different project paths:
+
+```bash
+# Check current project paths
+agent-relay project
+
+# List all known projects
+agent-relay project --list
+
+# Force global paths (not recommended)
+agent-relay start --global
+```
 
 ## Development
 
