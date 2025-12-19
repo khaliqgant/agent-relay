@@ -319,12 +319,59 @@ npx agent-relay wrap "claude"
 # Wrap an agent with explicit name
 npx agent-relay wrap -n my-agent "claude"
 
+# Wrap with tmux mode (recommended for multi-agent sessions)
+npx agent-relay wrap --tmux2 -n PlayerX "claude"
+
 # Check status
 npx agent-relay status
 
 # Send a test message
 npx agent-relay send -t recipient -m "Hello"
 ```
+
+### Tmux Mode (`--tmux2`)
+
+The `--tmux2` flag wraps your agent in a tmux session, which provides better stability for multi-agent coordination:
+
+```bash
+# Terminal 1: Start daemon
+agent-relay start -f
+
+# Terminal 2: Start first agent
+agent-relay wrap --tmux2 -n PlayerX -- claude
+
+# Terminal 3: Start second agent
+agent-relay wrap --tmux2 -n PlayerO -- claude
+```
+
+**How it works:**
+- Creates a detached tmux session for each agent
+- Attaches your terminal directly to the session
+- Background polling captures output and parses `@relay:` commands
+- Incoming messages are injected via `tmux send-keys`
+
+**Tuning flags:**
+- `--tmux2-quiet` to silence debug logs (stderr)
+- `--tmux2-log-interval <ms>` to throttle debug output
+- `--tmux2-inject-idle-ms <ms>` to change the idle window before injecting messages (default 1500ms)
+- `--tmux2-inject-retry-ms <ms>` to adjust how often we re-check for an idle window (default 500ms)
+
+**Scrolling in tmux:**
+
+By default, scroll wheel is sent to the application inside tmux. To scroll through history:
+
+1. **Enter copy mode**: Press `Ctrl+b` then `[`
+2. Scroll with arrow keys, Page Up/Down, or mouse wheel
+3. Press `q` to exit copy mode
+
+**Or enable mouse scrolling** (add to `~/.tmux.conf`):
+```bash
+set -g mouse on
+```
+
+Then reload: `tmux source-file ~/.tmux.conf`
+
+**Compatibility:** Works with any CLI that accepts text input (Claude, Codex, Gemini, etc.)
 
 ### File-Based Inbox Commands
 

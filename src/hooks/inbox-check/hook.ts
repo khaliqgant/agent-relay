@@ -67,7 +67,8 @@ function exitHook(code: number): never {
  */
 async function main(): Promise<void> {
   try {
-    const _input = readStdin();
+    // Read stdin (required by Claude Code hook protocol, but we only use env vars)
+    readStdin();
 
     // Get agent name from env
     const agentName = getAgentName();

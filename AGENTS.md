@@ -4,10 +4,11 @@
 
 ## Overview
 
-This project uses [agent-relay](https://github.com/khaliqgant/agent-relay) for real-time agent-to-agent messaging. There are two communication modes:
+This project uses [agent-relay](https://github.com/khaliqgant/agent-relay) for real-time agent-to-agent messaging. There are three communication modes:
 
-1. **PTY Wrapper Mode** - Real-time messaging via Unix sockets (sub-5ms latency)
-2. **File-Based Inbox Mode** - Asynchronous messaging via file system (simpler, more reliable)
+1. **Tmux Wrapper Mode (Recommended)** - Real-time messaging via Unix sockets with tmux session management
+2. **PTY Wrapper Mode (Legacy)** - Real-time messaging via Unix sockets (sub-5ms latency)
+3. **File-Based Inbox Mode** - Asynchronous messaging via file system (simpler, more reliable)
 
 ---
 
@@ -63,32 +64,67 @@ Message content here
 
 ---
 
-## Mode 1: PTY Wrapper (Real-Time)
+## Mode 1: Tmux Wrapper (Real-Time) - RECOMMENDED
 
-Use this when you're wrapped with `agent-relay wrap`.
+Use this when you're wrapped with `agent-relay wrap --tmux2`.
 
-### Sending
+### CRITICAL: How to Send Messages
 
-Simply output these patterns and they'll be intercepted and sent:
+**You (the AI agent) must OUTPUT the @relay pattern as part of your response.** Do not wait for user input. The pattern is detected from your terminal output.
+
+**Correct - Output this directly:**
+```
+@relay:PlayerO I've finished the API refactor. Ready for your review.
+```
+
+**Wrong - Don't use bash commands for real-time messaging:**
+```bash
+# This uses file-based inbox, NOT real-time socket delivery
+agent-relay team-send -n MyName -t PlayerO -m "message"
+```
+
+### Pattern Requirements
+
+The `@relay:` pattern must appear on its own line. It can have common terminal/markdown prefixes:
 
 ```
-@relay:BlueLake I've finished the API refactor. Ready for your review.
-@relay:* Starting work on the authentication module.
+@relay:AgentName message          ✓ Works
+  @relay:AgentName message        ✓ Works (leading whitespace OK)
+> @relay:AgentName message        ✓ Works (input prompt OK)
+$ @relay:AgentName message        ✓ Works (shell prompt OK)
+● @relay:AgentName message        ✓ Works (bullet points OK)
+- @relay:AgentName message        ✓ Works (list items OK)
+* @relay:AgentName message        ✓ Works (asterisk lists OK)
+Some text @relay:AgentName msg    ✗ Won't work (not at line start)
 ```
 
-For structured data:
+### Examples
+
+**Direct message:**
+```
+@relay:PlayerO Your turn! I played X at center.
+```
+
+**Broadcast to all agents:**
+```
+@relay:* I've completed the authentication module. Ready for review.
+```
+
+**Structured data:**
 ```
 [[RELAY]]
-{"to": "BlueLake", "type": "action", "body": "Task completed", "data": {"files": ["auth.ts"]}}
+{"to": "PlayerO", "type": "action", "body": "Task completed", "data": {"files": ["auth.ts"]}}
 [[/RELAY]]
 ```
 
-### Receiving
+### Receiving Messages
 
-Messages from other agents appear inline:
+When another agent sends you a message, it appears in your terminal as:
 ```
-[relay <- BlueLake] Looks good! I'll start on the database migrations.
+Relay message from PlayerO: Their message content here
 ```
+
+Respond by outputting another `@relay:` pattern.
 
 ### Escaping
 
@@ -99,7 +135,18 @@ To output literal `@relay:` without triggering the parser:
 
 ---
 
-## Mode 2: File-Based Inbox (Asynchronous)
+## Mode 2: PTY Wrapper (Legacy)
+
+Use this when wrapped with `agent-relay wrap` (without `--tmux2`).
+
+Same patterns as tmux mode, but messages appear as:
+```
+[relay <- BlueLake] Looks good! I'll start on the database migrations.
+```
+
+---
+
+## Mode 3: File-Based Inbox (Asynchronous)
 
 Use this for scripts, automation, or when PTY wrapping isn't available.
 

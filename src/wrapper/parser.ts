@@ -36,8 +36,9 @@ const DEFAULT_OPTIONS: Required<ParserOptions> = {
 };
 
 // Patterns
-const INLINE_RELAY = /^(\s*)@relay:(\S+)\s+(.+)$/;
-const INLINE_THINKING = /^(\s*)@thinking:(\S+)\s+(.+)$/;
+// Allow common input prefixes: >, $, %, #, →, ➜, bullets (●•◦‣⁃-*⏺◆◇○□■), and their variations
+const INLINE_RELAY = /^(?:\s*(?:[>$%#→➜›»●•◦‣⁃\-*⏺◆◇○□■]\s*)*)?@relay:(\S+)\s+(.+)$/;
+const INLINE_THINKING = /^(?:\s*(?:[>$%#→➜›»●•◦‣⁃\-*⏺◆◇○□■]\s*)*)?@thinking:(\S+)\s+(.+)$/;
 const BLOCK_END = /\[\[\/RELAY\]\]/;
 const CODE_FENCE = /^```/;
 const ESCAPE_PREFIX = /^(\s*)\\@(relay|thinking):/;
@@ -328,7 +329,7 @@ export class OutputParser {
     if (this.options.enableInline) {
       const relayMatch = stripped.match(INLINE_RELAY);
       if (relayMatch) {
-        const [raw, , target, body] = relayMatch;
+        const [raw, target, body] = relayMatch;
         return {
           command: {
             to: target,
@@ -342,7 +343,7 @@ export class OutputParser {
 
       const thinkingMatch = stripped.match(INLINE_THINKING);
       if (thinkingMatch) {
-        const [raw, , target, body] = thinkingMatch;
+        const [raw, target, body] = thinkingMatch;
         return {
           command: {
             to: target,

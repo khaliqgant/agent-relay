@@ -219,12 +219,19 @@ program
   .option('-n, --name <name>', 'Agent name (auto-generated if not provided)')
   .option('-s, --socket <path>', 'Socket path', DEFAULT_SOCKET_PATH)
   .option('-r, --raw', 'Raw mode - bypass parsing for terminal-heavy CLIs', false)
-  .option('-t, --tmux', 'Use tmux for message injection (more reliable)', false)
+  .option('-t, --tmux', 'Use tmux for message injection (old implementation)', false)
+  .option('--tmux2', 'Use new tmux wrapper (simpler, no PTY attachment)', false)
+  .option('--tmux2-quiet', 'Disable tmux2 debug logging', false)
+  .option('--tmux2-log-interval <ms>', 'Throttle tmux2 debug logs (ms)', (val) => parseInt(val, 10))
+  .option('--tmux2-inject-idle-ms <ms>', 'Idle time before injecting messages (ms)', (val) => parseInt(val, 10))
+  .option('--tmux2-inject-retry-ms <ms>', 'Retry interval while waiting to inject (ms)', (val) => parseInt(val, 10))
   .option('-o, --osascript', 'Use osascript for OS-level keyboard simulation (macOS)', false)
   .option('-i, --inbox', 'Use file-based inbox (agent reads messages from file)', false)
   .option('--inbox-dir <path>', 'Custom inbox directory', '/tmp/agent-relay')
   .argument('<command...>', 'Command to wrap')
   .action(async (commandParts, options) => {
+    // For tmux2, we need to preserve args separately for proper quoting
+    const [mainCommand, ...commandArgs] = commandParts;
     const command = commandParts.join(' ');
 
     // Auto-generate name if not provided
@@ -234,12 +241,54 @@ program
       process.stderr.write(`Mode: inbox (file-based messaging)\n`);
     } else if (options.osascript) {
       process.stderr.write(`Mode: osascript (OS-level keyboard simulation)\n`);
+    } else if (options.tmux2) {
+      process.stderr.write(`Mode: tmux2 (new simplified tmux wrapper)\n`);
     } else if (options.tmux) {
-      process.stderr.write(`Mode: tmux\n`);
+      process.stderr.write(`Mode: tmux (old implementation)\n`);
     } else {
       process.stderr.write(`Mode: direct PTY\n`);
     }
 
+    // Use the new TmuxWrapper if --tmux2 is specified
+    if (options.tmux2) {
+      let TmuxWrapperClass: any;
+      try {
+        ({ TmuxWrapper: TmuxWrapperClass } = await import('../wrapper/tmux-wrapper.js'));
+      } catch (err) {
+        console.error('Failed to load TmuxWrapper.');
+        console.error('Original error:', err);
+        process.exit(1);
+      }
+
+      const wrapper = new TmuxWrapperClass({
+        name: agentName,
+        command: mainCommand,
+        args: commandArgs,
+        socketPath: options.socket,
+        useInbox: options.inbox,
+        inboxDir: options.inboxDir,
+        debug: !options.tmux2Quiet,
+        debugLogIntervalMs: options.tmux2LogInterval,
+        idleBeforeInjectMs: options.tmux2InjectIdleMs,
+        injectRetryMs: options.tmux2InjectRetryMs,
+      });
+
+      // Handle shutdown
+      process.on('SIGINT', () => {
+        wrapper.stop();
+        process.exit(0);
+      });
+
+      try {
+        await wrapper.start();
+      } catch (err) {
+        console.error('Failed to start tmux wrapper:', err);
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Use the original PtyWrapper
     let PtyWrapperClass: any;
     try {
       ({ PtyWrapper: PtyWrapperClass } = await import('../wrapper/pty-wrapper.js'));

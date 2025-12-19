@@ -256,18 +256,8 @@ export class PtyWrapper {
       return;
     }
 
-    // Debug: log if we see @relay in the output
-    if (data.includes('@relay:')) {
-      process.stderr.write(`[debug] Saw @relay in output: ${JSON.stringify(data.substring(0, 200))}\n`);
-    }
-
     // Parse for relay commands
     const { commands, output } = this.parser.parse(data);
-
-    // Debug: log detected commands
-    if (commands.length > 0) {
-      process.stderr.write(`[debug] Detected ${commands.length} relay command(s)\n`);
-    }
 
     // Send any extracted commands to relay
     for (const cmd of commands) {
@@ -370,38 +360,29 @@ export class PtyWrapper {
   /**
    * Handle incoming message from relay.
    *
-   * Strategy depends on mode:
-   * - Inbox mode: Write to inbox file (agent reads it)
-   * - Default: Display message and send trigger to stdin
+   * Strategy:
+   * - Always show notification in terminal (real-time visual cue)
+   * - If inbox mode: also write to inbox file (for hook polling)
+   * - No stdin injection (unreliable after a few rounds)
    */
   private handleIncomingMessage(from: string, payload: SendPayload): void {
     // Log to stderr
     process.stderr.write(`\n[relay ← ${from}] ${payload.body}\n`);
 
-    // Inbox mode: write to file, no injection
-    if (this.inbox) {
-      this.inbox.addMessage(from, payload.body);
-      process.stderr.write(`[relay] Message written to inbox file\n`);
-      return;
-    }
-
-    // Default mode: try to inject (legacy, unreliable)
     if (!this.running || !this.ptyProcess) return;
 
-    // Sanitize the message
+    // Sanitize the message for display
     const sanitizedBody = payload.body.replace(/[\r\n]+/g, ' ').trim();
 
-    // Write message to stdout immediately (visible in terminal)
+    // Always show notification in terminal (real-time visual cue)
     const notification = `\n\n📨 [RELAY MESSAGE FROM ${from}]: ${sanitizedBody}\n`;
     process.stdout.write(notification);
 
-    // Send trigger to stdin after a short delay
-    setTimeout(() => {
-      if (this.ptyProcess && this.running) {
-        process.stderr.write(`[relay] Sending trigger to stdin\n`);
-        this.ptyProcess.write('respond to the relay message above\r');
-      }
-    }, 500);
+    // If inbox mode, also write to file for hook polling
+    if (this.inbox) {
+      this.inbox.addMessage(from, payload.body);
+      process.stderr.write(`[relay] Message written to inbox file (hook will poll)\n`);
+    }
   }
 
   /**

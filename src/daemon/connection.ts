@@ -174,7 +174,8 @@ export class Connection {
     }
   }
 
-  private handlePong(envelope: Envelope<PongPayload>): void {
+  private handlePong(_envelope: Envelope<PongPayload>): void {
+    // Note: envelope.payload.nonce could be used for RTT calculation in the future
     this.lastPongReceived = Date.now();
   }
 
