@@ -43,7 +43,12 @@ install_source() {
     fi
 
     cd "$INSTALL_DIR" && npm ci && npm run build
-    ln -sf "$INSTALL_DIR/dist/cli/index.js" "$BIN_DIR/agent-relay"
+
+    # Create wrapper script that runs from install dir (for node_modules resolution)
+    cat > "$BIN_DIR/agent-relay" << WRAPPER
+#!/usr/bin/env bash
+cd "$INSTALL_DIR" && exec node dist/cli/index.js "\$@"
+WRAPPER
     chmod +x "$BIN_DIR/agent-relay"
 
     [[ ":$PATH:" != *":$BIN_DIR:"* ]] && warn "Add to PATH: export PATH=\"\$PATH:$BIN_DIR\""
