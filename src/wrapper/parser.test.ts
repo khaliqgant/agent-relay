@@ -70,6 +70,33 @@ describe('OutputParser', () => {
       expect(result.commands[1].body).toBe('Second message');
     });
 
+    it('parses multi-line inline command with indented continuation', () => {
+      // TUI wrapping indents continuation lines
+      const result = parser.parse('@relay:agent2 First line\n   Second line\n');
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0].body).toBe('First line\n   Second line');
+      expect(result.output).toBe('');
+    });
+
+    it('does not swallow subsequent inline command after indented continuation', () => {
+      const result = parser.parse('@relay:agent1 First line\n   Second line\n@relay:agent2 Next\n');
+
+      expect(result.commands).toHaveLength(2);
+      expect(result.commands[0].body).toBe('First line\n   Second line');
+      expect(result.commands[1].body).toBe('Next');
+      expect(result.output).toBe('');
+    });
+
+    it('does not treat non-indented lines as continuation', () => {
+      // Non-indented lines after @relay should be regular output
+      const result = parser.parse('@relay:agent2 Message\nRegular output\n');
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0].body).toBe('Message');
+      expect(result.output).toBe('Regular output\n');
+    });
+
     it('does not require spaces in target name', () => {
       const result = parser.parse('@relay:agent-with-dashes Message here\n');
 
