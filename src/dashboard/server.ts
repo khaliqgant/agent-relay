@@ -73,10 +73,10 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
         const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
         // Convert agents.json format to team.json format
         return {
-          agents: data.agents.map((a: { name: string; connectedAt?: string }) => ({
+          agents: data.agents.map((a: { name: string; connectedAt?: string; cli?: string }) => ({
             name: a.name,
             role: 'Agent',
-            cli: 'unknown',
+            cli: a.cli ?? 'Unknown',
           })),
         };
       } catch (e) {
@@ -169,7 +169,7 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
       agentsMap.set(a.name, {
         name: a.name,
         role: a.role,
-        cli: a.cli,
+        cli: a.cli ?? 'Unknown',
         messageCount: 0,
         status: 'Idle'
       });

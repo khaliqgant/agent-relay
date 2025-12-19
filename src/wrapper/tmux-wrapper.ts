@@ -103,6 +103,7 @@ export class TmuxWrapper {
     this.client = new RelayClient({
       agentName: config.name,
       socketPath: config.socketPath,
+      cli: this.cliType,
     });
 
     this.parser = new OutputParser();
@@ -497,8 +498,11 @@ export class TmuxWrapper {
 
       // Gemini CLI interprets input as shell commands, so we need special handling
       if (this.cliType === 'gemini') {
-        // For Gemini: Use echo command to display the message
-        const echoMsg = `echo "[relay ${idTag} ← ${msg.from}] ${sanitizedBody.replace(/"/g, '\\"')}${truncationHint.replace(/"/g, '\\"')}"`;
+        // For Gemini: Use echo with single quotes to avoid complex escaping
+        // Single quotes only need to escape single quotes themselves: ' -> '\''
+        const safeBody = sanitizedBody.replace(/'/g, "'\\''");
+        const safeHint = truncationHint.replace(/'/g, "'\\''");
+        const echoMsg = `echo '[relay ${idTag} ← ${msg.from}] ${safeBody}${safeHint}'`;
 
         // Clear any partial input
         await this.sendKeys('Escape');

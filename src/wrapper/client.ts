@@ -22,6 +22,8 @@ export type ClientState = 'DISCONNECTED' | 'CONNECTING' | 'HANDSHAKING' | 'READY
 export interface ClientConfig {
   socketPath: string;
   agentName: string;
+  /** Optional CLI identifier to surface to the dashboard */
+  cli?: string;
   reconnect: boolean;
   maxReconnectAttempts: number;
   reconnectDelayMs: number;
@@ -31,6 +33,7 @@ export interface ClientConfig {
 const DEFAULT_CLIENT_CONFIG: ClientConfig = {
   socketPath: DEFAULT_SOCKET_PATH,
   agentName: 'agent',
+  cli: undefined,
   reconnect: true,
   maxReconnectAttempts: 10,
   reconnectDelayMs: 100,
@@ -226,6 +229,7 @@ export class RelayClient {
       ts: Date.now(),
       payload: {
         agent: this.config.agentName,
+        cli: this.config.cli,
         capabilities: {
           ack: true,
           resume: true,

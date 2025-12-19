@@ -15,6 +15,7 @@ import type { StorageAdapter } from '../storage/adapter.js';
 export interface RoutableConnection {
   id: string;
   agentName?: string;
+  cli?: string;
   sessionId: string;
   close(): void;
   send(envelope: Envelope): boolean;

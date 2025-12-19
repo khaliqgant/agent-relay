@@ -24,6 +24,7 @@
     "dev": "tsc -w",
     "start": "node dist/cli/index.js",
     "daemon": "node dist/daemon/server.js",
+    "dashboard": "node dist/dashboard/start.js",
     "pretest": "npm run build",
     "test": "vitest run",
     "pretest:coverage": "npm run build",

@@ -58,10 +58,14 @@ export class Daemon {
   private writeAgentsFile(): void {
     if (!this.config.teamDir) return;
     const agentsPath = path.join(this.config.teamDir, 'agents.json');
-    const agents = this.router.getAgents().map(name => ({
-      name,
-      connectedAt: new Date().toISOString(),
-    }));
+    const agents = this.router.getAgents().map(name => {
+      const connection = this.router.getConnection(name);
+      return {
+        name,
+        cli: connection?.cli,
+        connectedAt: new Date().toISOString(),
+      };
+    });
     try {
       fs.writeFileSync(agentsPath, JSON.stringify({ agents }, null, 2));
     } catch (err) {

@@ -47,6 +47,8 @@ export interface HelloPayload {
     max_inflight: number;
     supports_topics: boolean;
   };
+  /** Optional hint about which CLI the agent is using (claude, codex, gemini, etc.) */
+  cli?: string;
   session?: {
     resume_token?: string;
   };
