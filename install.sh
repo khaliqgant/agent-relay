@@ -44,6 +44,9 @@ install_source() {
 
     cd "$INSTALL_DIR" && npm ci && npm rebuild better-sqlite3 && npm run build
 
+    # Remove any existing symlink or file (old installs used symlinks which cause issues)
+    rm -f "$BIN_DIR/agent-relay"
+
     # Create wrapper script that runs from install dir (for node_modules resolution)
     cat > "$BIN_DIR/agent-relay" << WRAPPER
 #!/usr/bin/env bash
