@@ -9,14 +9,15 @@ import path from 'node:path';
 import { Connection, type ConnectionConfig, DEFAULT_CONFIG } from './connection.js';
 import { Router } from './router.js';
 import type { Envelope, SendPayload } from '../protocol/types.js';
-import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
-import type { StorageAdapter } from '../storage/adapter.js';
+import { createStorageAdapter, type StorageAdapter, type StorageConfig } from '../storage/adapter.js';
 
 export interface DaemonConfig extends ConnectionConfig {
   socketPath: string;
   pidFilePath: string;
   storagePath?: string;
   storageAdapter?: StorageAdapter;
+  /** Storage configuration (type, path, url) */
+  storageConfig?: StorageConfig;
 }
 
 export const DEFAULT_SOCKET_PATH = '/tmp/agent-relay.sock';
@@ -29,21 +30,40 @@ export const DEFAULT_DAEMON_CONFIG: DaemonConfig = {
 
 export class Daemon {
   private server: net.Server;
-  private router: Router;
+  private router!: Router;
   private config: DaemonConfig;
   private running = false;
   private connections: Set<Connection> = new Set();
   private storage?: StorageAdapter;
+  private storageInitialized = false;
 
   constructor(config: Partial<DaemonConfig> = {}) {
     this.config = { ...DEFAULT_DAEMON_CONFIG, ...config };
     if (config.socketPath && !config.pidFilePath) {
       this.config.pidFilePath = `${config.socketPath}.pid`;
     }
-    const storagePath = this.config.storagePath ?? path.join(path.dirname(this.config.socketPath), 'agent-relay.sqlite');
-    this.storage = this.config.storageAdapter ?? new SqliteStorageAdapter({ dbPath: storagePath });
-    this.router = new Router({ storage: this.storage });
+    // Storage is initialized lazily in start() to support async createStorageAdapter
     this.server = net.createServer(this.handleConnection.bind(this));
+  }
+
+  /**
+   * Initialize storage adapter (called during start).
+   */
+  private async initStorage(): Promise<void> {
+    if (this.storageInitialized) return;
+
+    if (this.config.storageAdapter) {
+      // Use explicitly provided adapter
+      this.storage = this.config.storageAdapter;
+    } else {
+      // Create adapter based on config/env
+      const storagePath = this.config.storagePath ??
+        path.join(path.dirname(this.config.socketPath), 'agent-relay.sqlite');
+      this.storage = await createStorageAdapter(storagePath, this.config.storageConfig);
+    }
+
+    this.router = new Router({ storage: this.storage });
+    this.storageInitialized = true;
   }
 
   /**
@@ -53,9 +73,7 @@ export class Daemon {
     if (this.running) return;
 
     // Initialize storage
-    if (this.storage) {
-      await this.storage.init();
-    }
+    await this.initStorage();
 
     // Clean up stale socket (only if it's actually a socket)
     if (fs.existsSync(this.config.socketPath)) {

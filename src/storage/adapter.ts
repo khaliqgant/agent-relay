@@ -32,13 +32,141 @@ export interface StorageAdapter {
 }
 
 /**
- * Create a storage adapter based on the provided path.
- * Currently only SQLite is supported, but this can be extended.
+ * Storage configuration options.
+ * Can be set via CLI options or environment variables.
  */
-export async function createStorageAdapter(dbPath: string): Promise<StorageAdapter> {
-  // For now, always use SQLite. In the future, could detect from path/config.
-  const { SqliteStorageAdapter } = await import('./sqlite-adapter.js');
-  const adapter = new SqliteStorageAdapter({ dbPath });
-  await adapter.init();
-  return adapter;
+export interface StorageConfig {
+  /** Storage type: 'sqlite', 'none', or 'postgres' (future) */
+  type?: string;
+  /** Path for SQLite database */
+  path?: string;
+  /** Connection URL for database (postgres://..., mysql://...) */
+  url?: string;
+}
+
+/**
+ * In-memory storage adapter (no persistence).
+ * Useful for testing or when persistence is not needed.
+ */
+export class MemoryStorageAdapter implements StorageAdapter {
+  private messages: StoredMessage[] = [];
+
+  async init(): Promise<void> {
+    // No initialization needed
+  }
+
+  async saveMessage(message: StoredMessage): Promise<void> {
+    this.messages.push(message);
+    // Keep only last 1000 messages to prevent memory issues
+    if (this.messages.length > 1000) {
+      this.messages = this.messages.slice(-1000);
+    }
+  }
+
+  async getMessages(query?: MessageQuery): Promise<StoredMessage[]> {
+    let result = [...this.messages];
+
+    if (query?.from) {
+      result = result.filter(m => m.from === query.from);
+    }
+    if (query?.to) {
+      result = result.filter(m => m.to === query.to);
+    }
+    if (query?.topic) {
+      result = result.filter(m => m.topic === query.topic);
+    }
+    if (query?.sinceTs) {
+      result = result.filter(m => m.ts >= query.sinceTs!);
+    }
+
+    if (query?.order === 'asc') {
+      result.sort((a, b) => a.ts - b.ts);
+    } else {
+      result.sort((a, b) => b.ts - a.ts);
+    }
+
+    if (query?.limit) {
+      result = result.slice(0, query.limit);
+    }
+
+    return result;
+  }
+
+  async getMessageById(id: string): Promise<StoredMessage | null> {
+    return this.messages.find(m => m.id === id) ?? null;
+  }
+
+  async close(): Promise<void> {
+    this.messages = [];
+  }
+}
+
+/**
+ * Get storage configuration from environment variables.
+ */
+export function getStorageConfigFromEnv(): StorageConfig {
+  return {
+    type: process.env.AGENT_RELAY_STORAGE_TYPE,
+    path: process.env.AGENT_RELAY_STORAGE_PATH,
+    url: process.env.AGENT_RELAY_STORAGE_URL,
+  };
+}
+
+/**
+ * Create a storage adapter based on configuration.
+ *
+ * Configuration priority:
+ * 1. Explicit config passed to function
+ * 2. Environment variables (AGENT_RELAY_STORAGE_TYPE, AGENT_RELAY_STORAGE_PATH, AGENT_RELAY_STORAGE_URL)
+ * 3. Default: SQLite at provided dbPath
+ *
+ * Supported storage types:
+ * - 'sqlite' (default): SQLite file-based storage
+ * - 'none' or 'memory': In-memory storage (no persistence)
+ * - 'postgres': PostgreSQL (requires AGENT_RELAY_STORAGE_URL) - future
+ */
+export async function createStorageAdapter(
+  dbPath: string,
+  config?: StorageConfig
+): Promise<StorageAdapter> {
+  // Merge with env config, explicit config takes priority
+  const envConfig = getStorageConfigFromEnv();
+  const finalConfig: StorageConfig = {
+    type: config?.type ?? envConfig.type ?? 'sqlite',
+    path: config?.path ?? envConfig.path ?? dbPath,
+    url: config?.url ?? envConfig.url,
+  };
+
+  const storageType = finalConfig.type?.toLowerCase();
+
+  switch (storageType) {
+    case 'none':
+    case 'memory': {
+      console.log('[storage] Using in-memory storage (no persistence)');
+      const adapter = new MemoryStorageAdapter();
+      await adapter.init();
+      return adapter;
+    }
+
+    case 'postgres':
+    case 'postgresql': {
+      if (!finalConfig.url) {
+        throw new Error(
+          'PostgreSQL storage requires AGENT_RELAY_STORAGE_URL environment variable or --storage-url option'
+        );
+      }
+      // Future: implement PostgreSQL adapter
+      throw new Error(
+        'PostgreSQL storage is not yet implemented. Use sqlite or none.'
+      );
+    }
+
+    case 'sqlite':
+    default: {
+      const { SqliteStorageAdapter } = await import('./sqlite-adapter.js');
+      const adapter = new SqliteStorageAdapter({ dbPath: finalConfig.path! });
+      await adapter.init();
+      return adapter;
+    }
+  }
 }

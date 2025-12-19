@@ -478,6 +478,9 @@ export class TmuxWrapper {
 
     try {
       let sanitizedBody = msg.body.replace(/[\r\n]+/g, ' ').trim();
+      // Short message ID for display (first 8 chars)
+      const shortId = msg.messageId.substring(0, 8);
+
       // Truncate long messages to avoid display issues
       const maxLen = 500;
       let wasTruncated = false;
@@ -486,16 +489,16 @@ export class TmuxWrapper {
         wasTruncated = true;
       }
 
-      // Build truncation hint if needed
+      // Always include message ID; add lookup hint if truncated
+      const idTag = `[${shortId}]`;
       const truncationHint = wasTruncated
-        ? ` [TRUNCATED - run "agent-relay msg-read ${msg.messageId}" for full message]`
+        ? ` [TRUNCATED - run "relay read ${msg.messageId}"]`
         : '';
 
       // Gemini CLI interprets input as shell commands, so we need special handling
       if (this.cliType === 'gemini') {
-        // For Gemini: Use echo command to display the message, then clear the line
-        // This shows the message without it being interpreted as a command
-        const echoMsg = `echo "[relay ← ${msg.from}] ${sanitizedBody.replace(/"/g, '\\"')}${truncationHint.replace(/"/g, '\\"')}"`;
+        // For Gemini: Use echo command to display the message
+        const echoMsg = `echo "[relay ${idTag} ← ${msg.from}] ${sanitizedBody.replace(/"/g, '\\"')}${truncationHint.replace(/"/g, '\\"')}"`;
 
         // Clear any partial input
         await this.sendKeys('Escape');
@@ -511,7 +514,8 @@ export class TmuxWrapper {
         this.logStderr(`Injection complete (gemini echo mode)`);
       } else {
         // Standard injection for Claude, Codex, etc.
-        const injection = `Relay message from ${msg.from}: ${sanitizedBody}${truncationHint}`;
+        // Format: Relay message from Sender [abc12345]: content
+        const injection = `Relay message from ${msg.from} ${idTag}: ${sanitizedBody}${truncationHint}`;
 
         // Clear any partial input
         await this.sendKeys('Escape');
