@@ -941,3 +941,28 @@ Train of thought trajectories transform ephemeral agent work into durable knowle
 - Builds trust in agent-generated code
 
 The key insight is that **the trajectory is as valuable as the code**. Just as we version control source, we should version control the reasoning that produced it.
+
+---
+
+## References & Inspiration
+
+### Industry Context
+
+**Gergely Orosz (Pragmatic Engineer)** on agent trajectories:
+- Tweet: https://x.com/gergelyorosz/status/2002160432841097239
+- From ["How do AI software engineering agents work?"](https://newsletter.pragmaticengineer.com/p/ai-coding-agents):
+  > "The trajectory of the run. Trajectory refers to the full history log of the run. It usually takes the agent about 10 'turns' to reach the point of attempting to submit a solution."
+
+**SWE-agent (Princeton)** - Open-source coding agent that popularized the "trajectory" terminology for agent run histories.
+
+### Related Observations
+
+From Gergely's tweets on AI agents:
+- "A BIG difference with AI agents: they will write more code, faster than before, and ship a LOT more code to prod! So ship more bugs as well."
+- "AI agents being able to run unit tests is SUCH a massive unlock."
+- "Working with multiple AI agents comes VERY natural to senior+ engineers who worked at large companies - you already got used to overseeing parallel work."
+
+These insights reinforce why trajectory capture matters:
+1. **More code, faster** → Need better traceability
+2. **Parallel agent work** → Need coordination history
+3. **Bug diagnosis** → Need to understand what the agent was thinking
