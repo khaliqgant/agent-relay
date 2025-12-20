@@ -524,16 +524,14 @@ Each layer is a **separate project** that can be used independently or together:
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │  AGENT-WORKSPACE (Layer 4)                              │   │
-│  │  github.com/???/agent-workspace                         │   │
-│  │  Knowledge base, patterns, decisions                    │   │
-│  │  Extracts wisdom from trajectories                      │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                            ▲                                    │
-│                            │ extracts from                      │
-│  ┌─────────────────────────────────────────────────────────┐   │
 │  │  AGENT-TRAJECTORIES (Layer 3)          ◄── THIS PROJECT │   │
 │  │  github.com/???/agent-trajectories                      │   │
+│  │                                                         │   │
+│  │  ┌─────────────────────────────────────────────────┐   │   │
+│  │  │  Workspace (built-in feature)                   │   │   │
+│  │  │  Patterns, decisions, knowledge extraction      │   │   │
+│  │  └─────────────────────────────────────────────────┘   │   │
+│  │                                                         │   │
 │  │  Task narratives, decisions, retrospectives             │   │
 │  │  Platform-agnostic .trajectory format                   │   │
 │  └─────────────────────────────────────────────────────────┘   │
@@ -564,7 +562,30 @@ Each layer is a **separate project** that can be used independently or together:
 | **agent-relay** | ✅ Yes | Nothing |
 | **claude-mem** | ✅ Yes | Nothing (Claude Code hooks) |
 | **agent-trajectories** | ✅ Yes | Nothing (but richer with relay/claude-mem) |
-| **agent-workspace** | ⚠️ Needs trajectories | agent-trajectories |
+
+### agent-trajectories Structure
+
+Workspace is a **built-in feature**, not a separate project:
+
+```
+agent-trajectories/
+├── src/
+│   ├── core/              # .trajectory format, types
+│   ├── capture/           # CLI, event capture
+│   ├── adapters/          # beads, linear, github, plain
+│   ├── workspace/         # Patterns, decisions, knowledge (opt-in)
+│   │   ├── decisions.ts   # Decision log
+│   │   ├── patterns.ts    # Pattern library
+│   │   ├── knowledge.ts   # Knowledge base
+│   │   └── extract.ts     # Auto-extraction from trajectories
+│   └── export/            # Markdown, timeline views
+```
+
+**Why combined:**
+1. Workspace is derived data from trajectories - not a separate concern
+2. Flywheel only works if tightly coupled (trajectory complete → extract → enrich next)
+3. Users expect "trajectory complete" → "knowledge extracted" to be automatic
+4. Single install, single config, simpler for users
 
 ### Integration Points
 
