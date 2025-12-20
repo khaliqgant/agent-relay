@@ -675,6 +675,363 @@ Agents automatically announce state changes:
 
 ---
 
+## Why They Scale Better (And How We Can Too)
+
+### The Scaling Problem
+
+With 2-3 agents, our current approach works well:
+- Open 2-3 terminal tabs
+- Switch between them manually
+- Remember who's doing what
+
+With 5-10 agents, this breaks down:
+
+| Problem | Impact at 5-10 Agents |
+|---------|----------------------|
+| **No visibility** | Can't see what all agents are doing at once |
+| **No status** | Don't know if agent is busy, idle, or stuck |
+| **Lost context** | Forget which agent is working on what |
+| **Message chaos** | Too many messages to track manually |
+| **Terminal sprawl** | 10 tabs is unmanageable |
+
+### Why Their Approach Scales
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ THEIR ARCHITECTURE                                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              BROWSER DASHBOARD                           │    │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐       │    │
+│  │  │ Agent 1 │ │ Agent 2 │ │ Agent 3 │ │ Agent 4 │ ...   │    │
+│  │  │ ● active│ │ ○ idle  │ │ ● active│ │ ✗ error │       │    │
+│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘       │    │
+│  │                                                          │    │
+│  │  [Live message feed]  [Inbox: 3 unread]  [Agent graph]  │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                           │                                      │
+│                    Single pane of glass                          │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+Key insight: ONE place to see EVERYTHING
+```
+
+Their specific advantages at scale:
+
+| Feature | Why It Helps at Scale |
+|---------|----------------------|
+| **Dashboard** | See all 10 agents at once without switching |
+| **Activity state** | Know instantly who's busy vs idle |
+| **Message inbox** | Messages don't disappear into terminal history |
+| **Agent discovery** | Auto-finds agents, no manual tracking |
+| **Persistent storage** | Query historical messages anytime |
+
+### How We Keep Our Strengths AND Scale
+
+The goal: **Single pane of glass, but in the terminal**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ OUR IMPROVED ARCHITECTURE                                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              TUI DASHBOARD (agent-relay watch)           │    │
+│  │                                                          │    │
+│  │  Agents:        Status:      Messages:                   │    │
+│  │  ● Coordinator  active       12↑ 8↓                     │    │
+│  │  ● ApiDev       typing...    5↑ 14↓                     │    │
+│  │  ● DbAdmin      idle 30s     3↑ 6↓                      │    │
+│  │  ○ QA           offline      queued: 3                   │    │
+│  │                                                          │    │
+│  │  [Press 'a' to attach, 's' to send, 'q' to quit]        │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                           │                                      │
+│                           │ 'a' to attach                        │
+│                           ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              NATIVE TMUX SESSION                         │    │
+│  │                                                          │    │
+│  │  claude> Working on the API endpoint...                  │    │
+│  │  @relay:DbAdmin Need the users table schema              │    │
+│  │                                                          │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                           │                                      │
+│                           │ Ctrl+B d to detach                   │
+│                           ▼                                      │
+│                    Back to TUI dashboard                         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+Key insight: TUI for overview, native tmux for work
+```
+
+### Specific Scaling Improvements
+
+#### 1. Daemon Event Stream
+
+The daemon must broadcast events, not just route messages:
+
+```typescript
+// NEW: Daemon broadcasts events to all listeners
+interface DaemonEvent {
+  type: 'agent_connected' | 'agent_disconnected' | 'agent_active' |
+        'agent_idle' | 'message_sent' | 'message_delivered' | 'message_queued';
+  timestamp: number;
+  data: Record<string, unknown>;
+}
+
+// In daemon/server.ts
+class Daemon {
+  private eventSubscribers: Set<Connection> = new Set();
+
+  broadcast(event: DaemonEvent): void {
+    const envelope = { type: 'EVENT', event };
+    for (const subscriber of this.eventSubscribers) {
+      subscriber.send(envelope);
+    }
+  }
+
+  // Called when agent output detected
+  onAgentActivity(agentName: string): void {
+    this.broadcast({
+      type: 'agent_active',
+      timestamp: Date.now(),
+      data: { agent: agentName }
+    });
+  }
+}
+```
+
+#### 2. Activity Reporting from Wrapper
+
+Wrappers must report activity state to daemon:
+
+```typescript
+// In tmux-wrapper.ts
+private reportActivity(): void {
+  const now = Date.now();
+  const timeSinceOutput = now - this.lastOutputTime;
+
+  let state: 'active' | 'idle' | 'typing';
+  if (timeSinceOutput < 1000) {
+    state = 'active';
+  } else if (this.detectTypingIndicator()) {
+    state = 'typing';  // Agent is thinking/working
+  } else if (timeSinceOutput < 30000) {
+    state = 'idle';
+  } else {
+    state = 'idle';
+  }
+
+  // Only send if state changed
+  if (state !== this.lastReportedState) {
+    this.client.sendStatus(state);
+    this.lastReportedState = state;
+  }
+}
+
+private detectTypingIndicator(): boolean {
+  // Claude Code shows "[1/418]" when thinking
+  // Detect this pattern in recent output
+  return /\[\d+\/\d+\]/.test(this.recentOutput);
+}
+```
+
+#### 3. TUI Dashboard Implementation
+
+```typescript
+// src/cli/watch.ts
+import blessed from 'blessed';
+
+export async function watchCommand(socketPath: string): Promise<void> {
+  const screen = blessed.screen({ smartCSR: true });
+
+  // Agent list panel
+  const agentList = blessed.list({
+    parent: screen,
+    label: ' Agents ',
+    top: 0,
+    left: 0,
+    width: '50%',
+    height: '60%',
+    border: { type: 'line' },
+    style: {
+      selected: { bg: 'blue' }
+    },
+    keys: true,
+    vi: true,
+  });
+
+  // Message feed panel
+  const messageFeed = blessed.log({
+    parent: screen,
+    label: ' Messages ',
+    top: 0,
+    right: 0,
+    width: '50%',
+    height: '60%',
+    border: { type: 'line' },
+    scrollable: true,
+  });
+
+  // Status bar
+  const statusBar = blessed.box({
+    parent: screen,
+    bottom: 0,
+    height: 3,
+    content: ' [a]ttach  [s]end  [r]efresh  [q]uit ',
+  });
+
+  // Connect to daemon event stream
+  const client = new RelayClient({ socketPath, subscribe: true });
+
+  client.onEvent = (event: DaemonEvent) => {
+    switch (event.type) {
+      case 'agent_connected':
+        updateAgentList();
+        break;
+      case 'message_sent':
+        messageFeed.log(`${event.data.from} → ${event.data.to}: ${event.data.preview}`);
+        break;
+      // ...
+    }
+    screen.render();
+  };
+
+  // Keyboard handlers
+  screen.key(['a'], () => attachToSelected());
+  screen.key(['s'], () => showSendDialog());
+  screen.key(['q'], () => process.exit(0));
+
+  screen.render();
+}
+
+function attachToSelected(): void {
+  const agent = getSelectedAgent();
+  // Detach from blessed, attach to tmux
+  screen.destroy();
+  execSync(`tmux attach-session -t relay-${agent}-*`, { stdio: 'inherit' });
+  // When user detaches (Ctrl+B d), restart watch
+  watchCommand(socketPath);
+}
+```
+
+#### 4. Message History Query
+
+```typescript
+// src/cli/index.ts
+program
+  .command('history')
+  .description('Show message history')
+  .option('-n <count>', 'Number of messages', '20')
+  .option('-f, --from <agent>', 'Filter by sender')
+  .option('-t, --to <agent>', 'Filter by recipient')
+  .option('--since <time>', 'Since time (e.g., "1h", "2024-01-01")')
+  .action(async (options) => {
+    const messages = await queryMessages({
+      limit: parseInt(options.n),
+      from: options.from,
+      to: options.to,
+      since: parseTime(options.since),
+    });
+
+    for (const msg of messages) {
+      console.log(`${msg.timestamp} ${msg.from} → ${msg.to}: ${msg.body.slice(0, 80)}`);
+    }
+  });
+```
+
+#### 5. Agent Summary Command
+
+```bash
+$ agent-relay agents
+
+NAME          STATUS    MESSAGES    LAST ACTIVE
+───────────────────────────────────────────────
+Coordinator   active    12↑ 8↓      now
+ApiDev        typing    5↑ 14↓      now
+DbAdmin       idle      3↑ 6↓       30s ago
+AuthService   idle      2↑ 4↓       2m ago
+QA            offline   queued: 3   5m ago
+
+Total: 5 agents (3 active, 1 idle, 1 offline)
+```
+
+Implementation:
+```typescript
+program
+  .command('agents')
+  .description('List connected agents with status')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const agents = await getAgentStatus(socketPath);
+
+    if (options.json) {
+      console.log(JSON.stringify(agents, null, 2));
+      return;
+    }
+
+    console.log('NAME          STATUS    MESSAGES    LAST ACTIVE');
+    console.log('───────────────────────────────────────────────');
+
+    for (const agent of agents) {
+      const status = agent.status.padEnd(9);
+      const msgs = `${agent.sent}↑ ${agent.received}↓`.padEnd(11);
+      const lastActive = formatRelativeTime(agent.lastActive);
+      console.log(`${agent.name.padEnd(13)} ${status} ${msgs} ${lastActive}`);
+    }
+  });
+```
+
+### Scaling Comparison: Before vs After
+
+| Capability | Current | After Improvements |
+|------------|---------|-------------------|
+| **See all agents** | Switch tabs manually | `agent-relay watch` TUI |
+| **Agent status** | None | active/idle/typing/offline |
+| **Message history** | Lost in scrollback | `agent-relay history` |
+| **Quick attach** | Remember session names | Press 'a' in TUI |
+| **Send from CLI** | Must be in session | `agent-relay send Bob "msg"` |
+| **Agent list** | `tmux ls \| grep relay` | `agent-relay agents` |
+
+### Architecture Changes for Scale
+
+```
+CURRENT (doesn't scale):
+
+  Wrapper 1 ──┐
+  Wrapper 2 ──┼──► Daemon ──► SQLite
+  Wrapper 3 ──┘
+       │
+       └──► User switches between terminal tabs
+
+
+IMPROVED (scales to 10+):
+
+  Wrapper 1 ──┐                    ┌──► TUI Dashboard
+  Wrapper 2 ──┼──► Daemon ◄────────┼──► CLI queries
+  Wrapper 3 ──┤    │               └──► Health checks
+  ...         │    │
+  Wrapper 10 ─┘    ▼
+                SQLite
+                   │
+                   └──► Persistent history
+                   └──► Agent registry
+                   └──► Message queue
+```
+
+Key changes:
+1. **Daemon becomes event hub** - broadcasts state changes
+2. **Wrappers report status** - not just messages
+3. **TUI provides overview** - single pane of glass
+4. **CLI provides queries** - history, agents, send
+5. **Storage is durable** - survives restarts
+
+---
+
 ## Non-Goals
 
 - **Browser Dashboard**: Out of scope. TUI (`agent-relay watch`) provides visibility.
