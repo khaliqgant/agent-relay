@@ -72,6 +72,11 @@ export class RelayClient {
     return this.config.agentName;
   }
 
+  /** Get the session ID assigned by the server */
+  get currentSessionId(): string | undefined {
+    return this.sessionId;
+  }
+
   /**
    * Connect to the relay daemon.
    */

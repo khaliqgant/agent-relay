@@ -15,7 +15,7 @@
 import { exec, execSync, spawn, ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RelayClient } from './client.js';
-import { OutputParser, type ParsedCommand, parseSummaryFromOutput, parseSessionEndFromOutput, type ParsedSummary } from './parser.js';
+import { OutputParser, type ParsedCommand, parseSummaryFromOutput, parseSessionEndFromOutput } from './parser.js';
 import { InboxManager } from './inbox.js';
 import type { SendPayload } from '../protocol/types.js';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
@@ -683,7 +683,7 @@ export class TmuxWrapper {
     }
 
     // Get session ID from client connection
-    const sessionId = this.client.sessionId;
+    const sessionId = this.client.currentSessionId;
     if (!sessionId) {
       this.logStderr('Cannot close session: no session ID');
       return;
