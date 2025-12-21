@@ -91,38 +91,162 @@ We evaluated cross-platform memory solutions before building our own:
 | Fleet-wide patterns/decisions | **BUILD** | agent-trajectories |
 | Message routing | **USE** | agent-relay |
 
+## Constraint: Claude Code Auth Only (No Direct SDK)
+
+**Problem:** We use Claude Code via auth, not direct Anthropic SDK access. Mem0's TypeScript SDK requires LLM API access for memory extraction/compression.
+
+**Solution:** Use MCP approach where **Claude Code IS the intelligence layer**.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MCP-BASED MEMORY (Recommended)                           │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                      Claude Code Agent                               │   │
+│  │                                                                      │   │
+│  │  1. Agent decides what to remember (intelligence here)              │   │
+│  │  2. Agent calls MCP tool: add_memory("user prefers dark mode")      │   │
+│  │  3. Later: Agent calls search_memories("user preferences")          │   │
+│  │  4. Agent uses retrieved memories in context                        │   │
+│  └────────────────────────────────────┬────────────────────────────────┘   │
+│                                       │ MCP calls                           │
+│                                       ▼                                     │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                      Mem0 MCP Server                                 │   │
+│  │                                                                      │   │
+│  │  • add_memory(content, metadata)   → Store to vector DB             │   │
+│  │  • search_memories(query)          → Vector search (no LLM needed)  │   │
+│  │  • delete_memory(id)               → Remove from storage            │   │
+│  │                                                                      │   │
+│  │  NO LLM CALLS - Pure storage + retrieval                            │   │
+│  └────────────────────────────────────┬────────────────────────────────┘   │
+│                                       │                                     │
+│                                       ▼                                     │
+│                             ┌──────────────────┐                           │
+│                             │   Qdrant / Redis  │                           │
+│                             │   (Vector Store)  │                           │
+│                             └──────────────────┘                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why This Works
+
+| Approach | LLM Needed? | Works with Claude Code Auth? |
+|----------|-------------|------------------------------|
+| Mem0 TypeScript SDK (full) | ✅ Yes, for extraction | ❌ No - requires API key |
+| Mem0 MCP Server | ❌ No, agent is the LLM | ✅ Yes |
+| Mem0 with `infer: false` | ❌ No, raw storage | ✅ Yes |
+
+**Key Insight:** With MCP, the agent (Claude Code) does the "thinking" about what to remember. Mem0 becomes a dumb storage layer with smart retrieval (vector search).
+
+### Integration Modes
+
+| Mode | Use Case | LLM Required |
+|------|----------|--------------|
+| **MCP (Primary)** | Claude Code agents | No - agent is the LLM |
+| **SDK with infer:false** | Programmatic storage | No - raw storage |
+| **SDK with LLM** | Non-Claude agents with API keys | Yes - for extraction |
+
+### MCP Server Options
+
+1. **Mem0 Official MCP** - `@mem0/mcp-server`
+2. **Composio MCP** - Third-party wrapper
+3. **Custom MCP** - Build thin layer over Qdrant
+
+### Embeddings Without API Keys
+
+Vector search needs embeddings. Options without paid API:
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **Ollama** (local) | Free, private, fast | Requires local GPU/CPU |
+| **HuggingFace TEI** | Free, self-hosted | Setup complexity |
+| **Qdrant FastEmbed** | Built-in, no setup | Limited models |
+| **OpenAI API** | Best quality | Requires API key + cost |
+
+Recommended: **Ollama + nomic-embed-text** for local development, option to swap to OpenAI embeddings in production if quality matters.
+
 ## Integration Points
 
-### 1. Mem0 as Storage Backend
+### 1. Mem0 as Storage Backend (No LLM Required)
 
 ```typescript
 // agent-trajectories uses Mem0 for observation storage
-import { Memory } from 'mem0ai';
+// NOTE: Using infer:false - no LLM API needed
+import { Memory } from 'mem0ai/oss';
 
 const memory = new Memory({
-  // Self-hosted or cloud
-  api_key: process.env.MEM0_API_KEY,
+  // Vector store only - no LLM config needed
+  vectorStore: {
+    provider: 'qdrant',
+    config: {
+      url: process.env.QDRANT_URL || 'http://localhost:6333',
+      collectionName: 'trajectories',
+    },
+  },
+  // Optional: embeddings can use local model or API
+  embedder: {
+    provider: 'ollama',  // Local embeddings, no API key
+    config: { model: 'nomic-embed-text' },
+  },
 });
 
-// Store trajectory events as Mem0 memories
+// Store trajectory events - raw storage, no extraction
 async function storeTrajectoryEvent(event: TrajectoryEvent) {
-  await memory.add({
-    messages: [{ role: 'assistant', content: event.content }],
-    user_id: event.agentId,
-    metadata: {
-      trajectory_id: event.trajectoryId,
-      task_id: event.taskId,
-      event_type: event.type,
-      ts: event.ts,
-    },
+  await memory.add(
+    [{ role: 'assistant', content: event.content }],
+    {
+      user_id: event.agentId,
+      metadata: {
+        trajectory_id: event.trajectoryId,
+        task_id: event.taskId,
+        event_type: event.type,
+        ts: event.ts,
+      },
+      infer: false,  // Skip LLM extraction - store as-is
+    }
+  );
+}
+
+// Retrieve relevant context - vector search only
+async function getAgentContext(agentId: string, query: string) {
+  return memory.search(query, {
+    user_id: agentId,
+    limit: 10,
+  });
+}
+```
+
+### 1b. Alternative: Direct Qdrant (Simpler)
+
+If Mem0 adds complexity, use Qdrant directly:
+
+```typescript
+import { QdrantClient } from '@qdrant/js-client-rest';
+
+const qdrant = new QdrantClient({ url: 'http://localhost:6333' });
+
+// Store with pre-computed embeddings (from local model)
+async function storeEvent(event: TrajectoryEvent, embedding: number[]) {
+  await qdrant.upsert('trajectories', {
+    points: [{
+      id: event.id,
+      vector: embedding,
+      payload: {
+        agentId: event.agentId,
+        content: event.content,
+        trajectoryId: event.trajectoryId,
+        ts: event.ts,
+      },
+    }],
   });
 }
 
-// Retrieve relevant context for an agent
-async function getAgentContext(agentId: string, query: string) {
-  return memory.search({
-    query,
-    user_id: agentId,
+// Search by vector similarity
+async function search(queryEmbedding: number[], agentId: string) {
+  return qdrant.search('trajectories', {
+    vector: queryEmbedding,
+    filter: { must: [{ key: 'agentId', match: { value: agentId } }] },
     limit: 10,
   });
 }
@@ -202,11 +326,12 @@ class LocalBackend implements MemoryBackend { ... }
 
 ## Next Steps
 
-1. Add Mem0 dependency to agent-trajectories
-2. Implement MemoryBackend interface with Mem0
-3. Add MCP configuration for Claude Code agents
-4. Build task-based trajectory layer on top
-5. Integrate with agent-relay event emission
+1. **Set up Qdrant** - Local vector store (docker or binary)
+2. **Set up Ollama** - Local embeddings (nomic-embed-text)
+3. **Configure Mem0 MCP** - For Claude Code agents
+4. **Implement MemoryBackend** - With `infer: false` for programmatic use
+5. **Build trajectory layer** - Task grouping, patterns on top
+6. **Integrate with agent-relay** - Event emission to trajectories
 
 ## References
 
