@@ -110,6 +110,326 @@ Usage in agent output:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Lifecycle Events: Detailed Specification
+
+### onSessionStart
+
+**When:** Immediately after tmux session is created, before agent CLI starts producing output.
+
+**Trigger point:** `TmuxWrapper.start()` after spawn, before first `pollOutput()`.
+
+```typescript
+// In src/wrapper/tmux-wrapper.ts
+async start(command: string) {
+  await this.spawnTmuxSession(command);
+
+  // TRIGGER: onSessionStart
+  const result = await this.hooks.emit('sessionStart', {
+    agentId: this.agentId,
+    agentName: this.agentName,
+    sessionId: this.sessionId,
+    workingDir: process.cwd(),
+  });
+
+  // Inject any returned text (e.g., loaded memories)
+  if (result?.inject) {
+    await this.injectText(result.inject);
+  }
+
+  this.startPolling();
+}
+```
+
+**Use cases:**
+- Load relevant memories from Mem0 based on project/directory
+- Inject user preferences ("User prefers TypeScript")
+- Set up agent context ("You are working on the auth module")
+
+**Handler signature:**
+```typescript
+onSessionStart: (ctx: HookContext) => Promise<HookResult | void>
+```
+
+---
+
+### onOutput
+
+**When:** Every time new output is captured from the agent (polled every 100ms, fires on diff).
+
+**Trigger point:** `TmuxWrapper.pollOutput()` when `newOutput !== lastOutput`.
+
+```typescript
+// In src/wrapper/tmux-wrapper.ts
+async pollOutput() {
+  const paneContent = await this.capturePane();
+  const newOutput = this.diffOutput(paneContent, this.lastContent);
+
+  if (newOutput) {
+    this.lastContent = paneContent;
+    this.lastOutputTime = Date.now();
+
+    // TRIGGER: onOutput
+    await this.hooks.emit('output', newOutput, this.context);
+
+    // Check for @pattern: matches
+    await this.matchPatterns(newOutput);
+  }
+}
+```
+
+**Use cases:**
+- Log all agent output to file/database
+- Detect errors and alert
+- Track progress metrics
+- Custom pattern matching beyond @namespace:
+
+**Handler signature:**
+```typescript
+onOutput: (output: string, ctx: HookContext) => Promise<HookResult | void>
+```
+
+**Note:** This fires frequently. Keep handlers fast. Don't inject on every output.
+
+---
+
+### onIdle
+
+**When:** Agent has produced no output for `idleThreshold` (default 30 seconds).
+
+**Trigger point:** `TmuxWrapper.pollOutput()` when idle time exceeds threshold.
+
+```typescript
+// In src/wrapper/tmux-wrapper.ts
+private idleThreshold = 30000; // 30 seconds
+private lastIdleNotification = 0;
+
+async pollOutput() {
+  // ... capture and diff ...
+
+  const idleTime = Date.now() - this.lastOutputTime;
+
+  // TRIGGER: onIdle (once per idle period, not continuously)
+  if (idleTime > this.idleThreshold &&
+      Date.now() - this.lastIdleNotification > this.idleThreshold) {
+    this.lastIdleNotification = Date.now();
+
+    const result = await this.hooks.emit('idle', this.context);
+    if (result?.inject) {
+      await this.injectText(result.inject);
+    }
+  }
+}
+```
+
+**Use cases:**
+- Prompt agent for status update
+- Ask if agent is stuck or needs help
+- Suggest next steps
+- Trigger auto-save of work in progress
+
+**Handler signature:**
+```typescript
+onIdle: (ctx: HookContext) => Promise<HookResult | void>
+```
+
+**Configuration:**
+```typescript
+// relay.config.ts
+export default {
+  hooks: {
+    onIdle: async (ctx) => {
+      return { inject: '[STATUS CHECK] Are you making progress?' };
+    }
+  },
+  options: {
+    idleThreshold: 60000, // 60 seconds instead of default 30
+  }
+};
+```
+
+---
+
+### onMessageReceived
+
+**When:** A relay message arrives for this agent from another agent or broadcast.
+
+**Trigger point:** `TmuxWrapper.handleIncomingMessage()` when daemon delivers message.
+
+```typescript
+// In src/wrapper/tmux-wrapper.ts
+async handleIncomingMessage(message: RelayMessage) {
+  // TRIGGER: onMessageReceived (before injection)
+  const result = await this.hooks.emit('messageReceived', message, this.context);
+
+  // Allow handler to modify or suppress injection
+  if (result?.suppress) {
+    return; // Don't inject this message
+  }
+
+  const textToInject = result?.inject || this.formatMessage(message);
+  await this.injectText(textToInject);
+}
+```
+
+**Use cases:**
+- Custom message formatting
+- Filter/suppress certain messages
+- Log incoming messages
+- Transform message content
+- Route to different handlers based on sender
+
+**Handler signature:**
+```typescript
+onMessageReceived: (message: RelayMessage, ctx: HookContext) => Promise<HookResult | void>
+```
+
+**Example - Custom formatting:**
+```typescript
+onMessageReceived: async (msg, ctx) => {
+  // Add priority indicator
+  const priority = msg.metadata?.urgent ? '🚨 URGENT' : '📨';
+  return {
+    inject: `${priority} Message from ${msg.from}: ${msg.content}`
+  };
+}
+```
+
+---
+
+### onSessionEnd
+
+**When:** Agent session is ending (user pressed Ctrl+C, agent exited, or explicit stop).
+
+**Trigger point:** `TmuxWrapper.stop()` or SIGINT/SIGTERM handler.
+
+```typescript
+// In src/wrapper/tmux-wrapper.ts
+async stop() {
+  // TRIGGER: onSessionEnd (before cleanup)
+  const result = await this.hooks.emit('sessionEnd', this.context);
+
+  if (result?.inject) {
+    await this.injectText(result.inject);
+    // Give agent time to process and respond
+    await this.waitForResponse(5000);
+  }
+
+  await this.cleanup();
+}
+
+// Also in signal handlers
+process.on('SIGINT', async () => {
+  await wrapper.stop();
+  process.exit(0);
+});
+```
+
+**Use cases:**
+- Prompt agent to save important learnings
+- Capture final summary
+- Cleanup resources
+- Save session transcript
+
+**Handler signature:**
+```typescript
+onSessionEnd: (ctx: HookContext) => Promise<HookResult | void>
+```
+
+**Example - Memory prompt:**
+```typescript
+onSessionEnd: async (ctx) => {
+  return {
+    inject: `
+[SESSION ENDING]
+Before you go, save any important learnings:
+  @memory:save <what you learned>
+`
+  };
+}
+```
+
+---
+
+### onToolCall (Future)
+
+**When:** Agent invokes a tool (requires parsing tool calls from output).
+
+**Status:** Future enhancement - requires understanding agent's tool output format.
+
+```typescript
+onToolCall: (tool: string, args: any, ctx: HookContext) => Promise<HookResult | void>
+```
+
+**Use cases:**
+- Audit tool usage
+- Block dangerous operations
+- Inject additional context before tool runs
+
+---
+
+## Implementation Location
+
+All lifecycle events are triggered from `src/wrapper/tmux-wrapper.ts`:
+
+```typescript
+// src/wrapper/tmux-wrapper.ts - Current structure
+export class TmuxWrapper {
+  // ADD: Hook emitter
+  private hooks: HookEmitter;
+
+  constructor(config: WrapperConfig) {
+    this.hooks = new HookEmitter(config.hooks);
+  }
+
+  async start() { /* triggers onSessionStart */ }
+  async pollOutput() { /* triggers onOutput, onIdle */ }
+  async handleIncomingMessage() { /* triggers onMessageReceived */ }
+  async stop() { /* triggers onSessionEnd */ }
+}
+```
+
+New file needed: `src/hooks/emitter.ts`:
+
+```typescript
+// src/hooks/emitter.ts
+export class HookEmitter {
+  private handlers: Map<string, HookHandler[]>;
+
+  constructor(config?: HooksConfig) {
+    this.handlers = new Map();
+    if (config) this.loadFromConfig(config);
+  }
+
+  on(event: HookEvent, handler: HookHandler) {
+    const existing = this.handlers.get(event) || [];
+    this.handlers.set(event, [...existing, handler]);
+  }
+
+  async emit(event: HookEvent, ...args: any[]): Promise<HookResult | void> {
+    const handlers = this.handlers.get(event) || [];
+    let result: HookResult | void;
+
+    for (const handler of handlers) {
+      result = await handler(...args);
+      if (result?.stop) break; // Stop propagation
+    }
+
+    return result;
+  }
+}
+```
+
+## Event Summary Table
+
+| Event | Trigger | Frequency | Can Inject? | Use Case |
+|-------|---------|-----------|-------------|----------|
+| `onSessionStart` | Session spawn | Once | ✅ Yes | Load memories, set context |
+| `onOutput` | New output captured | Many (100ms poll) | ⚠️ Rarely | Logging, error detection |
+| `onIdle` | No output for 30s | Periodic | ✅ Yes | Status prompts |
+| `onMessageReceived` | Relay message arrives | Per message | ✅ Yes | Custom formatting |
+| `onSessionEnd` | Session closing | Once | ✅ Yes | Save memories, cleanup |
+| `onToolCall` | Tool invoked | Per tool | Future | Audit, block |
+
 ## Hook API
 
 ### Configuration File
