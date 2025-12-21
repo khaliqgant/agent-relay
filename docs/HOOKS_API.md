@@ -150,6 +150,32 @@ async start(command: string) {
 onSessionStart: (ctx: HookContext) => Promise<HookResult | void>
 ```
 
+**Example - Inject project context:**
+```typescript
+onSessionStart: async (ctx) => {
+  // Greet agent with project info
+  return {
+    inject: `[CONTEXT] You are working in ${ctx.projectName}.
+Working directory: ${ctx.workingDir}
+Remember to save important learnings with @memory:save`,
+    log: `Session started: ${ctx.agentName} in ${ctx.projectName}`
+  };
+}
+```
+
+**Example - Role-based context:**
+```typescript
+onSessionStart: async (ctx) => {
+  const roles = {
+    'Reviewer': 'Focus on code quality, security, and best practices.',
+    'Architect': 'Design systems, make technical decisions.',
+    'Developer': 'Implement features, fix bugs, write tests.',
+  };
+  const role = roles[ctx.agentName] || 'General assistant.';
+  return { inject: `[ROLE] ${role}` };
+}
+```
+
 ---
 
 ### onOutput
@@ -189,6 +215,45 @@ onOutput: (output: string, ctx: HookContext) => Promise<HookResult | void>
 ```
 
 **Note:** This fires frequently. Keep handlers fast. Don't inject on every output.
+
+**Example - Error detection:**
+```typescript
+onOutput: async (output, ctx) => {
+  // Alert coordinator when errors occur
+  if (output.includes('Error:') || output.includes('FATAL')) {
+    return {
+      sendMessage: {
+        to: 'Coordinator',
+        content: `[ALERT] ${ctx.agentName} hit error: ${output.slice(0, 200)}`
+      },
+      log: `Error in ${ctx.agentName}: ${output.slice(0, 100)}`
+    };
+  }
+}
+```
+
+**Example - Progress tracking:**
+```typescript
+onOutput: async (output, ctx) => {
+  // Log test results
+  if (output.includes('PASS') || output.includes('FAIL')) {
+    return { log: `[TEST] ${ctx.agentName}: ${output.slice(0, 150)}` };
+  }
+}
+```
+
+**Example - Keyword alerting:**
+```typescript
+onOutput: async (output, ctx) => {
+  // Notify on security-related output
+  const keywords = ['vulnerability', 'CVE-', 'security', 'exploit'];
+  if (keywords.some(k => output.toLowerCase().includes(k))) {
+    return {
+      sendMessage: { to: 'Security', content: `Review needed: ${output.slice(0, 300)}` }
+    };
+  }
+}
+```
 
 ---
 
@@ -247,6 +312,43 @@ export default {
 };
 ```
 
+**Example - Escalating idle prompts:**
+```typescript
+onIdle: async (ctx) => {
+  // Gentle prompt after 30s, escalate after 2min
+  if (ctx.idleSeconds > 120) {
+    return {
+      inject: '[STUCK?] No activity for 2+ minutes. Need help?',
+      sendMessage: { to: 'Coordinator', content: `${ctx.agentName} idle for ${ctx.idleSeconds}s` }
+    };
+  } else if (ctx.idleSeconds > 30) {
+    return { inject: '[STATUS] Still working? Update with @relay:* STATUS: ...' };
+  }
+}
+```
+
+**Example - Auto-save reminder:**
+```typescript
+onIdle: async (ctx) => {
+  return {
+    inject: '[REMINDER] Consider saving progress: @memory:save <current status>'
+  };
+}
+```
+
+**Example - Notify coordinator only (no injection):**
+```typescript
+onIdle: async (ctx) => {
+  // Silent monitoring - don't interrupt agent
+  if (ctx.idleSeconds > 60) {
+    return {
+      sendMessage: { to: 'Coordinator', content: `${ctx.agentName} idle ${ctx.idleSeconds}s` },
+      log: `Idle alert: ${ctx.agentName}`
+    };
+  }
+}
+```
+
 ---
 
 ### onMessageReceived
@@ -291,6 +393,44 @@ onMessageReceived: async (msg, ctx) => {
   return {
     inject: `${priority} Message from ${msg.from}: ${msg.content}`
   };
+}
+```
+
+**Example - Suppress broadcasts while focused:**
+```typescript
+onMessageReceived: async (msg, ctx) => {
+  // Suppress status broadcasts, keep direct messages
+  if (msg.from === '*' && msg.content.startsWith('STATUS:')) {
+    return { suppress: true, log: `Suppressed broadcast: ${msg.content.slice(0, 50)}` };
+  }
+}
+```
+
+**Example - Filter by sender:**
+```typescript
+onMessageReceived: async (msg, ctx) => {
+  // Only accept messages from Coordinator and Reviewer
+  const allowedSenders = ['Coordinator', 'Reviewer'];
+  if (!allowedSenders.includes(msg.from)) {
+    return { suppress: true, log: `Blocked message from ${msg.from}` };
+  }
+}
+```
+
+**Example - Transform task assignments:**
+```typescript
+onMessageReceived: async (msg, ctx) => {
+  // Reformat task assignments with clear structure
+  if (msg.content.startsWith('TASK:')) {
+    const task = msg.content.replace('TASK:', '').trim();
+    return {
+      inject: `
+───────────────────────────────
+NEW TASK from ${msg.from}:
+${task}
+───────────────────────────────`
+    };
+  }
 }
 ```
 
@@ -344,6 +484,45 @@ onSessionEnd: async (ctx) => {
 Before you go, save any important learnings:
   @memory:save <what you learned>
 `
+  };
+}
+```
+
+**Example - Notify team of departure:**
+```typescript
+onSessionEnd: async (ctx) => {
+  const duration = Math.round((Date.now() - ctx.sessionStartTime) / 60000);
+  return {
+    inject: '[ENDING] Save your progress!',
+    sendMessage: {
+      to: '*',
+      content: `${ctx.agentName} signing off after ${duration} minutes`
+    },
+    log: `Session ended: ${ctx.agentName} (${duration}m)`
+  };
+}
+```
+
+**Example - Request summary before exit:**
+```typescript
+onSessionEnd: async (ctx) => {
+  return {
+    inject: `[SESSION END] Please provide a brief summary:
+1. What did you accomplish?
+2. What's left to do?
+3. Any blockers for the next agent?
+
+Reply, then I'll save your response.`
+  };
+}
+```
+
+**Example - Silent logging only:**
+```typescript
+onSessionEnd: async (ctx) => {
+  // No injection, just audit log
+  return {
+    log: `END: ${ctx.agentName} | project: ${ctx.projectName} | messages: ${ctx.recentMessages.length}`
   };
 }
 ```
