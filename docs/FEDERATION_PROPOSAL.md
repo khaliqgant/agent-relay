@@ -61,6 +61,7 @@ This proposal extends agent-relay to support **federated multi-server deployment
 14. [Implementation Plan](#14-implementation-plan)
 15. [Migration Path](#15-migration-path)
 16. [Open Questions](#16-open-questions) *(NEW)*
+17. [Storage Architecture](#17-storage-architecture) *(NEW)*
 
 ---
 
@@ -1786,6 +1787,362 @@ These questions remain unresolved and need input before/during implementation:
 
 ---
 
+## 17. Storage Architecture *(NEW)*
+
+Federation introduces distinct storage requirements: **ephemeral storage** for message routing and **durable storage** for trajectories and work history. These have fundamentally different characteristics.
+
+### 17.1 Two Storage Domains
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         STORAGE ARCHITECTURE                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────────┐      ┌─────────────────────────────────────┐  │
+│  │   EPHEMERAL STORAGE     │      │       DURABLE STORAGE                │  │
+│  │   (Message Routing)     │      │       (Trajectories)                 │  │
+│  │                         │      │                                      │  │
+│  │  • Peer message queues  │      │  • Agent work history               │  │
+│  │  • Pending ACKs         │      │  • Decisions & retrospectives       │  │
+│  │  • Flow control credits │      │  • Inter-agent conversations        │  │
+│  │  • Connection state     │      │  • Exported artifacts               │  │
+│  │                         │      │                                      │  │
+│  │  Lifetime: minutes/hours│      │  Lifetime: months/years             │  │
+│  │  Size: KB-MB per peer   │      │  Size: MB-GB per project            │  │
+│  │  Loss impact: retry     │      │  Loss impact: permanent             │  │
+│  │                         │      │                                      │  │
+│  │  Backend:               │      │  Backend:                           │  │
+│  │  • Memory (default)     │      │  • File system (default)            │  │
+│  │  • NATS JetStream       │      │  • SQLite (local queries)           │  │
+│  │                         │      │  • PostgreSQL (team sharing)        │  │
+│  │                         │      │  • S3/GCS (archive)                 │  │
+│  └─────────────────────────┘      └─────────────────────────────────────┘  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 17.2 Ephemeral Storage (Message Routing)
+
+For federation's real-time message routing, **memory is the default**. Messages are transient—they matter for delivery, not history.
+
+#### In-Memory Queues (Default)
+
+```typescript
+class EphemeralStore {
+  // Per-peer outbound queues (for disconnected peers)
+  peerQueues: Map<string, BoundedQueue<PeerEnvelope>>;
+
+  // Pending delivery confirmations
+  pendingAcks: Map<string, { envelope: Envelope; sentAt: number }>;
+
+  // Flow control state
+  peerCredits: Map<string, number>;
+
+  // Configuration
+  config: {
+    maxQueueSize: 1000;           // Bounded to prevent OOM
+    ackTimeoutMs: 30000;          // Expire pending ACKs after 30s
+    queueTtlMs: 3600000;          // Drop queued messages after 1 hour
+  };
+}
+```
+
+**Properties:**
+- ✅ Fast (no I/O)
+- ✅ Simple (no external deps)
+- ❌ Lost on daemon restart
+- ❌ Limited by available memory
+
+**When this is fine:**
+- Most messages deliver immediately
+- Disconnections are brief (seconds to minutes)
+- Acceptable to lose queued messages on crash
+
+#### NATS JetStream (Optional Upgrade)
+
+When using NATS transport (Section 11), streams provide ephemeral persistence:
+
+```typescript
+// NATS stream for routing messages
+const routingStream = {
+  name: 'RELAY_ROUTING',
+  subjects: ['relay.route.*', 'relay.broadcast'],
+  retention: RetentionPolicy.Limits,
+  max_age: 3600 * 1e9,           // 1 hour retention
+  max_bytes: 100 * 1024 * 1024,  // 100 MB max
+  discard: DiscardPolicy.Old,    // Drop oldest on limit
+};
+```
+
+**Properties:**
+- ✅ Survives daemon restarts
+- ✅ Shared across peers (no per-peer queuing)
+- ✅ Built-in flow control and backpressure
+- ❌ External dependency
+- ❌ Additional operational complexity
+
+**When to use NATS:**
+- High message volume
+- Long disconnection tolerance needed
+- Already have NATS infrastructure
+
+### 17.3 Durable Storage (Trajectories)
+
+For long-term work history, **durable storage is essential**. This stores agent trajectories—the complete record of task work including prompts, reasoning, decisions, and retrospectives.
+
+> **See also:** [Trajectories Proposal](https://github.com/khaliqgant/agent-relay/pull/3) for detailed format specification.
+
+#### Storage Tiers
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    TRAJECTORY STORAGE TIERS                                  │
+│                                                                              │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌────────────┐│
+│  │  Active     │     │   Local     │     │   Central   │     │  Archive   ││
+│  │  (File)     │────►│  (SQLite)   │────►│  (Postgres) │────►│  (S3)      ││
+│  │             │     │             │     │             │     │            ││
+│  │ In-progress │     │ Completed   │     │ Team-shared │     │ Cold       ││
+│  │ trajectories│     │ trajectories│     │ trajectories│     │ storage    ││
+│  │             │     │ (indexed)   │     │             │     │            ││
+│  │ .trajectories/    │ trajectories.db   │ Central DB  │     │ S3 bucket  ││
+│  │  active/    │     │             │     │             │     │            ││
+│  └─────────────┘     └─────────────┘     └─────────────┘     └────────────┘│
+│                                                                              │
+│  Speed: ◄────────────────────────────────────────────────────────────► Cost │
+│         Fastest                                                    Cheapest  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### File System (Default)
+
+```
+.trajectories/
+├── index.json                    # Quick lookup index
+├── active/                       # In-progress trajectories
+│   └── traj_abc123.json
+├── completed/                    # Finished trajectories
+│   ├── 2024-01/
+│   │   ├── traj_def456.json     # Full trajectory data
+│   │   └── traj_def456.md       # Human-readable export
+│   └── 2024-02/
+└── archive/                      # Compressed old trajectories
+```
+
+**Properties:**
+- ✅ Git-friendly (can commit trajectories with code)
+- ✅ No external deps
+- ✅ Portable (copy directory to share)
+- ❌ No cross-server queries
+- ❌ No team sharing without file sync
+
+#### SQLite (Local)
+
+For indexing and querying completed trajectories:
+
+```sql
+-- Same DB can hold both routing state and trajectories
+-- /tmp/agent-relay/state.sqlite
+
+CREATE TABLE trajectories (
+  id TEXT PRIMARY KEY,
+  task_id TEXT,
+  project_id TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  agent_names TEXT,                -- JSON array
+  chapters TEXT NOT NULL,          -- JSON
+  retrospective TEXT,              -- JSON
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_traj_task ON trajectories(task_id);
+CREATE INDEX idx_traj_project ON trajectories(project_id);
+```
+
+**Properties:**
+- ✅ Fast local queries
+- ✅ Single-file, easy backup
+- ✅ No external deps
+- ❌ Single-server scope
+
+#### PostgreSQL (Central)
+
+For team-wide trajectory sharing:
+
+```typescript
+// Central trajectory store configuration
+interface CentralStorageConfig {
+  type: 'postgresql';
+  connectionString: string;
+  schema: 'agent_relay';
+
+  // Sync behavior
+  syncOnComplete: boolean;        // Push trajectory when task completes
+  syncOnDemand: boolean;          // Pull trajectories from central
+  conflictResolution: 'server-wins' | 'local-wins' | 'merge';
+}
+```
+
+**Properties:**
+- ✅ Team-wide visibility
+- ✅ Rich querying (across all servers)
+- ✅ Central backup
+- ❌ Requires PostgreSQL infrastructure
+- ❌ Network dependency for writes
+
+#### S3/GCS (Archive)
+
+For long-term cold storage:
+
+```typescript
+interface ArchiveConfig {
+  type: 's3' | 'gcs';
+  bucket: string;
+  prefix: 'trajectories/';
+
+  // Lifecycle
+  archiveAfterDays: 90;           // Move to archive after 90 days
+  format: 'json' | 'json.gz';     // Compress for storage
+}
+```
+
+### 17.4 Export Format
+
+Trajectories export to a portable `.trajectory` format:
+
+```
+task-bd-123.trajectory/
+├── manifest.json                 # Metadata and table of contents
+├── trajectory.json               # Machine-readable full data
+├── trajectory.md                 # Human-readable narrative
+└── assets/                       # Attachments (screenshots, files)
+    ├── screenshot-001.png
+    └── diff-summary.patch
+```
+
+**Manifest structure:**
+
+```json
+{
+  "version": 1,
+  "trajectory_id": "traj_abc123",
+  "task": {
+    "source": "beads",
+    "id": "bd-123",
+    "title": "Implement rate limiting"
+  },
+  "created_at": "2025-01-15T10:00:00Z",
+  "completed_at": "2025-01-15T14:30:00Z",
+  "agents": ["Alice", "Bob"],
+  "summary": {
+    "chapters": 5,
+    "decisions": 3,
+    "files_changed": 12,
+    "total_events": 156
+  }
+}
+```
+
+### 17.5 Storage Configuration
+
+```yaml
+# /etc/agent-relay/config.yaml
+
+storage:
+  # Ephemeral (routing)
+  ephemeral:
+    type: memory                   # memory | nats
+    max_queue_per_peer: 1000
+    queue_ttl_ms: 3600000
+
+    # If using NATS
+    nats:
+      stream: RELAY_ROUTING
+      max_age_seconds: 3600
+      max_bytes: 104857600         # 100 MB
+
+  # Durable (trajectories)
+  trajectories:
+    # Local storage
+    local:
+      type: file                   # file | sqlite
+      path: .trajectories/
+      index_db: .trajectories/index.sqlite
+
+    # Optional central storage
+    central:
+      enabled: false
+      type: postgresql
+      connection_string: "${TRAJECTORY_DB_URL}"
+      sync_on_complete: true
+
+    # Optional archive
+    archive:
+      enabled: false
+      type: s3
+      bucket: company-trajectories
+      region: us-east-1
+      archive_after_days: 90
+```
+
+### 17.6 Federation Impact on Storage
+
+When federation is enabled, storage considerations change:
+
+| Concern | Single Server | Federated Fleet |
+|---------|---------------|-----------------|
+| **Routing queues** | Per-agent | Per-peer + per-agent |
+| **Registry** | Local only | Fleet-wide sync |
+| **Trajectories** | Local files | Central DB recommended |
+| **Message history** | Optional | Recommended for debugging |
+
+**Recommendations for federated deployments:**
+
+1. **Routing:** Use NATS if available, otherwise memory with bounded queues
+2. **Registry:** Memory + periodic persistence (survive restarts)
+3. **Trajectories:** SQLite local + PostgreSQL central for team visibility
+4. **Archive:** S3 for cost-effective long-term storage
+
+### 17.7 Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DATA FLOW: ROUTING vs TRAJECTORIES                        │
+│                                                                              │
+│  Message Send                              Task Work                         │
+│       │                                         │                            │
+│       ▼                                         ▼                            │
+│  ┌─────────────┐                         ┌─────────────┐                    │
+│  │ Route via   │                         │ Capture     │                    │
+│  │ ephemeral   │                         │ events      │                    │
+│  │ queues      │                         │ (trajectory)│                    │
+│  └──────┬──────┘                         └──────┬──────┘                    │
+│         │                                       │                            │
+│         ▼                                       ▼                            │
+│  ┌─────────────┐                         ┌─────────────┐                    │
+│  │ Deliver     │                         │ Write to    │                    │
+│  │ & discard   │◄── separate ───────────►│ durable     │                    │
+│  │             │    concerns             │ storage     │                    │
+│  └─────────────┘                         └──────┬──────┘                    │
+│                                                 │                            │
+│                                                 ▼                            │
+│                                          ┌─────────────┐                    │
+│                                          │ Sync to     │                    │
+│                                          │ central     │                    │
+│                                          │ (optional)  │                    │
+│                                          └──────┬──────┘                    │
+│                                                 │                            │
+│                                                 ▼                            │
+│                                          ┌─────────────┐                    │
+│                                          │ Archive to  │                    │
+│                                          │ S3 (cold)   │                    │
+│                                          └─────────────┘                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Summary (v2)
 
 This revised proposal addresses the critical issues identified in review:
@@ -1798,6 +2155,7 @@ This revised proposal addresses the critical issues identified in review:
 | No backpressure | Credit-based flow control (Section 9) |
 | Timeline unrealistic | Revised to 8-10 weeks (Section 14.3) |
 | NATS consideration | Pluggable transport layer (Section 11) |
+| Storage for trajectories | Two-tier storage architecture (Section 17) |
 
 **Key additions in v2:**
 - End-to-end delivery confirmation
@@ -1805,6 +2163,7 @@ This revised proposal addresses the critical issues identified in review:
 - Ed25519 authentication (scales better)
 - Credit-based flow control + rate limiting
 - Transport abstraction for NATS option
+- Storage architecture (ephemeral routing + durable trajectories)
 - Realistic timeline with MVP option
 - Open questions for discussion
 
