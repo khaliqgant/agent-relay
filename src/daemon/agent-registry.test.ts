@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { AgentRegistry } from './agent-registry.js';
+import { AgentRegistry } from './registry.js';
 
 function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-registry-'));
@@ -13,7 +13,7 @@ describe('AgentRegistry', () => {
     const dir = makeTempDir();
     const registry = new AgentRegistry(dir);
 
-    const created = registry.registerOrUpdate({
+    const created = registry.register({
       name: 'alice',
       cli: 'claude',
       workingDirectory: '/tmp/alice',
@@ -44,14 +44,14 @@ describe('AgentRegistry', () => {
     const dir = makeTempDir();
     const registry = new AgentRegistry(dir);
 
-    registry.registerOrUpdate({
+    registry.register({
       name: 'bob',
       cli: 'claude',
       workingDirectory: '/tmp/one',
     });
     const first = registry.getAgents()[0];
 
-    registry.registerOrUpdate({
+    registry.register({
       name: 'bob',
       cli: 'gemini',
       workingDirectory: '/tmp/two',
@@ -80,7 +80,7 @@ describe('AgentRegistry', () => {
   it('logs write failures without throwing', () => {
     const dir = makeTempDir();
     const registry = new AgentRegistry(dir);
-    registry.registerOrUpdate({ name: 'carol' });
+    registry.register({ name: 'carol' });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {

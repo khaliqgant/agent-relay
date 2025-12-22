@@ -2,6 +2,9 @@
 <html>
 <head>
   <title>Agent Relay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
         --bg-primary: #09090b;
@@ -26,11 +29,25 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
       background: var(--bg-primary);
+      background-image:
+        linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
+      background-size: 20px 20px;
       color: var(--text);
       min-height: 100vh;
       overflow-x: hidden;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 4px currentColor, 0 0 8px currentColor; }
+      50% { box-shadow: 0 0 8px currentColor, 0 0 16px currentColor; }
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .container {
@@ -63,6 +80,7 @@
       align-items: center;
       padding: 16px 20px;
       border-bottom: 1px solid var(--border-color);
+      box-shadow: 0 1px 0 rgba(59, 130, 246, 0.2);
     }
 
     .logo {
@@ -115,8 +133,20 @@
       padding: 12px;
       border-radius: 8px;
       margin-bottom: 4px;
-      transition: background 0.15s;
+      transition: background 0.15s, border-color 0.3s, opacity 0.3s;
       cursor: default;
+      border-left: 3px solid var(--success);
+    }
+
+    .agent-card.disconnected {
+      border-left-color: var(--error);
+      opacity: 0.6;
+    }
+
+    .agent-card.disconnected .status-dot {
+      background: var(--error);
+      color: var(--error);
+      animation: none;
     }
 
     .agent-card:hover {
@@ -174,6 +204,8 @@
       height: 6px;
       border-radius: 50%;
       background: var(--success);
+      color: var(--success);
+      animation: pulse-glow 2s ease-in-out infinite;
     }
 
     .badge {
@@ -214,6 +246,8 @@
       height: 6px;
       border-radius: 50%;
       background: var(--success);
+      color: var(--success);
+      animation: pulse-glow 2s ease-in-out infinite;
     }
 
     .log-content {
@@ -229,6 +263,22 @@
       display: flex;
       gap: 12px;
       transition: background 0.15s;
+      animation: slideIn 0.2s ease-out;
+      border-left: 3px solid transparent;
+    }
+
+    .message.broadcast {
+      border-left-color: var(--warning);
+      background: var(--warning-muted);
+    }
+
+    .message.broadcast .msg-target {
+      color: var(--warning);
+      font-weight: 600;
+    }
+
+    .message.direct {
+      border-left-color: var(--primary);
     }
 
     .message:hover {
@@ -283,6 +333,36 @@
       margin-left: auto;
     }
 
+    .thread-badge {
+      background: var(--primary-muted);
+      color: var(--primary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 500;
+    }
+
+    .filter-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .thread-filter {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.75rem;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+
+    .thread-filter:focus {
+      border-color: var(--primary);
+      outline: none;
+    }
+
     .msg-text {
       font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
       font-size: 0.8rem;
@@ -324,6 +404,36 @@
       background: var(--error) !important;
     }
 
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    #connection-status.reconnecting,
+    #connection-status.connecting {
+      background: var(--warning-muted);
+      color: var(--warning);
+    }
+
+    #connection-status.reconnecting .dot,
+    #connection-status.connecting .dot {
+      background: transparent;
+      border: 2px solid var(--warning);
+      border-top-color: transparent;
+      animation: spin 0.8s linear infinite;
+    }
+
+    #connection-status .dot {
+      color: inherit;
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+
+    #connection-status .uptime {
+      font-size: 0.65rem;
+      opacity: 0.7;
+      margin-left: 4px;
+    }
+
     .empty-state {
       text-align: center;
       padding: 48px 24px;
@@ -333,6 +443,247 @@
     .empty-state-text {
       font-size: 0.875rem;
       line-height: 1.6;
+    }
+
+    /* Compose Section - Command Center Aesthetic */
+    .compose-section {
+      padding: 20px 24px;
+      border-top: 1px solid var(--border-color);
+      background: linear-gradient(180deg, var(--bg-secondary) 0%, rgba(9, 9, 11, 0.95) 100%);
+      position: relative;
+    }
+
+    .compose-section::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 24px;
+      right: 24px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--primary), transparent);
+      opacity: 0.3;
+    }
+
+    .compose-wrapper {
+      display: flex;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .compose-input-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .compose-meta-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .compose-to {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .compose-to label {
+      font-size: 0.6875rem;
+      font-weight: 600;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    }
+
+    .compose-to select {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 0.8125rem;
+      padding: 8px 12px;
+      outline: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      min-width: 180px;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 32px;
+    }
+
+    .compose-to select:hover {
+      border-color: var(--border-hover);
+    }
+
+    .compose-to select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-muted), inset 0 0 20px rgba(59, 130, 246, 0.05);
+    }
+
+    .compose-hint {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      margin-left: auto;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    }
+
+    .compose-section:focus-within .compose-hint {
+      opacity: 1;
+    }
+
+    .compose-hint kbd {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-color);
+      border-radius: 3px;
+      padding: 3px 6px;
+      font-family: inherit;
+      font-size: 0.625rem;
+      box-shadow: 0 1px 0 var(--border-color);
+    }
+
+    .compose-input-row {
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .compose-textarea-wrapper {
+      flex: 1;
+      position: relative;
+    }
+
+    .compose-textarea-wrapper::before {
+      content: '>';
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      color: var(--primary);
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 0.875rem;
+      font-weight: 600;
+      opacity: 0.6;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .compose-textarea-wrapper:focus-within::before {
+      opacity: 1;
+      animation: blink 1.2s step-end infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .compose-textarea-wrapper textarea {
+      width: 100%;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 0.8125rem;
+      padding: 12px 14px 12px 32px;
+      outline: none;
+      transition: all 0.2s ease;
+      resize: none;
+      min-height: 80px;
+      line-height: 1.6;
+    }
+
+    .compose-textarea-wrapper textarea:hover {
+      border-color: var(--border-hover);
+    }
+
+    .compose-textarea-wrapper textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-muted), inset 0 0 30px rgba(59, 130, 246, 0.03);
+      background: linear-gradient(180deg, var(--bg-primary) 0%, rgba(59, 130, 246, 0.02) 100%);
+    }
+
+    .compose-textarea-wrapper textarea::placeholder {
+      color: var(--text-muted);
+      opacity: 0.5;
+    }
+
+    .send-btn {
+      background: linear-gradient(180deg, var(--primary) 0%, #2563eb 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 0 24px;
+      min-width: 100px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .send-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    .send-btn:hover {
+      background: linear-gradient(180deg, #4f8ff7 0%, var(--primary) 100%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .send-btn:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 6px rgba(59, 130, 246, 0.2);
+    }
+
+    .send-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .send-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .send-status {
+      font-size: 0.6875rem;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      padding: 6px 0 0;
+      min-height: 22px;
+      letter-spacing: 0.02em;
+    }
+
+    .send-status.success {
+      color: var(--success);
+    }
+
+    .send-status.error {
+      color: var(--error);
     }
 
     /* Scrollbar */
@@ -378,6 +729,11 @@
         <div class="activity-log">
             <div class="log-header">
                 <h2>Activity</h2>
+                <div class="filter-section">
+                    <select id="thread-filter" class="thread-filter">
+                        <option value="">All threads</option>
+                    </select>
+                </div>
                 <div class="live-indicator">
                     <span class="live-dot"></span>
                     <span>Live</span>
@@ -387,6 +743,37 @@
                 <!-- Messages injected here -->
             </div>
         </div>
+        <div class="compose-section">
+            <div class="compose-wrapper">
+                <div class="compose-input-area">
+                    <div class="compose-meta-row">
+                        <div class="compose-to">
+                            <label for="agent-select">Target</label>
+                            <select id="agent-select">
+                                <option value="">Select agent...</option>
+                                <option value="*">* (Broadcast all)</option>
+                            </select>
+                        </div>
+                        <div class="compose-hint">
+                            <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send
+                        </div>
+                    </div>
+                    <div class="compose-input-row">
+                        <div class="compose-textarea-wrapper">
+                            <textarea id="message-input" placeholder="Enter your message..."></textarea>
+                        </div>
+                        <button class="send-btn" id="send-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                            Send
+                        </button>
+                    </div>
+                    <div class="send-status" id="send-status"></div>
+                </div>
+            </div>
+        </div>
     </div>
   </div>
 
@@ -394,22 +781,80 @@
     const agentsContainer = document.getElementById('agents');
     const logContainer = document.getElementById('log');
     const statusDiv = document.getElementById('connection-status');
+    const agentSelect = document.getElementById('agent-select');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const sendStatus = document.getElementById('send-status');
+    const threadFilter = document.getElementById('thread-filter');
 
     // Track last data hash to prevent unnecessary re-renders
+    const STALE_THRESHOLD_MS = 30_000;
     let lastDataHash = '';
+    let currentAgents = [];
+    let allMessages = [];
+    let connectionStart = null;
+    let uptimeInterval = null;
+    let isReconnect = false;
+
+    function isAgentOnline(lastSeen) {
+        if (!lastSeen) return false;
+        const ts = Date.parse(lastSeen);
+        if (Number.isNaN(ts)) return false;
+        return (Date.now() - ts) < STALE_THRESHOLD_MS;
+    }
+
+    function formatUptime(ms) {
+        const seconds = Math.floor(ms / 1000);
+        if (seconds < 60) return `${seconds}s`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m`;
+        const hours = Math.floor(minutes / 60);
+        return `${hours}h ${minutes % 60}m`;
+    }
+
+    function updateConnectionStatus(state, uptime = null) {
+        statusDiv.className = '';
+        if (state === 'connecting' || state === 'reconnecting') {
+            statusDiv.classList.add(state);
+            const label = state === 'reconnecting' ? 'Reconnecting...' : 'Connecting...';
+            statusDiv.innerHTML = `<span class="dot"></span><span>${label}</span>`;
+        } else if (state === 'connected') {
+            const uptimeStr = uptime ? `<span class="uptime">${formatUptime(uptime)}</span>` : '';
+            statusDiv.innerHTML = `<span class="dot"></span><span>Live</span>${uptimeStr}`;
+        } else {
+            statusDiv.classList.add('disconnected');
+            statusDiv.innerHTML = '<span class="dot"></span><span>Offline</span>';
+        }
+    }
 
     function connect() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+        updateConnectionStatus(isReconnect ? 'reconnecting' : 'connecting');
+
         const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
         ws.onopen = () => {
-            statusDiv.innerHTML = '<span class="dot"></span><span>Live</span>';
-            statusDiv.classList.remove('disconnected');
+            connectionStart = Date.now();
+            updateConnectionStatus('connected');
+
+            // Start uptime counter
+            if (uptimeInterval) clearInterval(uptimeInterval);
+            uptimeInterval = setInterval(() => {
+                if (connectionStart) {
+                    updateConnectionStatus('connected', Date.now() - connectionStart);
+                }
+            }, 1000);
         };
 
         ws.onclose = () => {
-            statusDiv.innerHTML = '<span class="dot"></span><span>Offline</span>';
-            statusDiv.classList.add('disconnected');
+            if (uptimeInterval) {
+                clearInterval(uptimeInterval);
+                uptimeInterval = null;
+            }
+            connectionStart = null;
+            updateConnectionStatus('disconnected');
+            isReconnect = true;
             setTimeout(connect, 3000);
         };
 
@@ -427,8 +872,12 @@
     function render(data) {
         // Render Agents
         if (data.agents && data.agents.length > 0) {
-            const newAgentsHTML = data.agents.map((a, i) => `
-                <div class="agent-card ${a.messageCount > 0 ? 'active' : ''}">
+            const newAgentsHTML = data.agents.map((a, i) => {
+                const lastSeen = a.lastSeen ?? a.lastActive;
+                const online = isAgentOnline(lastSeen);
+                const disconnectedClass = online ? '' : 'disconnected';
+                return `
+                <div class="agent-card ${a.messageCount > 0 ? 'active' : ''} ${disconnectedClass}">
                     <div class="agent-header">
                         <div class="agent-name">${a.name}</div>
                         ${a.messageCount > 0 ? `<span class="badge">${a.messageCount}</span>` : ''}
@@ -444,10 +893,18 @@
                         ${a.lastActive ? timeAgo(new Date(a.lastActive)) : 'No activity'}
                     </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
 
             if (agentsContainer.innerHTML !== newAgentsHTML) {
                 agentsContainer.innerHTML = newAgentsHTML;
+            }
+
+            // Update agent dropdown if agents changed
+            const agentNames = data.agents.map(a => a.name).sort();
+            if (JSON.stringify(agentNames) !== JSON.stringify(currentAgents)) {
+                currentAgents = agentNames;
+                updateAgentDropdown(agentNames);
             }
         } else if (!agentsContainer.querySelector('.empty-state')) {
             agentsContainer.innerHTML = `
@@ -455,17 +912,23 @@
                     <div class="empty-state-text">Waiting for agents...</div>
                 </div>
             `;
+            // Clear agent dropdown
+            if (currentAgents.length > 0) {
+                currentAgents = [];
+                updateAgentDropdown([]);
+            }
         }
 
         // Render Messages (Activity Log)
         if (data.messages && data.messages.length > 0) {
-            const currentCount = logContainer.querySelectorAll('.message').length;
-            const newCount = data.messages.length;
+            allMessages = data.messages;
 
-            if (currentCount !== newCount) {
-                logContainer.innerHTML = data.messages.map(m => createMessageHTML(m)).join('');
-            }
+            // Update conversation filter dropdown
+            updateConversationDropdown();
+
+            renderMessages();
         } else if (!logContainer.querySelector('.empty-state')) {
+            allMessages = [];
             logContainer.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-text">No messages yet</div>
@@ -474,16 +937,84 @@
         }
     }
 
+    function renderMessages() {
+        const selectedFilter = threadFilter.value;
+        const filtered = selectedFilter
+            ? allMessages.filter(m => getConversationKey(m) === selectedFilter)
+            : allMessages;
+
+        if (filtered.length > 0) {
+            logContainer.innerHTML = filtered.map(m => createMessageHTML(m)).join('');
+        } else {
+            logContainer.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-text">No messages${selectedFilter ? ' in this conversation' : ''}</div>
+                </div>
+            `;
+        }
+    }
+
+    function getConversationKey(m) {
+        // For broadcasts, group under "Broadcasts"
+        if (m.to === '*') return 'broadcast:*';
+        // For direct messages, create a sorted pair key
+        const pair = [m.from, m.to].sort();
+        return `conv:${pair[0]}↔${pair[1]}`;
+    }
+
+    function updateConversationDropdown() {
+        const currentValue = threadFilter.value;
+
+        // Build conversation map
+        const conversations = new Map();
+        allMessages.forEach(m => {
+            const key = getConversationKey(m);
+            if (!conversations.has(key)) {
+                conversations.set(key, { count: 0, label: '' });
+            }
+            conversations.get(key).count++;
+        });
+
+        // Create labels
+        conversations.forEach((data, key) => {
+            if (key === 'broadcast:*') {
+                data.label = '📢 Broadcasts';
+            } else {
+                data.label = key.replace('conv:', '');
+            }
+        });
+
+        // Sort by count descending
+        const sorted = [...conversations.entries()].sort((a, b) => b[1].count - a[1].count);
+
+        threadFilter.innerHTML = `
+            <option value="">All messages (${allMessages.length})</option>
+            ${sorted.map(([key, data]) =>
+                `<option value="${escapeHtml(key)}">${escapeHtml(data.label)} (${data.count})</option>`
+            ).join('')}
+        `;
+
+        // Restore selection if still valid
+        if (currentValue && conversations.has(currentValue)) {
+            threadFilter.value = currentValue;
+        }
+    }
+
     function createMessageHTML(m) {
         const initials = m.from.substring(0, 2).toUpperCase();
+        const threadBadge = m.thread ? `<span class="thread-badge" title="Thread: ${escapeHtml(m.thread)}">#${escapeHtml(m.thread)}</span>` : '';
+        const isBroadcast = m.to === '*';
+        const msgClass = isBroadcast ? 'broadcast' : 'direct';
+        const targetDisplay = isBroadcast ? '* (all)' : m.to;
         return `
-            <div class="message">
+            <div class="message ${msgClass}" ${m.thread ? `data-thread="${escapeHtml(m.thread)}"` : ''} data-from="${escapeHtml(m.from)}" data-to="${escapeHtml(m.to)}">
                 <div class="msg-avatar">${initials}</div>
                 <div class="msg-body">
                     <div class="msg-meta">
                         <span class="msg-sender">${m.from}</span>
                         <span class="msg-arrow">→</span>
-                        <span class="msg-target">${m.to}</span>
+                        <span class="msg-target">${targetDisplay}</span>
+                        ${threadBadge}
                         <span class="msg-time">${new Date(m.timestamp).toLocaleTimeString()}</span>
                     </div>
                     <div class="msg-text">${escapeHtml(m.content)}</div>
@@ -508,6 +1039,84 @@
         if (hours < 24) return `${hours}h ago`;
         return `${Math.floor(hours / 24)}d ago`;
     }
+
+    function updateAgentDropdown(agents) {
+        const currentValue = agentSelect.value;
+        agentSelect.innerHTML = `
+            <option value="">Select agent...</option>
+            <option value="*">* (Broadcast)</option>
+            ${agents.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
+        `;
+        // Restore selection if still valid
+        if (currentValue && (currentValue === '*' || agents.includes(currentValue))) {
+            agentSelect.value = currentValue;
+        }
+    }
+
+    async function sendMessage() {
+        const to = agentSelect.value;
+        const message = messageInput.value.trim();
+
+        if (!to) {
+            showStatus('Please select an agent', 'error');
+            return;
+        }
+        if (!message) {
+            showStatus('Please enter a message', 'error');
+            return;
+        }
+
+        sendBtn.disabled = true;
+        showStatus('Sending...', '');
+
+        try {
+            const response = await fetch('/api/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to, message })
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                showStatus('Message sent!', 'success');
+                messageInput.value = '';
+            } else {
+                showStatus(result.error || 'Failed to send', 'error');
+            }
+        } catch (err) {
+            showStatus('Network error', 'error');
+        } finally {
+            sendBtn.disabled = false;
+        }
+    }
+
+    function showStatus(text, type) {
+        sendStatus.textContent = text;
+        sendStatus.className = 'send-status' + (type ? ' ' + type : '');
+        if (type === 'success') {
+            setTimeout(() => {
+                if (sendStatus.textContent === text) {
+                    sendStatus.textContent = '';
+                    sendStatus.className = 'send-status';
+                }
+            }, 3000);
+        }
+    }
+
+    // Send button click handler
+    sendBtn.addEventListener('click', sendMessage);
+
+    // Thread filter change handler
+    threadFilter.addEventListener('change', renderMessages);
+
+    // Allow Ctrl+Enter to send
+    messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
 
     connect();
   </script>

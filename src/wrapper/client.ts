@@ -10,6 +10,8 @@ import {
   type HelloPayload,
   type WelcomePayload,
   type SendPayload,
+  type SendMeta,
+  type SendEnvelope,
   type DeliverEnvelope,
   type ErrorPayload,
   type PayloadKind,
@@ -25,8 +27,16 @@ export interface ClientConfig {
   agentName: string;
   /** Optional CLI identifier to surface to the dashboard */
   cli?: string;
+  /** Optional program identifier (e.g., 'claude', 'gpt-4o') */
+  program?: string;
+  /** Optional model identifier (e.g., 'claude-3-opus-2024-xx') */
+  model?: string;
+  /** Optional task description for registry/dashboard */
+  task?: string;
   /** Optional working directory to surface in registry/dashboard */
   workingDirectory?: string;
+  /** Suppress client-side console logging */
+  quiet?: boolean;
   reconnect: boolean;
   maxReconnectAttempts: number;
   reconnectDelayMs: number;
@@ -37,6 +47,7 @@ const DEFAULT_CLIENT_CONFIG: ClientConfig = {
   socketPath: DEFAULT_SOCKET_PATH,
   agentName: 'agent',
   cli: undefined,
+  quiet: false,
   reconnect: true,
   maxReconnectAttempts: 10,
   reconnectDelayMs: 100,
@@ -57,7 +68,7 @@ export class RelayClient {
   private _destroyed = false;
 
   // Event handlers
-  onMessage?: (from: string, payload: SendPayload, messageId: string) => void;
+  onMessage?: (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => void;
   onStateChange?: (state: ClientState) => void;
   onError?: (error: Error) => void;
 
@@ -180,13 +191,14 @@ export class RelayClient {
    * @param kind - Message type (default: 'message')
    * @param data - Optional structured data
    * @param thread - Optional thread ID for grouping related messages
+   * @param meta - Optional message metadata (importance, replyTo, etc.)
    */
-  sendMessage(to: string, body: string, kind: PayloadKind = 'message', data?: Record<string, unknown>, thread?: string): boolean {
+  sendMessage(to: string, body: string, kind: PayloadKind = 'message', data?: Record<string, unknown>, thread?: string, meta?: SendMeta): boolean {
     if (this._state !== 'READY') {
       return false;
     }
 
-    const envelope: Envelope<SendPayload> = {
+    const envelope: SendEnvelope = {
       v: PROTOCOL_VERSION,
       type: 'SEND',
       id: uuid(),
@@ -198,6 +210,7 @@ export class RelayClient {
         data,
         thread,
       },
+      payload_meta: meta,
     };
 
     return this.send(envelope);
@@ -258,6 +271,9 @@ export class RelayClient {
       payload: {
         agent: this.config.agentName,
         cli: this.config.cli,
+        program: this.config.program,
+        model: this.config.model,
+        task: this.config.task,
         workingDirectory: this.config.workingDirectory,
         capabilities: {
           ack: true,
@@ -326,7 +342,9 @@ export class RelayClient {
     this.reconnectAttempts = 0;
     this.reconnectDelay = this.config.reconnectDelayMs;
     this.setState('READY');
-    console.log(`[client] Connected as ${this.config.agentName} (session: ${this.sessionId})`);
+    if (!this.config.quiet) {
+      console.log(`[client] Connected as ${this.config.agentName} (session: ${this.sessionId})`);
+    }
   }
 
   private handleDeliver(envelope: DeliverEnvelope): void {
@@ -344,7 +362,7 @@ export class RelayClient {
 
     // Notify handler
     if (this.onMessage && envelope.from) {
-      this.onMessage(envelope.from, envelope.payload, envelope.id);
+      this.onMessage(envelope.from, envelope.payload, envelope.id, envelope.payload_meta);
     }
   }
 
@@ -409,7 +427,9 @@ export class RelayClient {
     const delay = Math.min(this.reconnectDelay * jitter, this.config.reconnectMaxDelayMs);
     this.reconnectDelay *= 2;
 
-    console.log(`[client] Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
+    if (!this.config.quiet) {
+      console.log(`[client] Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
+    }
 
     this.reconnectTimer = setTimeout(() => {
       this.connect().catch(() => {

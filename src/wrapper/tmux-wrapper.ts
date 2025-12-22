@@ -17,7 +17,7 @@ import { promisify } from 'node:util';
 import { RelayClient } from './client.js';
 import { OutputParser, type ParsedCommand, parseSummaryWithDetails, parseSessionEndFromOutput, ParsedMessageMetadata } from './parser.js';
 import { InboxManager } from './inbox.js';
-import type { SendPayload } from '../protocol/types.js';
+import type { SendPayload, SendMeta } from '../protocol/types.js';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
 
@@ -43,6 +43,12 @@ export interface TmuxWrapperConfig {
   rows?: number;
   cwd?: string;
   env?: Record<string, string>;
+  /** Optional program identifier (e.g., 'claude', 'gpt-4o') */
+  program?: string;
+  /** Optional model identifier (e.g., 'claude-3-opus') */
+  model?: string;
+  /** Optional task/role description for dashboard/registry */
+  task?: string;
   /** Use file-based inbox in addition to injection */
   useInbox?: boolean;
   /** Custom inbox directory */
@@ -97,7 +103,7 @@ export class TmuxWrapper {
   private activityState: 'active' | 'idle' | 'disconnected' = 'disconnected';
   private recentlySentMessages: Map<string, number> = new Map();
   private sentMessageHashes: Set<string> = new Set(); // Permanent dedup
-  private messageQueue: Array<{ from: string; body: string; messageId: string }> = [];
+  private messageQueue: Array<{ from: string; body: string; messageId: string; thread?: string; importance?: number }> = [];
   private isInjecting = false;
   // Track processed output to avoid re-parsing
   private processedOutputLength = 0;
@@ -107,6 +113,9 @@ export class TmuxWrapper {
   private lastSummaryHash = ''; // Dedup summary saves
   private lastSummaryRawContent = ''; // Dedup invalid JSON error logging
   private sessionEndProcessed = false; // Track if we've already processed session end
+  private pendingRelayCommands: ParsedCommand[] = [];
+  private queuedMessageHashes: Set<string> = new Set(); // For offline queue dedup
+  private readonly MAX_PENDING_RELAY_COMMANDS = 50;
 
   constructor(config: TmuxWrapperConfig) {
     this.config = {
@@ -139,14 +148,18 @@ export class TmuxWrapper {
     // Determine relay prefix: explicit config > auto-detect from CLI type
     this.relayPrefix = config.relayPrefix ?? getDefaultPrefix(this.cliType);
 
-    // Generate unique session name
-    this.sessionName = `relay-${config.name}-${process.pid}`;
+    // Session name (one agent per name - starting a duplicate kills the existing one)
+    this.sessionName = `relay-${config.name}`;
 
     this.client = new RelayClient({
       agentName: config.name,
       socketPath: config.socketPath,
       cli: this.cliType,
+      program: this.config.program,
+      model: this.config.model,
+      task: this.config.task,
       workingDirectory: this.config.cwd ?? process.cwd(),
+      quiet: true, // Keep stdout clean; we log to stderr via wrapper
     });
 
     this.parser = new OutputParser({ prefix: this.relayPrefix });
@@ -170,14 +183,21 @@ export class TmuxWrapper {
     });
 
     // Handle incoming messages from relay
-    this.client.onMessage = (from: string, payload: SendPayload, messageId: string) => {
-      this.handleIncomingMessage(from, payload, messageId);
+    this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
+      this.handleIncomingMessage(from, payload, messageId, meta);
     };
 
     this.client.onStateChange = (state) => {
       // Only log to stderr, never stdout (user is in tmux)
       if (state === 'READY') {
-        this.logStderr(`Connected to relay daemon`);
+        this.logStderr('Connected to relay daemon');
+        this.flushQueuedRelayCommands();
+      } else if (state === 'BACKOFF') {
+        this.logStderr('Relay unavailable, will retry (backoff)');
+      } else if (state === 'DISCONNECTED') {
+        this.logStderr('Relay disconnected (offline mode)');
+      } else if (state === 'CONNECTING') {
+        this.logStderr('Connecting to relay daemon...');
       }
     };
   }
@@ -245,8 +265,9 @@ export class TmuxWrapper {
     }
 
     // Connect to relay daemon (in background, don't block)
-    this.client.connect().catch(() => {
-      // Silent - relay connection is optional
+    this.client.connect().catch((err: Error) => {
+      // Connection failures will retry via client backoff; surface once to stderr.
+      this.logStderr(`Relay connect failed: ${err.message}. Will retry if enabled.`, true);
     });
 
     // Kill any existing session with this name
@@ -277,6 +298,7 @@ export class TmuxWrapper {
         // Pass through mouse scroll to application in alternate screen mode
         'set -ga terminal-overrides ",xterm*:Tc"',
         'set -g status-left-length 100',      // Provide ample space for agent name in status bar
+        'set -g mode-keys vi',                // Predictable key table (avoid copy-mode surprises)
       ];
 
       // Add mouse mode if enabled (allows scroll passthrough to CLI apps)
@@ -290,6 +312,26 @@ export class TmuxWrapper {
           execSync(`tmux ${setting}`, { stdio: 'pipe' });
         } catch {
           // Some settings may not be available in older tmux versions
+        }
+      }
+
+      // Harden session against accidental copy-mode / mouse capture that interrupts agents
+      const tmuxCopyModeBlockers = [
+        'unbind -T prefix [',                 // Disable prefix-[ copy-mode
+        'unbind -T prefix PageUp',            // Disable PageUp copy-mode entry
+        'unbind -T root WheelUpPane',         // Stop wheel from entering copy-mode
+        'unbind -T root WheelDownPane',
+        'unbind -T root MouseDrag1Pane',
+        'bind -T root WheelUpPane send-keys -M',   // Pass wheel events through to app
+        'bind -T root WheelDownPane send-keys -M',
+        'bind -T root MouseDrag1Pane send-keys -M',
+      ];
+
+      for (const setting of tmuxCopyModeBlockers) {
+        try {
+          execSync(`tmux ${setting}`, { stdio: 'pipe' });
+        } catch {
+          // Ignore on older tmux versions lacking these key tables
         }
       }
 
@@ -612,14 +654,58 @@ export class TmuxWrapper {
       return;
     }
 
-    const success = this.client.sendMessage(cmd.to, cmd.body, cmd.kind, cmd.data);
+    // If client not ready, queue for later and return
+    if (this.client.state !== 'READY') {
+      if (this.queuedMessageHashes.has(msgHash)) {
+        return; // Already queued
+      }
+      if (this.pendingRelayCommands.length >= this.MAX_PENDING_RELAY_COMMANDS) {
+        this.logStderr('Relay offline queue full, dropping oldest');
+        const dropped = this.pendingRelayCommands.shift();
+        if (dropped) {
+          this.queuedMessageHashes.delete(`${dropped.to}:${dropped.body}`);
+        }
+      }
+      this.pendingRelayCommands.push(cmd);
+      this.queuedMessageHashes.add(msgHash);
+      this.logStderr(`Relay offline; queued message to ${cmd.to}`);
+      return;
+    }
+
+    // Convert ParsedMessageMetadata to SendMeta if present
+    let sendMeta: SendMeta | undefined;
+    if (cmd.meta) {
+      sendMeta = {
+        importance: cmd.meta.importance,
+        replyTo: cmd.meta.replyTo,
+        requires_ack: cmd.meta.ackRequired,
+      };
+    }
+
+    const success = this.client.sendMessage(cmd.to, cmd.body, cmd.kind, cmd.data, cmd.thread, sendMeta);
     if (success) {
       this.sentMessageHashes.add(msgHash);
+      this.queuedMessageHashes.delete(msgHash);
       const truncatedBody = cmd.body.substring(0, Math.min(RELAY_LOG_TRUNCATE_LENGTH, cmd.body.length));
       this.logStderr(`→ ${cmd.to}: ${truncatedBody}...`);
     } else if (this.client.state !== 'READY') {
       // Only log failure once per state change
       this.logStderr(`Send failed (client ${this.client.state})`);
+    }
+  }
+
+  /**
+   * Flush any queued relay commands when the client reconnects.
+   */
+  private flushQueuedRelayCommands(): void {
+    if (this.pendingRelayCommands.length === 0) return;
+
+    const queued = [...this.pendingRelayCommands];
+    this.pendingRelayCommands = [];
+    this.queuedMessageHashes.clear();
+
+    for (const cmd of queued) {
+      this.sendRelayCommand(cmd);
     }
   }
 
@@ -723,12 +809,12 @@ export class TmuxWrapper {
   /**
    * Handle incoming message from relay
    */
-  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string): void {
+  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta): void {
     const truncatedBody = payload.body.substring(0, Math.min(DEBUG_LOG_TRUNCATE_LENGTH, payload.body.length));
     this.logStderr(`← ${from}: ${truncatedBody}...`);
 
     // Queue for injection
-    this.messageQueue.push({ from, body: payload.body, messageId });
+    this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance });
 
     // Write to inbox if enabled
     if (this.inbox) {
@@ -818,8 +904,13 @@ export class TmuxWrapper {
       }
 
       // Standard injection for all CLIs including Gemini
-      // Format: Relay message from Sender [abc12345]: content
-      const injection = `Relay message from ${msg.from} ${idTag}: ${sanitizedBody}${truncationHint}`;
+      // Format: Relay message from Sender [abc12345] [thread:xxx] [!]: content
+      // Thread/importance hints are compact and optional to not break TUIs
+      const threadHint = msg.thread ? ` [thread:${msg.thread}]` : '';
+      // Importance indicator: [!!] for high (>75), [!] for medium (>50), none for low/default
+      const importanceHint = msg.importance !== undefined && msg.importance > 75 ? ' [!!]' :
+                             msg.importance !== undefined && msg.importance > 50 ? ' [!]' : '';
+      const injection = `Relay message from ${msg.from} ${idTag}${threadHint}${importanceHint}: ${sanitizedBody}${truncationHint}`;
 
       // Type the message as literal text
       await this.sendKeysLiteral(injection);

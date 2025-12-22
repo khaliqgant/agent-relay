@@ -140,3 +140,32 @@ To output literal `->relay:` without sending:
 | Messages not sending | `agent-relay status` to check daemon |
 | Socket not found | `agent-relay up` to start daemon |
 | Truncated message | `agent-relay read <id>` for full content |
+<!-- PRPM_MANIFEST_START -->
+
+<skills_system priority="1">
+<usage>
+When users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.
+
+How to use skills (loaded into main context):
+- Use the <path> from the skill entry below
+- Invoke: Bash("cat <path>")
+- The skill content will load into your current context
+- Example: Bash("cat .openskills/backend-architect/SKILL.md")
+
+Usage notes:
+- Skills share your context window
+- Do not invoke a skill that is already loaded in your context
+</usage>
+
+<available_skills>
+
+<skill activation="lazy">
+<name>frontend-design</name>
+<description>Design and build modern frontend interfaces with best practices and user experience principles. Create beautiful, accessible, and performant web interfaces.</description>
+<path>.openskills/frontend-design/SKILL.md</path>
+</skill>
+
+</available_skills>
+</skills_system>
+
+<!-- PRPM_MANIFEST_END -->
