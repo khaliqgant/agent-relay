@@ -27,6 +27,8 @@ export interface ClientConfig {
   cli?: string;
   /** Optional working directory to surface in registry/dashboard */
   workingDirectory?: string;
+  /** Suppress client-side console logging */
+  quiet?: boolean;
   reconnect: boolean;
   maxReconnectAttempts: number;
   reconnectDelayMs: number;
@@ -37,6 +39,7 @@ const DEFAULT_CLIENT_CONFIG: ClientConfig = {
   socketPath: DEFAULT_SOCKET_PATH,
   agentName: 'agent',
   cli: undefined,
+  quiet: false,
   reconnect: true,
   maxReconnectAttempts: 10,
   reconnectDelayMs: 100,
@@ -326,7 +329,9 @@ export class RelayClient {
     this.reconnectAttempts = 0;
     this.reconnectDelay = this.config.reconnectDelayMs;
     this.setState('READY');
-    console.log(`[client] Connected as ${this.config.agentName} (session: ${this.sessionId})`);
+    if (!this.config.quiet) {
+      console.log(`[client] Connected as ${this.config.agentName} (session: ${this.sessionId})`);
+    }
   }
 
   private handleDeliver(envelope: DeliverEnvelope): void {
@@ -409,7 +414,9 @@ export class RelayClient {
     const delay = Math.min(this.reconnectDelay * jitter, this.config.reconnectMaxDelayMs);
     this.reconnectDelay *= 2;
 
-    console.log(`[client] Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
+    if (!this.config.quiet) {
+      console.log(`[client] Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
+    }
 
     this.reconnectTimer = setTimeout(() => {
       this.connect().catch(() => {

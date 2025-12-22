@@ -335,6 +335,114 @@
       line-height: 1.6;
     }
 
+    /* Compose Section */
+    .compose-section {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+    }
+
+    .compose-header {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+
+    .compose-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .compose-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .compose-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .compose-field.grow {
+      flex: 1;
+    }
+
+    .compose-field label {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    .compose-field select,
+    .compose-field textarea {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.875rem;
+      padding: 8px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .compose-field select:focus,
+    .compose-field textarea:focus {
+      border-color: var(--primary);
+    }
+
+    .compose-field select {
+      min-width: 150px;
+      cursor: pointer;
+    }
+
+    .compose-field textarea {
+      resize: none;
+      min-height: 60px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    }
+
+    .send-btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      white-space: nowrap;
+    }
+
+    .send-btn:hover {
+      background: #2563eb;
+    }
+
+    .send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .send-status {
+      font-size: 0.75rem;
+      padding: 4px 0;
+      min-height: 20px;
+    }
+
+    .send-status.success {
+      color: var(--success);
+    }
+
+    .send-status.error {
+      color: var(--error);
+    }
+
     /* Scrollbar */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -387,6 +495,26 @@
                 <!-- Messages injected here -->
             </div>
         </div>
+        <div class="compose-section">
+            <div class="compose-header">Send Message</div>
+            <div class="compose-form">
+                <div class="compose-row">
+                    <div class="compose-field">
+                        <label for="agent-select">To</label>
+                        <select id="agent-select">
+                            <option value="">Select agent...</option>
+                            <option value="*">* (Broadcast)</option>
+                        </select>
+                    </div>
+                    <div class="compose-field grow">
+                        <label for="message-input">Message</label>
+                        <textarea id="message-input" placeholder="Type your message..."></textarea>
+                    </div>
+                    <button class="send-btn" id="send-btn">Send</button>
+                </div>
+                <div class="send-status" id="send-status"></div>
+            </div>
+        </div>
     </div>
   </div>
 
@@ -394,9 +522,14 @@
     const agentsContainer = document.getElementById('agents');
     const logContainer = document.getElementById('log');
     const statusDiv = document.getElementById('connection-status');
+    const agentSelect = document.getElementById('agent-select');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const sendStatus = document.getElementById('send-status');
 
     // Track last data hash to prevent unnecessary re-renders
     let lastDataHash = '';
+    let currentAgents = [];
 
     function connect() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -449,12 +582,24 @@
             if (agentsContainer.innerHTML !== newAgentsHTML) {
                 agentsContainer.innerHTML = newAgentsHTML;
             }
+
+            // Update agent dropdown if agents changed
+            const agentNames = data.agents.map(a => a.name).sort();
+            if (JSON.stringify(agentNames) !== JSON.stringify(currentAgents)) {
+                currentAgents = agentNames;
+                updateAgentDropdown(agentNames);
+            }
         } else if (!agentsContainer.querySelector('.empty-state')) {
             agentsContainer.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-text">Waiting for agents...</div>
                 </div>
             `;
+            // Clear agent dropdown
+            if (currentAgents.length > 0) {
+                currentAgents = [];
+                updateAgentDropdown([]);
+            }
         }
 
         // Render Messages (Activity Log)
@@ -508,6 +653,81 @@
         if (hours < 24) return `${hours}h ago`;
         return `${Math.floor(hours / 24)}d ago`;
     }
+
+    function updateAgentDropdown(agents) {
+        const currentValue = agentSelect.value;
+        agentSelect.innerHTML = `
+            <option value="">Select agent...</option>
+            <option value="*">* (Broadcast)</option>
+            ${agents.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
+        `;
+        // Restore selection if still valid
+        if (currentValue && (currentValue === '*' || agents.includes(currentValue))) {
+            agentSelect.value = currentValue;
+        }
+    }
+
+    async function sendMessage() {
+        const to = agentSelect.value;
+        const message = messageInput.value.trim();
+
+        if (!to) {
+            showStatus('Please select an agent', 'error');
+            return;
+        }
+        if (!message) {
+            showStatus('Please enter a message', 'error');
+            return;
+        }
+
+        sendBtn.disabled = true;
+        showStatus('Sending...', '');
+
+        try {
+            const response = await fetch('/api/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to, message })
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                showStatus('Message sent!', 'success');
+                messageInput.value = '';
+            } else {
+                showStatus(result.error || 'Failed to send', 'error');
+            }
+        } catch (err) {
+            showStatus('Network error', 'error');
+        } finally {
+            sendBtn.disabled = false;
+        }
+    }
+
+    function showStatus(text, type) {
+        sendStatus.textContent = text;
+        sendStatus.className = 'send-status' + (type ? ' ' + type : '');
+        if (type === 'success') {
+            setTimeout(() => {
+                if (sendStatus.textContent === text) {
+                    sendStatus.textContent = '';
+                    sendStatus.className = 'send-status';
+                }
+            }, 3000);
+        }
+    }
+
+    // Send button click handler
+    sendBtn.addEventListener('click', sendMessage);
+
+    // Allow Ctrl+Enter to send
+    messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
 
     connect();
   </script>

@@ -139,8 +139,8 @@ export class TmuxWrapper {
     // Determine relay prefix: explicit config > auto-detect from CLI type
     this.relayPrefix = config.relayPrefix ?? getDefaultPrefix(this.cliType);
 
-    // Generate unique session name
-    this.sessionName = `relay-${config.name}-${process.pid}`;
+    // Session name (one agent per name - starting a duplicate kills the existing one)
+    this.sessionName = `relay-${config.name}`;
 
     this.client = new RelayClient({
       agentName: config.name,

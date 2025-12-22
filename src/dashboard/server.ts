@@ -6,6 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import type { StorageAdapter, StoredMessage } from '../storage/adapter.js';
+import { RelayClient } from '../wrapper/client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,6 +82,74 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
   // Serve static files from public directory
   app.use(express.static(publicDir));
   app.use(express.json());
+
+  // Relay client for sending messages from dashboard
+  const socketPath = path.join(dataDir, 'relay.sock');
+  let relayClient: RelayClient | undefined;
+
+  const connectRelayClient = async (): Promise<void> => {
+    // Only attempt connection if socket exists (daemon is running)
+    if (!fs.existsSync(socketPath)) {
+      console.log('[dashboard] Relay socket not found, messaging disabled');
+      return;
+    }
+
+    relayClient = new RelayClient({
+      socketPath,
+      agentName: 'Dashboard',
+      cli: 'dashboard',
+      reconnect: true,
+      maxReconnectAttempts: 5,
+    });
+
+    relayClient.onError = (err) => {
+      console.error('[dashboard] Relay client error:', err.message);
+    };
+
+    relayClient.onStateChange = (state) => {
+      console.log(`[dashboard] Relay client state: ${state}`);
+    };
+
+    try {
+      await relayClient.connect();
+      console.log('[dashboard] Connected to relay daemon');
+    } catch (err) {
+      console.error('[dashboard] Failed to connect to relay daemon:', err);
+      relayClient = undefined;
+    }
+  };
+
+  // Start relay client connection (non-blocking)
+  connectRelayClient().catch(() => {});
+
+  // API endpoint to send messages
+  app.post('/api/send', async (req, res) => {
+    const { to, message } = req.body;
+
+    if (!to || !message) {
+      return res.status(400).json({ error: 'Missing "to" or "message" field' });
+    }
+
+    if (!relayClient || relayClient.state !== 'READY') {
+      // Try to reconnect
+      await connectRelayClient();
+      if (!relayClient || relayClient.state !== 'READY') {
+        return res.status(503).json({ error: 'Relay daemon not connected' });
+      }
+    }
+
+    try {
+      const sent = relayClient.sendMessage(to, message);
+      if (sent) {
+        res.json({ success: true });
+      } else {
+        res.status(500).json({ error: 'Failed to send message' });
+      }
+    } catch (err) {
+      console.error('[dashboard] Failed to send message:', err);
+      res.status(500).json({ error: 'Failed to send message' });
+    }
+  });
 
   const getTeamData = () => {
     // Try team.json first (file-based team mode)

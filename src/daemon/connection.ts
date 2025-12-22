@@ -153,6 +153,9 @@ export class Connection {
     }
 
     // Send WELCOME
+    // Note: resume_token is omitted because session resume is not yet implemented.
+    // Sending a token would cause clients to attempt resume on reconnect,
+    // triggering a RESUME_TOO_OLD -> new token -> reconnect loop.
     const welcome: Envelope<WelcomePayload> = {
       v: PROTOCOL_VERSION,
       type: 'WELCOME',
@@ -160,7 +163,6 @@ export class Connection {
       ts: Date.now(),
       payload: {
         session_id: this._sessionId,
-        resume_token: this._resumeToken,
         server: {
           max_frame_bytes: this.config.maxFrameBytes,
           heartbeat_ms: this.config.heartbeatMs,

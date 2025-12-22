@@ -58,7 +58,8 @@ export interface HelloPayload {
 
 export interface WelcomePayload {
   session_id: string;
-  resume_token: string;
+  /** Optional - only provided when session resume is implemented */
+  resume_token?: string;
   server: {
     max_frame_bytes: number;
     heartbeat_ms: number;
