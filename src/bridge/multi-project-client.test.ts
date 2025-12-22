@@ -63,8 +63,8 @@ describe('MultiProjectClient (unit)', () => {
 
     createConnectionMock.mockImplementation((_path: string, cb?: () => void) => {
       const socket = new MockSocket();
-      // Simulate immediate connect callback
-      cb?.();
+      // Fire connect callback asynchronously to mirror net.createConnection timing
+      if (cb) setImmediate(cb);
       return socket;
     });
   });
@@ -82,17 +82,18 @@ describe('MultiProjectClient (unit)', () => {
     const client = new MultiProjectClient([projectA]);
 
     const connectPromise = client.connect();
+    const rejection = expect(connectPromise).rejects.toThrow('Connection timeout');
 
     // No WELCOME frame emitted -> timeout triggers
     await vi.runAllTimersAsync();
-    await expect(connectPromise).rejects.toThrow('Connection timeout');
+    await rejection;
   });
 
   it('invokes state change callbacks on welcome and close', async () => {
     vi.useFakeTimers();
     const socket = new MockSocket();
     createConnectionMock.mockImplementation((_path: string, cb?: () => void) => {
-      cb?.();
+      if (cb) setImmediate(cb);
       return socket;
     });
 
@@ -117,6 +118,8 @@ describe('MultiProjectClient (unit)', () => {
     await vi.runOnlyPendingTimersAsync();
     await connectPromise;
 
+    expect(client.getConnectedProjects()).toContain('project-a');
+
     // Simulate close
     socket.emit('close');
 
@@ -124,7 +127,7 @@ describe('MultiProjectClient (unit)', () => {
       { id: 'project-a', connected: true },
       { id: 'project-a', connected: false },
     ]);
-    expect(client.getConnectedProjects()).toContain('project-a');
+    expect(client.getConnectedProjects()).not.toContain('project-a');
   });
 
   it('sendToProject returns false when project missing or not ready', () => {
