@@ -5,7 +5,7 @@
  * 1. Start agent in detached tmux session
  * 2. Attach user to tmux (they see real terminal)
  * 3. Background: poll capture-pane silently (no stdout writes)
- * 4. Background: parse @relay commands, send to daemon
+ * 4. Background: parse >>relay commands, send to daemon
  * 5. Background: inject messages via send-keys
  *
  * The key insight: user sees the REAL tmux session, not a proxy.
@@ -65,23 +65,17 @@ export interface TmuxWrapperConfig {
   cliType?: 'claude' | 'codex' | 'gemini' | 'other';
   /** Enable tmux mouse mode for scroll passthrough (default: true) */
   mouseMode?: boolean;
-  /** Relay prefix pattern (default: '@relay:' or '>>' for Gemini) */
+  /** Relay prefix pattern (default: '>>relay:') */
   relayPrefix?: string;
 }
 
 /**
  * Get the default relay prefix for a given CLI type.
- * Gemini uses '>>' to avoid conflict with @ file references.
+ * All agents now use '>>relay:' as the unified prefix.
  */
 export function getDefaultPrefix(cliType: 'claude' | 'codex' | 'gemini' | 'other'): string {
-  switch (cliType) {
-    case 'gemini':
-      return '>>'; // Avoid @ conflict with Gemini file references
-    case 'claude':
-    case 'codex':
-    default:
-      return '@relay:'; // Original, works fine
-  }
+  // Unified prefix for all agent types
+  return '>>relay:';
 }
 
 export class TmuxWrapper {
@@ -427,7 +421,7 @@ export class TmuxWrapper {
   }
 
   /**
-   * Start silent polling for @relay commands
+   * Start silent polling for >>relay commands
    * Does NOT write to stdout - just parses and sends to daemon
    */
   private startSilentPolling(): void {
@@ -439,7 +433,7 @@ export class TmuxWrapper {
   }
 
   /**
-   * Poll for @relay commands in output (silent)
+   * Poll for >>relay commands in output (silent)
    */
   private async pollForRelayCommands(): Promise<void> {
     if (!this.running) return;
@@ -447,11 +441,11 @@ export class TmuxWrapper {
     try {
       // Capture scrollback
       const { stdout } = await execAsync(
-        // -J joins wrapped lines to avoid truncating @relay commands mid-line
+        // -J joins wrapped lines to avoid truncating >>relay commands mid-line
         `tmux capture-pane -t ${this.sessionName} -p -J -S - 2>/dev/null`
       );
 
-      // Always parse the FULL capture for @relay commands
+      // Always parse the FULL capture for >>relay commands
       // This handles terminal UIs that rewrite content in place
       const cleanContent = this.stripAnsi(stdout);
       // Join continuation lines that TUIs split across multiple lines
@@ -491,10 +485,10 @@ export class TmuxWrapper {
   }
 
   /**
-   * Join continuation lines after @relay commands.
+   * Join continuation lines after >>relay commands.
    * Claude Code and other TUIs insert real newlines in output, causing
-   * @relay messages to span multiple lines. This joins indented
-   * continuation lines back to the @relay line.
+   * >>relay messages to span multiple lines. This joins indented
+   * continuation lines back to the >>relay line.
    */
   private joinContinuationLines(content: string): string {
     const lines = content.split('\n');
@@ -514,7 +508,7 @@ export class TmuxWrapper {
     while (i < lines.length) {
       const line = lines[i];
 
-      // Check if this is a @relay line
+      // Check if this is a >>relay line
       if (relayPattern.test(line)) {
         let joined = line;
         let j = i + 1;
@@ -665,17 +659,12 @@ export class TmuxWrapper {
     this.logStderr(`Injecting message from ${msg.from} (cli: ${this.cliType})`);
 
     try {
-      let sanitizedBody = msg.body.replace(/[\r\n]+/g, ' ').trim();
+      const sanitizedBody = msg.body.replace(/[\r\n]+/g, ' ').trim();
       // Short message ID for display (first 8 chars)
       const shortId = msg.messageId.substring(0, 8);
 
-      // Truncate very long messages to avoid display issues
-      const maxLen = 2000;
-      let wasTruncated = false;
-      if (sanitizedBody.length > maxLen) {
-        sanitizedBody = sanitizedBody.substring(0, maxLen) + '...';
-        wasTruncated = true;
-      }
+      // Remove message truncation to allow full messages to pass through
+      const wasTruncated = false;
 
       // Always include message ID; add lookup hint if truncated
       const idTag = `[${shortId}]`;
@@ -765,30 +754,56 @@ export class TmuxWrapper {
   }
 
   /**
-   * Check if the input line is clear (no user-typed text after the prompt).
-   * Returns true if the last visible line appears to be just a prompt.
+   * Get the prompt pattern for the current CLI type.
    */
-  private async isInputClear(): Promise<boolean> {
+  private getPromptPattern(): RegExp {
+    const promptPatterns: Record<string, RegExp> = {
+      claude: /^[>›»]\s*$/,           // Claude: "> " or similar
+      gemini: /^[>›»]\s*$/,           // Gemini: "> "
+      codex: /^[>›»]\s*$/,            // Codex: "> "
+      other: /^[>$%#➜›»]\s*$/,        // Shell or other: "$ ", "> ", etc.
+    };
+
+    return promptPatterns[this.cliType] || promptPatterns.other;
+  }
+
+  /**
+   * Capture the last non-empty line from the tmux pane.
+   */
+  private async getLastLine(): Promise<string> {
     try {
       const { stdout } = await execAsync(
         `tmux capture-pane -t ${this.sessionName} -p -J 2>/dev/null`
       );
       const lines = stdout.split('\n').filter(l => l.length > 0);
-      const lastLine = lines[lines.length - 1] || '';
+      return lines[lines.length - 1] || '';
+    } catch {
+      return '';
+    }
+  }
 
-      // CLI-specific prompt patterns (prompt char + optional whitespace, nothing else)
-      const promptPatterns: Record<string, RegExp> = {
-        claude: /^[>›»]\s*$/,           // Claude: "> " or similar
-        gemini: /^[>›»]\s*$/,           // Gemini: "> "
-        codex: /^[>›»]\s*$/,            // Codex: "> "
-        other: /^[>$%#➜›»]\s*$/,        // Shell or other: "$ ", "> ", etc.
-      };
+  /**
+   * Detect if the provided line contains visible user input (beyond the prompt).
+   */
+  private hasVisibleInput(line: string): boolean {
+    const cleanLine = this.stripAnsi(line).trimEnd();
+    if (cleanLine === '') return false;
 
-      const pattern = promptPatterns[this.cliType] || promptPatterns.other;
-      const isClear = pattern.test(lastLine);
+    return !this.getPromptPattern().test(cleanLine);
+  }
+
+  /**
+   * Check if the input line is clear (no user-typed text after the prompt).
+   * Returns true if the last visible line appears to be just a prompt.
+   */
+  private async isInputClear(lastLine?: string): Promise<boolean> {
+    try {
+      const lineToCheck = lastLine ?? await this.getLastLine();
+      const cleanLine = this.stripAnsi(lineToCheck).trimEnd();
+      const isClear = this.getPromptPattern().test(cleanLine);
 
       if (this.config.debug) {
-        const truncatedLine = lastLine.substring(0, Math.min(DEBUG_LOG_TRUNCATE_LENGTH, lastLine.length));
+        const truncatedLine = cleanLine.substring(0, Math.min(DEBUG_LOG_TRUNCATE_LENGTH, cleanLine.length));
         this.logStderr(`isInputClear: lastLine="${truncatedLine}", clear=${isClear}`);
       }
 
@@ -828,14 +843,18 @@ export class TmuxWrapper {
     let stableCursorCount = 0;
 
     while (Date.now() - startTime < maxWaitMs) {
+      const lastLine = await this.getLastLine();
+
       // Check if input line is just a prompt
-      if (await this.isInputClear()) {
+      if (await this.isInputClear(lastLine)) {
         return true;
       }
 
+      const hasInput = this.hasVisibleInput(lastLine);
+
       // Also check cursor stability - if cursor is moving, agent is typing
       const cursorX = await this.getCursorX();
-      if (cursorX === lastCursorX) {
+      if (!hasInput && cursorX === lastCursorX) {
         stableCursorCount++;
         // If cursor has been stable for enough polls and at typical prompt position,
         // the agent might be done but we just can't match the prompt pattern
