@@ -1,5 +1,7 @@
 import type { PayloadKind } from '../protocol/types.js';
 
+export type MessageStatus = 'unread' | 'read' | 'acked';
+
 export interface StoredMessage {
   id: string;
   ts: number;
@@ -14,6 +16,10 @@ export interface StoredMessage {
   deliverySeq?: number;
   deliverySessionId?: string;
   sessionId?: string;
+  /** Per-recipient message status */
+  status: MessageStatus;
+  /** Whether the message is marked as urgent */
+  is_urgent: boolean;
 }
 
 export interface MessageQuery {
@@ -25,6 +31,42 @@ export interface MessageQuery {
   /** Filter by thread ID */
   thread?: string;
   order?: 'asc' | 'desc';
+  /** Only include unread messages */
+  unreadOnly?: boolean;
+  /** Only include urgent messages */
+  urgentOnly?: boolean;
+}
+
+export interface StoredSession {
+  id: string;
+  agentName: string;
+  cli?: string;
+  projectId?: string;
+  projectRoot?: string;
+  startedAt: number;
+  endedAt?: number;
+  messageCount: number;
+  summary?: string;
+  /** How the session was closed: 'agent' (explicit), 'disconnect', 'error', or undefined (still active) */
+  closedBy?: 'agent' | 'disconnect' | 'error';
+}
+
+export interface SessionQuery {
+  agentName?: string;
+  projectId?: string;
+  since?: number;
+  limit?: number;
+}
+
+export interface AgentSummary {
+  agentName: string;
+  projectId?: string;
+  lastUpdated: number;
+  currentTask?: string;
+  completedTasks?: string[];
+  decisions?: string[];
+  context?: string;
+  files?: string[];
 }
 
 export interface StorageAdapter {
@@ -33,6 +75,18 @@ export interface StorageAdapter {
   getMessages(query?: MessageQuery): Promise<StoredMessage[]>;
   getMessageById?(id: string): Promise<StoredMessage | null>;
   close?(): Promise<void>;
+
+  // Session management (optional - for adapters that support it)
+  startSession?(session: Omit<StoredSession, 'messageCount'>): Promise<void>;
+  endSession?(sessionId: string, options?: { summary?: string; closedBy?: 'agent' | 'disconnect' | 'error' }): Promise<void>;
+  getSessions?(query?: SessionQuery): Promise<StoredSession[]>;
+  getRecentSessions?(limit?: number): Promise<StoredSession[]>;
+  incrementSessionMessageCount?(sessionId: string): Promise<void>;
+
+  // Agent summaries (optional - for adapters that support it)
+  saveAgentSummary?(summary: Omit<AgentSummary, 'lastUpdated'>): Promise<void>;
+  getAgentSummary?(agentName: string): Promise<AgentSummary | null>;
+  getAllAgentSummaries?(): Promise<AgentSummary[]>;
 }
 
 /**

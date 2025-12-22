@@ -49,6 +49,14 @@ export interface HelloPayload {
   };
   /** Optional hint about which CLI the agent is using (claude, codex, gemini, etc.) */
   cli?: string;
+  /** Optional program identifier (e.g., 'claude', 'gpt-4o') */
+  program?: string;
+  /** Optional model identifier (e.g., 'claude-3-opus-2024') */
+  model?: string;
+  /** Optional task/role description for dashboard/registry */
+  task?: string;
+  /** Optional working directory hint for registry/dashboard */
+  workingDirectory?: string;
   session?: {
     resume_token?: string;
   };
@@ -56,7 +64,8 @@ export interface HelloPayload {
 
 export interface WelcomePayload {
   session_id: string;
-  resume_token: string;
+  /** Optional - only provided when session resume is implemented */
+  resume_token?: string;
   server: {
     max_frame_bytes: number;
     heartbeat_ms: number;
@@ -75,6 +84,8 @@ export interface SendPayload {
 export interface SendMeta {
   requires_ack?: boolean;
   ttl_ms?: number;
+  importance?: number; // 0-100, 100 is highest
+  replyTo?: string;    // Correlation ID for replies
 }
 
 export interface DeliveryInfo {
@@ -138,7 +149,7 @@ export interface SyncPayload {
 export type HelloEnvelope = Envelope<HelloPayload>;
 export type WelcomeEnvelope = Envelope<WelcomePayload>;
 export type SendEnvelope = Envelope<SendPayload> & { payload_meta?: SendMeta };
-export type DeliverEnvelope = Envelope<SendPayload> & { delivery: DeliveryInfo };
+export type DeliverEnvelope = Envelope<SendPayload> & { delivery: DeliveryInfo; payload_meta?: SendMeta };
 export type AckEnvelope = Envelope<AckPayload>;
 export type NackEnvelope = Envelope<NackPayload>;
 export type PingEnvelope = Envelope<PingPayload>;

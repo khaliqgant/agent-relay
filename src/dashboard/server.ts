@@ -6,6 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import type { StorageAdapter, StoredMessage } from '../storage/adapter.js';
+import { RelayClient } from '../wrapper/client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,7 @@ interface AgentStatus {
   messageCount: number;
   status?: string;
   lastActive?: string;
+  lastSeen?: string;
 }
 
 interface Message {
@@ -25,9 +27,37 @@ interface Message {
   content: string;
   timestamp: string;
   id: string; // unique-ish id
+  thread?: string;
 }
 
-export async function startDashboard(port: number, dataDir: string, dbPath?: string): Promise<number> {
+interface SessionInfo {
+  id: string;
+  agentName: string;
+  cli?: string;
+  startedAt: string;
+  endedAt?: string;
+  duration?: string;
+  messageCount: number;
+  summary?: string;
+  /**
+   * true if session is still active (endedAt is not set).
+   * Note: This is determined solely by endedAt, regardless of how the session
+   * was closed (agent explicit close, disconnect, or error via closedBy field).
+   */
+  isActive: boolean;
+  /** How the session was closed: 'agent' (explicit), 'disconnect', 'error', or undefined */
+  closedBy?: 'agent' | 'disconnect' | 'error';
+}
+
+interface AgentSummary {
+  agentName: string;
+  lastUpdated: string;
+  currentTask?: string;
+  completedTasks?: string[];
+  context?: string;
+}
+
+export async function startDashboard(port: number, dataDir: string, teamDir: string, dbPath?: string): Promise<number> {
   console.log('Starting dashboard...');
   console.log('__dirname:', __dirname);
   const publicDir = path.join(__dirname, 'public');
@@ -55,9 +85,77 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
   app.use(express.static(publicDir));
   app.use(express.json());
 
+  // Relay client for sending messages from dashboard
+  const socketPath = path.join(dataDir, 'relay.sock');
+  let relayClient: RelayClient | undefined;
+
+  const connectRelayClient = async (): Promise<void> => {
+    // Only attempt connection if socket exists (daemon is running)
+    if (!fs.existsSync(socketPath)) {
+      console.log('[dashboard] Relay socket not found, messaging disabled');
+      return;
+    }
+
+    relayClient = new RelayClient({
+      socketPath,
+      agentName: 'Dashboard',
+      cli: 'dashboard',
+      reconnect: true,
+      maxReconnectAttempts: 5,
+    });
+
+    relayClient.onError = (err) => {
+      console.error('[dashboard] Relay client error:', err.message);
+    };
+
+    relayClient.onStateChange = (state) => {
+      console.log(`[dashboard] Relay client state: ${state}`);
+    };
+
+    try {
+      await relayClient.connect();
+      console.log('[dashboard] Connected to relay daemon');
+    } catch (err) {
+      console.error('[dashboard] Failed to connect to relay daemon:', err);
+      relayClient = undefined;
+    }
+  };
+
+  // Start relay client connection (non-blocking)
+  connectRelayClient().catch(() => {});
+
+  // API endpoint to send messages
+  app.post('/api/send', async (req, res) => {
+    const { to, message } = req.body;
+
+    if (!to || !message) {
+      return res.status(400).json({ error: 'Missing "to" or "message" field' });
+    }
+
+    if (!relayClient || relayClient.state !== 'READY') {
+      // Try to reconnect
+      await connectRelayClient();
+      if (!relayClient || relayClient.state !== 'READY') {
+        return res.status(503).json({ error: 'Relay daemon not connected' });
+      }
+    }
+
+    try {
+      const sent = relayClient.sendMessage(to, message);
+      if (sent) {
+        res.json({ success: true });
+      } else {
+        res.status(500).json({ error: 'Failed to send message' });
+      }
+    } catch (err) {
+      console.error('[dashboard] Failed to send message:', err);
+      res.status(500).json({ error: 'Failed to send message' });
+    }
+  });
+
   const getTeamData = () => {
     // Try team.json first (file-based team mode)
-    const teamPath = path.join(dataDir, 'team.json');
+    const teamPath = path.join(teamDir, 'team.json');
     if (fs.existsSync(teamPath)) {
       try {
         return JSON.parse(fs.readFileSync(teamPath, 'utf-8'));
@@ -67,16 +165,18 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
     }
 
     // Fall back to agents.json (daemon mode - live connected agents)
-    const agentsPath = path.join(dataDir, 'agents.json');
+    const agentsPath = path.join(teamDir, 'agents.json');
     if (fs.existsSync(agentsPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
         // Convert agents.json format to team.json format
         return {
-          agents: data.agents.map((a: { name: string; connectedAt?: string; cli?: string }) => ({
+          agents: data.agents.map((a: { name: string; connectedAt?: string; cli?: string; lastSeen?: string }) => ({
             name: a.name,
             role: 'Agent',
             cli: a.cli ?? 'Unknown',
+            lastSeen: a.lastSeen ?? a.connectedAt,
+            lastActive: a.lastSeen ?? a.connectedAt,
           })),
         };
       } catch (e) {
@@ -139,6 +239,7 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
       content: row.body,
       timestamp: new Date(row.ts).toISOString(),
       id: row.id,
+      thread: row.thread,
     }));
 
   const getMessages = async (agents: any[]): Promise<Message[]> => {
@@ -157,9 +258,53 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
     return allMessages;
   };
 
+  const formatDuration = (startMs: number, endMs?: number): string => {
+    const end = endMs ?? Date.now();
+    const durationMs = end - startMs;
+    const minutes = Math.floor(durationMs / 60000);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m`;
+    }
+    return `${minutes}m`;
+  };
+
+  const getRecentSessions = async (): Promise<SessionInfo[]> => {
+    if (storage && storage instanceof SqliteStorageAdapter) {
+      const sessions = await storage.getRecentSessions(20);
+      return sessions.map(s => ({
+        id: s.id,
+        agentName: s.agentName,
+        cli: s.cli,
+        startedAt: new Date(s.startedAt).toISOString(),
+        endedAt: s.endedAt ? new Date(s.endedAt).toISOString() : undefined,
+        duration: formatDuration(s.startedAt, s.endedAt),
+        messageCount: s.messageCount,
+        summary: s.summary,
+        isActive: !s.endedAt, // Active if no end time
+        closedBy: s.closedBy,
+      }));
+    }
+    return [];
+  };
+
+  const getAgentSummaries = async (): Promise<AgentSummary[]> => {
+    if (storage && storage instanceof SqliteStorageAdapter) {
+      const summaries = await storage.getAllAgentSummaries();
+      return summaries.map(s => ({
+        agentName: s.agentName,
+        lastUpdated: new Date(s.lastUpdated).toISOString(),
+        currentTask: s.currentTask,
+        completedTasks: s.completedTasks,
+        context: s.context,
+      }));
+    }
+    return [];
+  };
+
   const getAllData = async () => {
     const team = getTeamData();
-    if (!team) return { agents: [], messages: [], activity: [] };
+    if (!team) return { agents: [], messages: [], activity: [], sessions: [], summaries: [] };
 
     const agentsMap = new Map<string, AgentStatus>();
     const allMessages: Message[] = await getMessages(team.agents);
@@ -171,7 +316,9 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
         role: a.role,
         cli: a.cli ?? 'Unknown',
         messageCount: 0,
-        status: 'Idle'
+        status: 'Idle',
+        lastSeen: a.lastSeen,
+        lastActive: a.lastActive,
       });
     });
 
@@ -196,16 +343,25 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
       const agent = agentsMap.get(m.from);
       if (agent) {
         agent.lastActive = m.timestamp;
+        agent.lastSeen = m.timestamp;
         if (m.content.startsWith('STATUS:')) {
           agent.status = m.content.substring(7).trim(); // remove "STATUS:"
         }
       }
     });
 
+    // Fetch sessions and summaries in parallel
+    const [sessions, summaries] = await Promise.all([
+      getRecentSessions(),
+      getAgentSummaries(),
+    ]);
+
     return {
       agents: Array.from(agentsMap.values()),
       messages: allMessages,
-      activity: allMessages // For now, activity log is just the message log
+      activity: allMessages, // For now, activity log is just the message log
+      sessions,
+      summaries,
     };
   };
 
