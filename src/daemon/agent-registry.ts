@@ -11,6 +11,9 @@ export interface AgentRecord {
   id: string;
   name: string;
   cli?: string;
+  program?: string;
+  model?: string;
+  task?: string;
   workingDirectory?: string;
   firstSeen: string;
   lastSeen: string;
@@ -21,6 +24,9 @@ export interface AgentRecord {
 type AgentInput = {
   name: string;
   cli?: string;
+  program?: string;
+  model?: string;
+  task?: string;
   workingDirectory?: string;
 };
 
@@ -35,6 +41,13 @@ export class AgentRegistry {
   }
 
   /**
+   * Register or update an agent (public alias for registerOrUpdate to match docs).
+   */
+  register(agent: AgentInput): AgentRecord {
+    return this.registerOrUpdate(agent);
+  }
+
+  /**
    * Register or update an agent, refreshing lastSeen and metadata.
    */
   registerOrUpdate(agent: AgentInput): AgentRecord {
@@ -45,6 +58,9 @@ export class AgentRegistry {
       const updated: AgentRecord = {
         ...existing,
         cli: agent.cli ?? existing.cli,
+        program: agent.program ?? existing.program,
+        model: agent.model ?? existing.model,
+        task: agent.task ?? existing.task,
         workingDirectory: agent.workingDirectory ?? existing.workingDirectory,
         lastSeen: now,
       };
@@ -57,6 +73,9 @@ export class AgentRegistry {
       id: `agent-${uuid()}`,
       name: agent.name,
       cli: agent.cli,
+      program: agent.program,
+      model: agent.model,
+      task: agent.task,
       workingDirectory: agent.workingDirectory,
       firstSeen: now,
       lastSeen: now,
@@ -132,7 +151,7 @@ export class AgentRegistry {
     }
   }
 
-  private load(): void {
+  load(): void {
     if (!fs.existsSync(this.registryPath)) {
       return;
     }
@@ -151,6 +170,9 @@ export class AgentRegistry {
           id: raw.id ?? `agent-${uuid()}`,
           name: raw.name,
           cli: raw.cli,
+          program: raw.program,
+          model: raw.model,
+          task: raw.task,
           workingDirectory: raw.workingDirectory,
           firstSeen: raw.firstSeen ?? new Date().toISOString(),
           lastSeen: raw.lastSeen ?? new Date().toISOString(),
@@ -164,7 +186,7 @@ export class AgentRegistry {
     }
   }
 
-  private save(): void {
+  save(): void {
     try {
       fs.writeFileSync(
         this.registryPath,

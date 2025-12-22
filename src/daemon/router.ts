@@ -7,6 +7,8 @@ import { v4 as uuid } from 'uuid';
 import {
   type Envelope,
   type SendPayload,
+  type SendMeta,
+  type SendEnvelope,
   type DeliverEnvelope,
   type AckPayload,
   PROTOCOL_VERSION,
@@ -18,6 +20,9 @@ export interface RoutableConnection {
   id: string;
   agentName?: string;
   cli?: string;
+  program?: string;
+  model?: string;
+  task?: string;
   workingDirectory?: string;
   sessionId: string;
   close(): void;
@@ -80,6 +85,9 @@ export class Router {
       this.registry?.registerOrUpdate({
         name: connection.agentName,
         cli: connection.cli,
+        program: connection.program,
+        model: connection.model,
+        task: connection.task,
         workingDirectory: connection.workingDirectory,
       });
     }
@@ -133,7 +141,7 @@ export class Router {
   /**
    * Route a SEND message to its destination(s).
    */
-  route(from: RoutableConnection, envelope: Envelope<SendPayload>): void {
+  route(from: RoutableConnection, envelope: SendEnvelope): void {
     const senderName = from.agentName;
     if (!senderName) {
       console.log(`[router] Dropping message - sender has no name`);
@@ -162,7 +170,7 @@ export class Router {
   private sendDirect(
     from: string,
     to: string,
-    envelope: Envelope<SendPayload>
+    envelope: SendEnvelope
   ): boolean {
     const target = this.agents.get(to);
     if (!target) {
@@ -186,7 +194,7 @@ export class Router {
    */
   private broadcast(
     from: string,
-    envelope: Envelope<SendPayload>,
+    envelope: SendEnvelope,
     topic?: string
   ): void {
     const recipients = topic
@@ -215,7 +223,7 @@ export class Router {
   private createDeliverEnvelope(
     from: string,
     to: string,
-    original: Envelope<SendPayload>,
+    original: SendEnvelope,
     target: RoutableConnection
   ): DeliverEnvelope {
     return {
@@ -227,6 +235,7 @@ export class Router {
       to,
       topic: original.topic,
       payload: original.payload,
+      payload_meta: original.payload_meta,
       delivery: {
         seq: target.getNextSeq(original.topic ?? 'default', from),
         session_id: target.sessionId,

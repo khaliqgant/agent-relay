@@ -30,7 +30,7 @@ describe('SqliteStorageAdapter', () => {
   beforeEach(async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-sqlite-'));
     dbPath = path.join(tmpDir, 'messages.sqlite');
-    adapter = new SqliteStorageAdapter({ dbPath });
+    adapter = new SqliteStorageAdapter({ dbPath, cleanupIntervalMs: 0 }); // Disable auto cleanup for tests
     await adapter.init();
   });
 
@@ -299,6 +299,79 @@ describe('SqliteStorageAdapter', () => {
     it('returns null for non-existent message', async () => {
       const msg = await adapter.getMessageById('does-not-exist');
       expect(msg).toBeNull();
+    });
+  });
+
+  describe('message cleanup', () => {
+    it('cleanupExpiredMessages removes old messages', async () => {
+      const now = Date.now();
+      const oldTs = now - 8 * 24 * 60 * 60 * 1000; // 8 days ago
+      const newTs = now - 1 * 24 * 60 * 60 * 1000; // 1 day ago
+
+      // Save old and new messages
+      await adapter.saveMessage(makeMessage({ id: 'old-msg', ts: oldTs }));
+      await adapter.saveMessage(makeMessage({ id: 'new-msg', ts: newTs }));
+
+      // Verify both exist
+      let messages = await adapter.getMessages({});
+      expect(messages).toHaveLength(2);
+
+      // Run cleanup (default 7 day retention)
+      const deleted = await adapter.cleanupExpiredMessages();
+      expect(deleted).toBe(1);
+
+      // Verify only new message remains
+      messages = await adapter.getMessages({});
+      expect(messages).toHaveLength(1);
+      expect(messages[0].id).toBe('new-msg');
+    });
+
+    it('cleanupExpiredMessages returns 0 when no expired messages', async () => {
+      await adapter.saveMessage(makeMessage({ id: 'recent-msg', ts: Date.now() }));
+
+      const deleted = await adapter.cleanupExpiredMessages();
+      expect(deleted).toBe(0);
+
+      const messages = await adapter.getMessages({});
+      expect(messages).toHaveLength(1);
+    });
+
+    it('respects custom retention period', async () => {
+      // Close current adapter and create one with shorter retention
+      await adapter.close();
+
+      const shortRetentionAdapter = new SqliteStorageAdapter({
+        dbPath,
+        messageRetentionMs: 1000, // 1 second
+        cleanupIntervalMs: 0, // Disable auto cleanup
+      });
+      await shortRetentionAdapter.init();
+
+      const oldTs = Date.now() - 2000; // 2 seconds ago
+      await shortRetentionAdapter.saveMessage(makeMessage({ id: 'msg', ts: oldTs }));
+
+      const deleted = await shortRetentionAdapter.cleanupExpiredMessages();
+      expect(deleted).toBe(1);
+
+      await shortRetentionAdapter.close();
+    });
+  });
+
+  describe('getStats', () => {
+    it('returns correct counts', async () => {
+      await adapter.saveMessage(makeMessage({ id: 'msg-1' }));
+      await adapter.saveMessage(makeMessage({ id: 'msg-2' }));
+
+      const stats = await adapter.getStats();
+      expect(stats.messageCount).toBe(2);
+      expect(stats.sessionCount).toBe(0);
+      expect(stats.oldestMessageTs).toBeDefined();
+    });
+
+    it('returns undefined oldestMessageTs when no messages', async () => {
+      const stats = await adapter.getStats();
+      expect(stats.messageCount).toBe(0);
+      expect(stats.oldestMessageTs).toBeUndefined();
     });
   });
 });

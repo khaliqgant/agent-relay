@@ -13,7 +13,16 @@ import {
 
 export interface SqliteAdapterOptions {
   dbPath: string;
+  /** Message retention period in milliseconds (default: 7 days) */
+  messageRetentionMs?: number;
+  /** Auto-cleanup interval in milliseconds (default: 1 hour, 0 to disable) */
+  cleanupIntervalMs?: number;
 }
+
+/** Default retention: 7 days */
+const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** Default cleanup interval: 1 hour */
+const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 // Re-export types for backwards compatibility
 export type { StoredSession, SessionQuery } from './adapter.js';
@@ -39,9 +48,14 @@ export class SqliteStorageAdapter implements StorageAdapter {
   private insertStmt?: SqliteStatement;
   private insertSessionStmt?: SqliteStatement;
   private driver?: SqliteDriverName;
+  private retentionMs: number;
+  private cleanupIntervalMs: number;
+  private cleanupTimer?: ReturnType<typeof setInterval>;
 
   constructor(options: SqliteAdapterOptions) {
     this.dbPath = options.dbPath;
+    this.retentionMs = options.messageRetentionMs ?? DEFAULT_RETENTION_MS;
+    this.cleanupIntervalMs = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
   }
 
   private resolvePreferredDriver(): SqliteDriverName | undefined {
@@ -192,6 +206,69 @@ export class SqliteStorageAdapter implements StorageAdapter {
       (id, ts, sender, recipient, topic, kind, body, data, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+
+    // Start automatic cleanup if enabled
+    if (this.cleanupIntervalMs > 0) {
+      this.startCleanupTimer();
+    }
+  }
+
+  /**
+   * Start the automatic cleanup timer
+   */
+  private startCleanupTimer(): void {
+    // Run cleanup once at startup (async, don't block)
+    this.cleanupExpiredMessages().catch(() => {});
+
+    // Schedule periodic cleanup
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupExpiredMessages().catch(() => {});
+    }, this.cleanupIntervalMs);
+
+    // Prevent timer from keeping process alive
+    if (this.cleanupTimer.unref) {
+      this.cleanupTimer.unref();
+    }
+  }
+
+  /**
+   * Clean up messages older than the retention period
+   * @returns Number of messages deleted
+   */
+  async cleanupExpiredMessages(): Promise<number> {
+    if (!this.db) {
+      return 0;
+    }
+
+    const cutoffTs = Date.now() - this.retentionMs;
+    const stmt = this.db.prepare('DELETE FROM messages WHERE ts < ?');
+    const result = stmt.run(cutoffTs) as { changes?: number };
+    const deleted = result.changes ?? 0;
+
+    if (deleted > 0) {
+      console.log(`[storage] Cleaned up ${deleted} expired messages (older than ${Math.round(this.retentionMs / 86400000)}d)`);
+    }
+
+    return deleted;
+  }
+
+  /**
+   * Get storage statistics
+   */
+  async getStats(): Promise<{ messageCount: number; sessionCount: number; oldestMessageTs?: number }> {
+    if (!this.db) {
+      throw new Error('SqliteStorageAdapter not initialized');
+    }
+
+    const msgCount = this.db.prepare('SELECT COUNT(*) as count FROM messages').get() as { count: number };
+    const sessionCount = this.db.prepare('SELECT COUNT(*) as count FROM sessions').get() as { count: number };
+    const oldest = this.db.prepare('SELECT MIN(ts) as ts FROM messages').get() as { ts: number | null };
+
+    return {
+      messageCount: msgCount.count,
+      sessionCount: sessionCount.count,
+      oldestMessageTs: oldest.ts ?? undefined,
+    };
   }
 
   async saveMessage(message: StoredMessage): Promise<void> {
@@ -329,6 +406,12 @@ export class SqliteStorageAdapter implements StorageAdapter {
   }
 
   async close(): Promise<void> {
+    // Stop cleanup timer
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = undefined;
+    }
+
     if (this.db) {
       this.db.close();
       this.db = undefined;

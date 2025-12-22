@@ -1,0 +1,27 @@
+{
+  "version": "1.0.0",
+  "lockfileVersion": 1,
+  "packages": {
+    "@anthropic/frontend-design#agents.md": {
+      "version": "1.0.0",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40anthropic%2Ffrontend-design/1.0.0.tar.gz",
+      "integrity": "sha256-404d3d731beb8feaf0d7fff7fa967538686246cd930da612db753fa76e5fb057",
+      "format": "agents.md",
+      "subtype": "skill",
+      "sourceFormat": "claude",
+      "sourceSubtype": "skill",
+      "installedPath": ".openskills/frontend-design/SKILL.md",
+      "progressiveDisclosure": {
+        "mode": "progressive",
+        "resourceDir": ".openskills/frontend-design",
+        "manifestPath": "AGENTS.md",
+        "resourceName": "frontend-design",
+        "resourceType": "skill",
+        "skillsDir": ".openskills/frontend-design",
+        "skillName": "frontend-design",
+        "eager": false
+      }
+    }
+  },
+  "generated": "2025-12-22T14:49:30.518Z"
+}
