@@ -146,6 +146,7 @@ export class TmuxWrapper {
       agentName: config.name,
       socketPath: config.socketPath,
       cli: this.cliType,
+      workingDirectory: this.config.cwd ?? process.cwd(),
     });
 
     this.parser = new OutputParser({ prefix: this.relayPrefix });
@@ -799,6 +800,21 @@ export class TmuxWrapper {
         await this.sleep(30);
         await this.sendKeys('C-u');
         await this.sleep(30);
+      }
+
+      // For Gemini: check if we're at a shell prompt ($) vs chat prompt (>)
+      // If at shell prompt, skip injection to avoid shell command execution
+      if (this.cliType === 'gemini') {
+        const lastLine = await this.getLastLine();
+        const cleanLine = this.stripAnsi(lastLine).trim();
+        if (/^\$\s*$/.test(cleanLine) || /^\s*\$\s*$/.test(cleanLine)) {
+          this.logStderr('Gemini at shell prompt, skipping injection to avoid shell execution');
+          // Re-queue the message for later
+          this.messageQueue.unshift(msg);
+          this.isInjecting = false;
+          setTimeout(() => this.checkForInjectionOpportunity(), 2000);
+          return;
+        }
       }
 
       // Standard injection for all CLIs including Gemini
