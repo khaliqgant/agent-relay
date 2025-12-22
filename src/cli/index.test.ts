@@ -47,7 +47,7 @@ describe('CLI', () => {
       expect(stdout).toContain('down');
       expect(stdout).toContain('status');
       expect(stdout).toContain('agents');
-      expect(stdout).toContain('gc');
+      // gc is hidden (agent-only command)
     });
 
     it('should show help when no args', async () => {

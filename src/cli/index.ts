@@ -339,9 +339,9 @@ program
     console.log(`agent-relay v${VERSION}`);
   });
 
-// gc - Clean up orphaned tmux sessions
+// gc - Clean up orphaned tmux sessions (hidden - for agent use)
 program
-  .command('gc')
+  .command('gc', { hidden: true })
   .description('Clean up orphaned tmux sessions (sessions with no connected agent)')
   .option('--dry-run', 'Show what would be cleaned without actually doing it')
   .option('--force', 'Kill all relay sessions regardless of connection status')
