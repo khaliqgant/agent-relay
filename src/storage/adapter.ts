@@ -37,12 +37,56 @@ export interface MessageQuery {
   urgentOnly?: boolean;
 }
 
+export interface StoredSession {
+  id: string;
+  agentName: string;
+  cli?: string;
+  projectId?: string;
+  projectRoot?: string;
+  startedAt: number;
+  endedAt?: number;
+  messageCount: number;
+  summary?: string;
+  /** How the session was closed: 'agent' (explicit), 'disconnect', 'error', or undefined (still active) */
+  closedBy?: 'agent' | 'disconnect' | 'error';
+}
+
+export interface SessionQuery {
+  agentName?: string;
+  projectId?: string;
+  since?: number;
+  limit?: number;
+}
+
+export interface AgentSummary {
+  agentName: string;
+  projectId?: string;
+  lastUpdated: number;
+  currentTask?: string;
+  completedTasks?: string[];
+  decisions?: string[];
+  context?: string;
+  files?: string[];
+}
+
 export interface StorageAdapter {
   init(): Promise<void>;
   saveMessage(message: StoredMessage): Promise<void>;
   getMessages(query?: MessageQuery): Promise<StoredMessage[]>;
   getMessageById?(id: string): Promise<StoredMessage | null>;
   close?(): Promise<void>;
+
+  // Session management (optional - for adapters that support it)
+  startSession?(session: Omit<StoredSession, 'messageCount'>): Promise<void>;
+  endSession?(sessionId: string, options?: { summary?: string; closedBy?: 'agent' | 'disconnect' | 'error' }): Promise<void>;
+  getSessions?(query?: SessionQuery): Promise<StoredSession[]>;
+  getRecentSessions?(limit?: number): Promise<StoredSession[]>;
+  incrementSessionMessageCount?(sessionId: string): Promise<void>;
+
+  // Agent summaries (optional - for adapters that support it)
+  saveAgentSummary?(summary: Omit<AgentSummary, 'lastUpdated'>): Promise<void>;
+  getAgentSummary?(agentName: string): Promise<AgentSummary | null>;
+  getAllAgentSummaries?(): Promise<AgentSummary[]>;
 }
 
 /**

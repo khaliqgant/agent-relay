@@ -27,6 +27,33 @@ interface Message {
   id: string; // unique-ish id
 }
 
+interface SessionInfo {
+  id: string;
+  agentName: string;
+  cli?: string;
+  startedAt: string;
+  endedAt?: string;
+  duration?: string;
+  messageCount: number;
+  summary?: string;
+  /**
+   * true if session is still active (endedAt is not set).
+   * Note: This is determined solely by endedAt, regardless of how the session
+   * was closed (agent explicit close, disconnect, or error via closedBy field).
+   */
+  isActive: boolean;
+  /** How the session was closed: 'agent' (explicit), 'disconnect', 'error', or undefined */
+  closedBy?: 'agent' | 'disconnect' | 'error';
+}
+
+interface AgentSummary {
+  agentName: string;
+  lastUpdated: string;
+  currentTask?: string;
+  completedTasks?: string[];
+  context?: string;
+}
+
 export async function startDashboard(port: number, dataDir: string, dbPath?: string): Promise<number> {
   console.log('Starting dashboard...');
   console.log('__dirname:', __dirname);
@@ -157,9 +184,53 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
     return allMessages;
   };
 
+  const formatDuration = (startMs: number, endMs?: number): string => {
+    const end = endMs ?? Date.now();
+    const durationMs = end - startMs;
+    const minutes = Math.floor(durationMs / 60000);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m`;
+    }
+    return `${minutes}m`;
+  };
+
+  const getRecentSessions = async (): Promise<SessionInfo[]> => {
+    if (storage && storage instanceof SqliteStorageAdapter) {
+      const sessions = await storage.getRecentSessions(20);
+      return sessions.map(s => ({
+        id: s.id,
+        agentName: s.agentName,
+        cli: s.cli,
+        startedAt: new Date(s.startedAt).toISOString(),
+        endedAt: s.endedAt ? new Date(s.endedAt).toISOString() : undefined,
+        duration: formatDuration(s.startedAt, s.endedAt),
+        messageCount: s.messageCount,
+        summary: s.summary,
+        isActive: !s.endedAt, // Active if no end time
+        closedBy: s.closedBy,
+      }));
+    }
+    return [];
+  };
+
+  const getAgentSummaries = async (): Promise<AgentSummary[]> => {
+    if (storage && storage instanceof SqliteStorageAdapter) {
+      const summaries = await storage.getAllAgentSummaries();
+      return summaries.map(s => ({
+        agentName: s.agentName,
+        lastUpdated: new Date(s.lastUpdated).toISOString(),
+        currentTask: s.currentTask,
+        completedTasks: s.completedTasks,
+        context: s.context,
+      }));
+    }
+    return [];
+  };
+
   const getAllData = async () => {
     const team = getTeamData();
-    if (!team) return { agents: [], messages: [], activity: [] };
+    if (!team) return { agents: [], messages: [], activity: [], sessions: [], summaries: [] };
 
     const agentsMap = new Map<string, AgentStatus>();
     const allMessages: Message[] = await getMessages(team.agents);
@@ -202,10 +273,18 @@ export async function startDashboard(port: number, dataDir: string, dbPath?: str
       }
     });
 
+    // Fetch sessions and summaries in parallel
+    const [sessions, summaries] = await Promise.all([
+      getRecentSessions(),
+      getAgentSummaries(),
+    ]);
+
     return {
       agents: Array.from(agentsMap.values()),
       messages: allMessages,
-      activity: allMessages // For now, activity log is just the message log
+      activity: allMessages, // For now, activity log is just the message log
+      sessions,
+      summaries,
     };
   };
 

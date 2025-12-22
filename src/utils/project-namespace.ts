@@ -9,8 +9,32 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 
-const BASE_DIR = '/tmp/agent-relay';
+/**
+ * Get the base directory for agent-relay data.
+ * Priority:
+ * 1. AGENT_RELAY_DATA_DIR environment variable
+ * 2. XDG_DATA_HOME/agent-relay (Linux/macOS standard)
+ * 3. ~/.agent-relay (fallback)
+ */
+function getBaseDir(): string {
+  // Explicit override
+  if (process.env.AGENT_RELAY_DATA_DIR) {
+    return process.env.AGENT_RELAY_DATA_DIR;
+  }
+
+  // XDG Base Directory Specification
+  const xdgDataHome = process.env.XDG_DATA_HOME;
+  if (xdgDataHome) {
+    return path.join(xdgDataHome, 'agent-relay');
+  }
+
+  // Default: ~/.agent-relay
+  return path.join(os.homedir(), '.agent-relay');
+}
+
+const BASE_DIR = getBaseDir();
 
 /**
  * Generate a short hash of a path for namespacing

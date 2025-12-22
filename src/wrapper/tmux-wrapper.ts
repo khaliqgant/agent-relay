@@ -15,9 +15,11 @@
 import { exec, execSync, spawn, ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RelayClient } from './client.js';
-import { OutputParser, type ParsedCommand } from './parser.js';
+import { OutputParser, type ParsedCommand, parseSummaryWithDetails, parseSessionEndFromOutput, ParsedMessageMetadata } from './parser.js';
 import { InboxManager } from './inbox.js';
 import type { SendPayload } from '../protocol/types.js';
+import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
+import { getProjectPaths } from '../utils/project-namespace.js';
 
 const execAsync = promisify(exec);
 const escapeRegex = (str: string): string => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -84,6 +86,8 @@ export class TmuxWrapper {
   private client: RelayClient;
   private parser: OutputParser;
   private inbox?: InboxManager;
+  private storage?: SqliteStorageAdapter;
+  private storageReady: Promise<boolean>; // Resolves true if storage initialized, false if failed
   private running = false;
   private pollTimer?: NodeJS.Timeout;
   private attachProcess?: ChildProcess;
@@ -100,6 +104,9 @@ export class TmuxWrapper {
   private lastDebugLog = 0;
   private cliType: 'claude' | 'codex' | 'gemini' | 'other';
   private relayPrefix: string;
+  private lastSummaryHash = ''; // Dedup summary saves
+  private lastSummaryRawContent = ''; // Dedup invalid JSON error logging
+  private sessionEndProcessed = false; // Track if we've already processed session end
 
   constructor(config: TmuxWrapperConfig) {
     this.config = {
@@ -139,6 +146,7 @@ export class TmuxWrapper {
       agentName: config.name,
       socketPath: config.socketPath,
       cli: this.cliType,
+      workingDirectory: this.config.cwd ?? process.cwd(),
     });
 
     this.parser = new OutputParser({ prefix: this.relayPrefix });
@@ -150,6 +158,16 @@ export class TmuxWrapper {
         inboxDir: config.inboxDir,
       });
     }
+
+    // Initialize storage for session/summary persistence
+    const projectPaths = getProjectPaths();
+    this.storage = new SqliteStorageAdapter({ dbPath: projectPaths.dbPath });
+    // Initialize asynchronously (don't block constructor) - methods await storageReady
+    this.storageReady = this.storage.init().then(() => true).catch(err => {
+      this.logStderr(`Failed to initialize storage: ${err.message}`, true);
+      this.storage = undefined;
+      return false;
+    });
 
     // Handle incoming messages from relay
     this.client.onMessage = (from: string, payload: SendPayload, messageId: string) => {
@@ -258,6 +276,7 @@ export class TmuxWrapper {
         'setw -g alternate-screen on',        // Ensure alternate screen works
         // Pass through mouse scroll to application in alternate screen mode
         'set -ga terminal-overrides ",xterm*:Tc"',
+        'set -g status-left-length 100',      // Provide ample space for agent name in status bar
       ];
 
       // Add mouse mode if enabled (allows scroll passthrough to CLI apps)
@@ -323,8 +342,9 @@ export class TmuxWrapper {
     const instructions = [
       `[Agent Relay] You are "${this.config.name}" - connected for real-time messaging.`,
       `SEND: ${this.relayPrefix}AgentName message (or ${this.relayPrefix}* to broadcast)`,
-      `RECEIVE: "Relay message from X [id]: content"`,
-      `TRUNCATED: Run "agent-relay read <id>" if message seems cut off`,
+      `RECEIVE: Messages appear as "Relay message from X [id]: content"`,
+      `SUMMARY: Periodically output [[SUMMARY]]{"currentTask":"...","context":"..."}[[/SUMMARY]] to track progress`,
+      `END: Output [[SESSION_END]]{"summary":"..."}[[/SESSION_END]] when your task is complete`,
     ].join(' | ');
 
     try {
@@ -464,6 +484,12 @@ export class TmuxWrapper {
         this.sendRelayCommand(cmd);
       }
 
+      // Check for [[SUMMARY]] blocks and save to storage
+      this.parseSummaryAndSave(cleanContent);
+
+      // Check for [[SESSION_END]] blocks to explicitly close session
+      this.parseSessionEndAndClose(cleanContent);
+
       this.updateActivityState();
 
       // Also check for injection opportunity
@@ -598,6 +624,103 @@ export class TmuxWrapper {
   }
 
   /**
+   * Parse [[SUMMARY]] blocks from output and save to storage.
+   * Agents can output summaries to maintain running context:
+   *
+   * [[SUMMARY]]
+   * {"currentTask": "Implementing auth", "context": "Completed login flow"}
+   * [[/SUMMARY]]
+   */
+  private parseSummaryAndSave(content: string): void {
+    const result = parseSummaryWithDetails(content);
+
+    // No SUMMARY block found
+    if (!result.found) return;
+
+    // Dedup based on raw content - prevents repeated error logging for same invalid JSON
+    if (result.rawContent === this.lastSummaryRawContent) return;
+    this.lastSummaryRawContent = result.rawContent || '';
+
+    // Invalid JSON - log error once (deduped above)
+    if (!result.valid) {
+      this.logStderr('[parser] Invalid JSON in SUMMARY block');
+      return;
+    }
+
+    const summary = result.summary!;
+
+    // Dedup valid summaries - don't save same summary twice
+    const summaryHash = JSON.stringify(summary);
+    if (summaryHash === this.lastSummaryHash) return;
+    this.lastSummaryHash = summaryHash;
+
+    // Wait for storage to be ready before saving
+    this.storageReady.then(ready => {
+      if (!ready || !this.storage) {
+        this.logStderr('Cannot save summary: storage not initialized');
+        return;
+      }
+
+      const projectPaths = getProjectPaths();
+      this.storage.saveAgentSummary({
+        agentName: this.config.name,
+        projectId: projectPaths.projectId,
+        currentTask: summary.currentTask,
+        completedTasks: summary.completedTasks,
+        decisions: summary.decisions,
+        context: summary.context,
+        files: summary.files,
+      }).then(() => {
+        this.logStderr(`Saved agent summary: ${summary.currentTask || 'updated context'}`);
+      }).catch(err => {
+        this.logStderr(`Failed to save summary: ${err.message}`, true);
+      });
+    });
+  }
+
+  /**
+   * Parse [[SESSION_END]] blocks from output and close session explicitly.
+   * Agents output this to mark their work session as complete:
+   *
+   * [[SESSION_END]]
+   * {"summary": "Completed auth module", "completedTasks": ["login", "logout"]}
+   * [[/SESSION_END]]
+   */
+  private parseSessionEndAndClose(content: string): void {
+    if (this.sessionEndProcessed) return; // Only process once per session
+
+    const sessionEnd = parseSessionEndFromOutput(content);
+    if (!sessionEnd) return;
+
+    // Get session ID from client connection - if not available yet, don't set flag
+    // so we can retry when sessionId becomes available
+    const sessionId = this.client.currentSessionId;
+    if (!sessionId) {
+      this.logStderr('Cannot close session: no session ID yet, will retry');
+      return;
+    }
+
+    this.sessionEndProcessed = true;
+
+    // Wait for storage to be ready before attempting to close session
+    this.storageReady.then(ready => {
+      if (!ready || !this.storage) {
+        this.logStderr('Cannot close session: storage not initialized');
+        return;
+      }
+
+      this.storage.endSession(sessionId, {
+        summary: sessionEnd.summary,
+        closedBy: 'agent',
+      }).then(() => {
+        this.logStderr(`Session closed by agent: ${sessionEnd.summary || 'complete'}`);
+      }).catch(err => {
+        this.logStderr(`Failed to close session: ${err.message}`, true);
+      });
+    });
+  }
+
+  /**
    * Handle incoming message from relay
    */
   private handleIncomingMessage(from: string, payload: SendPayload, messageId: string): void {
@@ -646,7 +769,14 @@ export class TmuxWrapper {
     this.logStderr(`Injecting message from ${msg.from} (cli: ${this.cliType})`);
 
     try {
-      const sanitizedBody = msg.body.replace(/[\r\n]+/g, ' ').trim();
+      let sanitizedBody = msg.body.replace(/[\r\n]+/g, ' ').trim();
+
+      // Gemini interprets certain keywords (While, For, If, etc.) as shell commands
+      // Wrap in backticks to prevent shell keyword interpretation
+      if (this.cliType === 'gemini') {
+        sanitizedBody = `\`${sanitizedBody.replace(/`/g, "'")}\``;
+      }
+
       // Short message ID for display (first 8 chars)
       const shortId = msg.messageId.substring(0, 8);
 
@@ -670,6 +800,21 @@ export class TmuxWrapper {
         await this.sleep(30);
         await this.sendKeys('C-u');
         await this.sleep(30);
+      }
+
+      // For Gemini: check if we're at a shell prompt ($) vs chat prompt (>)
+      // If at shell prompt, skip injection to avoid shell command execution
+      if (this.cliType === 'gemini') {
+        const lastLine = await this.getLastLine();
+        const cleanLine = this.stripAnsi(lastLine).trim();
+        if (/^\$\s*$/.test(cleanLine) || /^\s*\$\s*$/.test(cleanLine)) {
+          this.logStderr('Gemini at shell prompt, skipping injection to avoid shell execution');
+          // Re-queue the message for later
+          this.messageQueue.unshift(msg);
+          this.isInjecting = false;
+          setTimeout(() => this.checkForInjectionOpportunity(), 2000);
+          return;
+        }
       }
 
       // Standard injection for all CLIs including Gemini
@@ -720,6 +865,16 @@ export class TmuxWrapper {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(r => setTimeout(r, ms));
+  }
+
+  /**
+   * Reset session-specific state for wrapper reuse.
+   * Call this when starting a new session with the same wrapper instance.
+   */
+  resetSessionState(): void {
+    this.sessionEndProcessed = false;
+    this.lastSummaryHash = '';
+    this.lastSummaryRawContent = '';
   }
 
   /**
@@ -850,6 +1005,9 @@ export class TmuxWrapper {
     if (!this.running) return;
     this.running = false;
     this.activityState = 'disconnected';
+
+    // Reset session state for potential reuse
+    this.resetSessionState();
 
     // Stop polling
     if (this.pollTimer) {

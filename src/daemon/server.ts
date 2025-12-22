@@ -10,6 +10,9 @@ import { Connection, type ConnectionConfig, DEFAULT_CONFIG } from './connection.
 import { Router } from './router.js';
 import type { Envelope, SendPayload } from '../protocol/types.js';
 import { createStorageAdapter, type StorageAdapter, type StorageConfig } from '../storage/adapter.js';
+import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
+import { getProjectPaths } from '../utils/project-namespace.js';
+import { AgentRegistry } from './agent-registry.js';
 
 export interface DaemonConfig extends ConnectionConfig {
   socketPath: string;
@@ -38,6 +41,7 @@ export class Daemon {
   private connections: Set<Connection> = new Set();
   private storage?: StorageAdapter;
   private storageInitialized = false;
+  private registry?: AgentRegistry;
 
   constructor(config: Partial<DaemonConfig> = {}) {
     this.config = { ...DEFAULT_DAEMON_CONFIG, ...config };
@@ -48,6 +52,9 @@ export class Daemon {
     if (!this.config.teamDir) {
       this.config.teamDir = path.dirname(this.config.socketPath);
     }
+    if (this.config.teamDir) {
+      this.registry = new AgentRegistry(this.config.teamDir);
+    }
     // Storage is initialized lazily in start() to support async createStorageAdapter
     this.server = net.createServer(this.handleConnection.bind(this));
   }
@@ -56,18 +63,15 @@ export class Daemon {
    * Write current agents to agents.json for dashboard consumption.
    */
   private writeAgentsFile(): void {
-    if (!this.config.teamDir) return;
-    const agentsPath = path.join(this.config.teamDir, 'agents.json');
-    const agents = this.router.getAgents().map(name => {
-      const connection = this.router.getConnection(name);
-      return {
-        name,
-        cli: connection?.cli,
-        connectedAt: new Date().toISOString(),
-      };
-    });
+    if (!this.registry) return;
+    // The registry persists on every update; this is a no-op helper for symmetry.
+    const agents = this.registry.getAgents();
     try {
-      fs.writeFileSync(agentsPath, JSON.stringify({ agents }, null, 2));
+      fs.writeFileSync(
+        path.join(this.config.teamDir ?? path.dirname(this.config.socketPath), 'agents.json'),
+        JSON.stringify({ agents }, null, 2),
+        'utf-8'
+      );
     } catch (err) {
       console.error('[daemon] Failed to write agents.json:', err);
     }
@@ -89,7 +93,7 @@ export class Daemon {
       this.storage = await createStorageAdapter(storagePath, this.config.storageConfig);
     }
 
-    this.router = new Router({ storage: this.storage });
+    this.router = new Router({ storage: this.storage, registry: this.registry });
     this.storageInitialized = true;
   }
 
@@ -188,7 +192,27 @@ export class Daemon {
       if (connection.agentName) {
         this.router.register(connection);
         console.log(`[daemon] Agent registered: ${connection.agentName}`);
-        this.writeAgentsFile();
+        if (connection.agentName) {
+          this.registry?.registerOrUpdate({
+            name: connection.agentName,
+            cli: connection.cli,
+            workingDirectory: connection.workingDirectory,
+          });
+          this.writeAgentsFile();
+        }
+
+        // Record session start
+        if (this.storage instanceof SqliteStorageAdapter) {
+          const projectPaths = getProjectPaths();
+          this.storage.startSession({
+            id: connection.sessionId,
+            agentName: connection.agentName,
+            cli: connection.cli,
+            projectId: projectPaths.projectId,
+            projectRoot: projectPaths.projectRoot,
+            startedAt: Date.now(),
+          }).catch(err => console.error('[daemon] Failed to record session start:', err));
+        }
       }
     };
 
@@ -196,14 +220,32 @@ export class Daemon {
       console.log(`[daemon] Connection closed: ${connection.agentName ?? connection.id}`);
       this.connections.delete(connection);
       this.router.unregister(connection);
+      if (connection.agentName) {
+        this.registry?.touch(connection.agentName);
+      }
       this.writeAgentsFile();
+
+      // Record session end (disconnect - agent may still mark it closed explicitly)
+      if (this.storage instanceof SqliteStorageAdapter) {
+        this.storage.endSession(connection.sessionId, { closedBy: 'disconnect' })
+          .catch(err => console.error('[daemon] Failed to record session end:', err));
+      }
     };
 
     connection.onError = (error: Error) => {
       console.error(`[daemon] Connection error: ${error.message}`);
       this.connections.delete(connection);
       this.router.unregister(connection);
+      if (connection.agentName) {
+        this.registry?.touch(connection.agentName);
+      }
       this.writeAgentsFile();
+
+      // Record session end on error
+      if (this.storage instanceof SqliteStorageAdapter) {
+        this.storage.endSession(connection.sessionId, { closedBy: 'error' })
+          .catch(err => console.error('[daemon] Failed to record session end:', err));
+      }
     };
   }
 
