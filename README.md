@@ -94,6 +94,31 @@ Long messages are truncated. Use the ID to read full content:
 agent-relay read abc123
 ```
 
+## Agent Roles
+
+Agent names automatically match role definitions (case-insensitive):
+
+```bash
+# If .claude/agents/lead.md exists:
+agent-relay -n Lead claude    # matches lead.md
+agent-relay -n LEAD claude    # matches lead.md
+agent-relay -n lead claude    # matches lead.md
+
+# Supported locations:
+# - .claude/agents/<name>.md
+# - .openagents/<name>.md
+```
+
+Create role agents for your team:
+
+```
+.claude/agents/
+├── lead.md          # Coordinator
+├── implementer.md   # Developer
+├── designer.md      # UI/UX
+└── reviewer.md      # Code review
+```
+
 ## Multi-Project Orchestration
 
 Bridge multiple projects with a single orchestrator:
@@ -115,18 +140,34 @@ agent-relay lead Alice
 ### Cross-Project Messaging
 
 ```
-@relay:projectId:agent Message to specific agent
-@relay:*:lead Broadcast to all project leads
+->relay:projectId:agent Message to specific agent
+->relay:*:lead Broadcast to all project leads
 ```
 
 ### Spawn Workers (Lead only)
 
 ```
-@relay:spawn Dev1 claude "Implement login endpoint"
-@relay:release Dev1
+->relay:spawn Dev1 claude "Implement login endpoint"
+->relay:release Dev1
 ```
 
 See [docs/DESIGN_BRIDGE_STAFFING.md](docs/DESIGN_BRIDGE_STAFFING.md) for full details.
+
+## Enabling AI Agents
+
+To teach your AI agents how to use agent-relay, you have two options:
+
+### Option 1: Install the Skill (Recommended)
+
+```bash
+prpm install using-agent-relay
+```
+
+This installs the `using-agent-relay` skill which provides agents with messaging patterns, coordination workflows, and troubleshooting guidance.
+
+### Option 2: Copy AGENTS.md
+
+Copy [docs/AGENTS.md](docs/AGENTS.md) to your project's agent instructions file (e.g., `CLAUDE.md`, `AGENTS.md`, or similar). This gives agents the messaging syntax and patterns they need.
 
 ## Dashboard
 

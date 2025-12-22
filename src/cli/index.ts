@@ -88,12 +88,83 @@ program
     await wrapper.start();
   });
 
+// Team config types
+interface TeamAgent {
+  name: string;
+  cli: string;
+  role?: string;
+}
+
+interface TeamConfig {
+  team?: string;
+  agents: TeamAgent[];
+  autoSpawn?: boolean;
+}
+
+// Load teams.json from project root or .agent-relay/
+function loadTeamConfig(projectRoot: string): TeamConfig | null {
+  const locations = [
+    path.join(projectRoot, 'teams.json'),
+    path.join(projectRoot, '.agent-relay', 'teams.json'),
+  ];
+
+  for (const configPath of locations) {
+    if (fs.existsSync(configPath)) {
+      try {
+        const content = fs.readFileSync(configPath, 'utf-8');
+        return JSON.parse(content) as TeamConfig;
+      } catch (err) {
+        console.error(`Failed to parse ${configPath}:`, err);
+      }
+    }
+  }
+  return null;
+}
+
+// Spawn agents from team config using tmux
+async function spawnTeamAgents(
+  agents: TeamAgent[],
+  socketPath: string,
+  dataDir: string,
+  relayPrefix?: string
+): Promise<void> {
+  const { TmuxWrapper } = await import('../wrapper/tmux-wrapper.js');
+
+  for (const agent of agents) {
+    console.log(`Spawning agent: ${agent.name} (${agent.cli})`);
+
+    // Parse CLI - handle "claude:opus" format
+    const [mainCommand, ...cliArgs] = agent.cli.split(/\s+/);
+
+    const wrapper = new TmuxWrapper({
+      name: agent.name,
+      command: mainCommand,
+      args: cliArgs,
+      socketPath,
+      debug: false,
+      relayPrefix,
+      useInbox: true,
+      inboxDir: dataDir,
+      // Note: agents run in tmux which is already background/detached
+    });
+
+    try {
+      await wrapper.start();
+      console.log(`  Started: ${agent.name}`);
+    } catch (err) {
+      console.error(`  Failed to start ${agent.name}:`, err);
+    }
+  }
+}
+
 // up - Start daemon + dashboard
 program
   .command('up')
   .description('Start daemon + dashboard')
   .option('--no-dashboard', 'Disable web dashboard')
   .option('--port <port>', 'Dashboard port', DEFAULT_DASHBOARD_PORT)
+  .option('--spawn', 'Auto-spawn agents from teams.json')
+  .option('--no-spawn', 'Disable auto-spawn even if teams.json has autoSpawn: true')
   .action(async (options) => {
     const { ensureProjectDir } = await import('../utils/project-namespace.js');
 

@@ -56,7 +56,7 @@
       display: grid;
       grid-template-columns: 320px 1fr;
       gap: 1px;
-      height: 100vh;
+      min-height: 100vh;
       background: var(--border-color);
     }
 
@@ -64,14 +64,14 @@
       display: flex;
       flex-direction: column;
       background: var(--bg-primary);
-      overflow: hidden;
+      overflow: auto;
     }
 
     .main-content {
       display: flex;
       flex-direction: column;
       background: var(--bg-primary);
-      overflow: hidden;
+      overflow: auto;
     }
 
     .header {
@@ -217,12 +217,31 @@
       font-weight: 600;
     }
 
+    .connection-badge {
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .connection-badge.online {
+      background: var(--success-muted);
+      color: var(--success);
+    }
+
+    .connection-badge.offline {
+      background: var(--error-muted);
+      color: var(--error);
+    }
+
     /* Activity Log */
     .activity-log {
       display: flex;
       flex-direction: column;
       flex: 1;
-      overflow: hidden;
+      overflow: auto;
     }
 
     .log-header {
@@ -876,21 +895,25 @@
                 const lastSeen = a.lastSeen ?? a.lastActive;
                 const online = isAgentOnline(lastSeen);
                 const disconnectedClass = online ? '' : 'disconnected';
+                const connectionStatus = online ? 'Online' : 'Offline';
+                const connectionClass = online ? 'online' : 'offline';
+                const statusText = a.status && a.status !== 'Idle' ? a.status : (online ? 'Ready' : 'Disconnected');
                 return `
                 <div class="agent-card ${a.messageCount > 0 ? 'active' : ''} ${disconnectedClass}">
                     <div class="agent-header">
                         <div class="agent-name">${a.name}</div>
-                        ${a.messageCount > 0 ? `<span class="badge">${a.messageCount}</span>` : ''}
+                        <span class="connection-badge ${connectionClass}">${connectionStatus}</span>
                     </div>
                     <div class="agent-meta">
                         <span class="cli-badge">${a.cli}</span>
+                        ${a.messageCount > 0 ? `<span class="badge">${a.messageCount} msgs</span>` : ''}
                     </div>
                     <div class="agent-status">
                         <span class="status-dot"></span>
-                        ${a.status && a.status !== 'Idle' ? a.status : 'Ready'}
+                        ${statusText}
                     </div>
                     <div class="last-active">
-                        ${a.lastActive ? timeAgo(new Date(a.lastActive)) : 'No activity'}
+                        ${lastSeen ? 'Last seen: ' + timeAgo(new Date(lastSeen)) : 'No activity'}
                     </div>
                 </div>
                 `;
