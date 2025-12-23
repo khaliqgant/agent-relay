@@ -88,12 +88,83 @@ program
     await wrapper.start();
   });
 
+// Team config types
+interface TeamAgent {
+  name: string;
+  cli: string;
+  role?: string;
+}
+
+interface TeamConfig {
+  team?: string;
+  agents: TeamAgent[];
+  autoSpawn?: boolean;
+}
+
+// Load teams.json from project root or .agent-relay/
+function loadTeamConfig(projectRoot: string): TeamConfig | null {
+  const locations = [
+    path.join(projectRoot, 'teams.json'),
+    path.join(projectRoot, '.agent-relay', 'teams.json'),
+  ];
+
+  for (const configPath of locations) {
+    if (fs.existsSync(configPath)) {
+      try {
+        const content = fs.readFileSync(configPath, 'utf-8');
+        return JSON.parse(content) as TeamConfig;
+      } catch (err) {
+        console.error(`Failed to parse ${configPath}:`, err);
+      }
+    }
+  }
+  return null;
+}
+
+// Spawn agents from team config using tmux
+async function spawnTeamAgents(
+  agents: TeamAgent[],
+  socketPath: string,
+  dataDir: string,
+  relayPrefix?: string
+): Promise<void> {
+  const { TmuxWrapper } = await import('../wrapper/tmux-wrapper.js');
+
+  for (const agent of agents) {
+    console.log(`Spawning agent: ${agent.name} (${agent.cli})`);
+
+    // Parse CLI - handle "claude:opus" format
+    const [mainCommand, ...cliArgs] = agent.cli.split(/\s+/);
+
+    const wrapper = new TmuxWrapper({
+      name: agent.name,
+      command: mainCommand,
+      args: cliArgs,
+      socketPath,
+      debug: false,
+      relayPrefix,
+      useInbox: true,
+      inboxDir: dataDir,
+      // Note: agents run in tmux which is already background/detached
+    });
+
+    try {
+      await wrapper.start();
+      console.log(`  Started: ${agent.name}`);
+    } catch (err) {
+      console.error(`  Failed to start ${agent.name}:`, err);
+    }
+  }
+}
+
 // up - Start daemon + dashboard
 program
   .command('up')
   .description('Start daemon + dashboard')
   .option('--no-dashboard', 'Disable web dashboard')
   .option('--port <port>', 'Dashboard port', DEFAULT_DASHBOARD_PORT)
+  .option('--spawn', 'Auto-spawn agents from teams.json')
+  .option('--no-spawn', 'Disable auto-spawn even if teams.json has autoSpawn: true')
   .action(async (options) => {
     const { ensureProjectDir } = await import('../utils/project-namespace.js');
 
@@ -377,6 +448,180 @@ program
   .description('Show version information')
   .action(() => {
     console.log(`agent-relay v${VERSION}`);
+  });
+
+// bridge - Multi-project orchestration
+program
+  .command('bridge')
+  .description('Bridge multiple projects as orchestrator')
+  .argument('[projects...]', 'Project paths to bridge')
+  .option('--cli <tool>', 'CLI tool override for all projects')
+  .action(async (projectPaths: string[], options) => {
+    const { resolveProjects, validateDaemons } = await import('../bridge/config.js');
+    const { MultiProjectClient } = await import('../bridge/multi-project-client.js');
+
+    // Resolve projects from args or config
+    const projects = resolveProjects(projectPaths, options.cli);
+
+    if (projects.length === 0) {
+      console.error('No projects specified.');
+      console.error('Usage: agent-relay bridge ~/project1 ~/project2');
+      console.error('   or: Create ~/.agent-relay/bridge.json with project config');
+      process.exit(1);
+    }
+
+    console.log('Bridge Mode - Multi-Project Orchestration');
+    console.log('─'.repeat(40));
+
+    // Check which daemons are running
+    const { valid, missing } = validateDaemons(projects);
+
+    if (missing.length > 0) {
+      console.error('\nMissing daemons for:');
+      for (const p of missing) {
+        console.error(`  - ${p.path}`);
+        console.error(`    Run: cd "${p.path}" && agent-relay up`);
+      }
+      console.error('');
+    }
+
+    if (valid.length === 0) {
+      console.error('No projects have running daemons. Start them first.');
+      process.exit(1);
+    }
+
+    console.log('\nConnecting to projects:');
+    for (const p of valid) {
+      console.log(`  - ${p.id} (${p.path})`);
+      console.log(`    Lead: ${p.leadName}, CLI: ${p.cli}`);
+    }
+    console.log('');
+
+    // Connect to all project daemons
+    const client = new MultiProjectClient(valid);
+
+    try {
+      await client.connect();
+    } catch (err) {
+      console.error('Failed to connect to all projects');
+      process.exit(1);
+    }
+
+    console.log('Connected to all projects.');
+    console.log('');
+    console.log('Cross-project messaging:');
+    console.log('  @relay:projectId:agent Message');
+    console.log('  @relay:*:lead Broadcast to all leads');
+    console.log('');
+
+    // Handle messages from projects
+    client.onMessage = (projectId, from, payload, messageId) => {
+      console.log(`[${projectId}] ${from}: ${payload.body.substring(0, 80)}...`);
+    };
+
+    // Keep running
+    process.on('SIGINT', () => {
+      console.log('\nDisconnecting...');
+      client.disconnect();
+      process.exit(0);
+    });
+
+    // Start a simple REPL for sending messages
+    const readline = await import('node:readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    console.log('Enter messages as: projectId:agent message');
+    console.log('Or: *:lead message (broadcast to all leads)');
+    console.log('Type "quit" to exit.\n');
+
+    const promptForInput = (): void => {
+      rl.question('> ', (input) => {
+        if (input.toLowerCase() === 'quit') {
+          client.disconnect();
+          rl.close();
+          process.exit(0);
+        }
+
+        // Parse input: projectId:agent message
+        const match = input.match(/^(\S+):(\S+)\s+(.+)$/);
+        if (match) {
+          const [, projectId, agent, message] = match;
+          if (projectId === '*' && agent === 'lead') {
+            client.broadcastToLeads(message);
+            console.log('→ Broadcast to all leads');
+          } else if (projectId === '*') {
+            client.broadcastAll(message);
+            console.log('→ Broadcast to all');
+          } else {
+            const sent = client.sendToProject(projectId, agent, message);
+            if (sent) {
+              console.log(`→ ${projectId}:${agent}`);
+            }
+          }
+        } else {
+          console.log('Format: projectId:agent message');
+        }
+
+        promptForInput();
+      });
+    };
+
+    promptForInput();
+  });
+
+// lead - Start as project lead with spawn capability
+program
+  .command('lead')
+  .description('Start as project lead with spawn capability')
+  .argument('<name>', 'Your agent name')
+  .argument('[cli]', 'CLI tool to use', 'claude')
+  .action(async (name: string, cli: string) => {
+    const { getProjectPaths } = await import('../utils/project-namespace.js');
+    const { AgentSpawner } = await import('../bridge/spawner.js');
+    const { TmuxWrapper } = await import('../wrapper/tmux-wrapper.js');
+
+    const paths = getProjectPaths();
+
+    console.log('Lead Mode - Project Lead with Spawn Capability');
+    console.log('─'.repeat(40));
+    console.log(`Agent: ${name}`);
+    console.log(`Project: ${paths.projectId}`);
+    console.log(`CLI: ${cli}`);
+    console.log('');
+    console.log('Spawn workers with:');
+    console.log('  @relay:spawn WorkerName cli "task"');
+    console.log('Release workers with:');
+    console.log('  @relay:release WorkerName');
+    console.log('');
+
+    // Create spawner for this project
+    const spawner = new AgentSpawner(paths.projectRoot);
+
+    // Parse CLI for model variant (e.g., claude:opus)
+    const [mainCommand, ...commandArgs] = cli.split(':');
+
+    const wrapper = new TmuxWrapper({
+      name,
+      command: mainCommand,
+      args: commandArgs.length > 0 ? commandArgs : undefined,
+      socketPath: paths.socketPath,
+      debug: true,
+    });
+
+    // Extend wrapper to handle spawn/release commands
+    // This will be done via parser extension
+
+    process.on('SIGINT', async () => {
+      console.log('\nReleasing workers...');
+      await spawner.releaseAll();
+      wrapper.stop();
+      process.exit(0);
+    });
+
+    await wrapper.start();
   });
 
 // gc - Clean up orphaned tmux sessions (hidden - for agent use)

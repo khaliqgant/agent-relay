@@ -40,6 +40,8 @@ Agents communicate by outputting `->relay:` patterns:
 | `agent-relay down` | Stop daemon |
 | `agent-relay status` | Check if running |
 | `agent-relay read <id>` | Read truncated message |
+| `agent-relay bridge <projects...>` | Bridge multiple projects |
+| `agent-relay lead <name>` | Start as project lead |
 
 ## How It Works
 
@@ -91,6 +93,81 @@ Long messages are truncated. Use the ID to read full content:
 ```bash
 agent-relay read abc123
 ```
+
+## Agent Roles
+
+Agent names automatically match role definitions (case-insensitive):
+
+```bash
+# If .claude/agents/lead.md exists:
+agent-relay -n Lead claude    # matches lead.md
+agent-relay -n LEAD claude    # matches lead.md
+agent-relay -n lead claude    # matches lead.md
+
+# Supported locations:
+# - .claude/agents/<name>.md
+# - .openagents/<name>.md
+```
+
+Create role agents for your team:
+
+```
+.claude/agents/
+├── lead.md          # Coordinator
+├── implementer.md   # Developer
+├── designer.md      # UI/UX
+└── reviewer.md      # Code review
+```
+
+## Multi-Project Orchestration
+
+Bridge multiple projects with a single orchestrator:
+
+```bash
+# Bridge projects (Architect mode)
+agent-relay bridge ~/auth ~/frontend ~/api
+
+# Start as project lead with spawn capability
+agent-relay lead Alice
+```
+
+### Workflow
+
+1. **Start daemons** in each project: `agent-relay up`
+2. **Start leads** in each project: `agent-relay lead Alice`
+3. **Bridge** from anywhere: `agent-relay bridge ~/project1 ~/project2`
+
+### Cross-Project Messaging
+
+```
+->relay:projectId:agent Message to specific agent
+->relay:*:lead Broadcast to all project leads
+```
+
+### Spawn Workers (Lead only)
+
+```
+->relay:spawn Dev1 claude "Implement login endpoint"
+->relay:release Dev1
+```
+
+See [docs/DESIGN_BRIDGE_STAFFING.md](docs/DESIGN_BRIDGE_STAFFING.md) for full details.
+
+## Enabling AI Agents
+
+To teach your AI agents how to use agent-relay, you have two options:
+
+### Option 1: Install the Skill (Recommended)
+
+```bash
+prpm install using-agent-relay
+```
+
+This installs the `using-agent-relay` skill which provides agents with messaging patterns, coordination workflows, and troubleshooting guidance.
+
+### Option 2: Copy AGENTS.md
+
+Copy [docs/AGENTS.md](docs/AGENTS.md) to your project's agent instructions file (e.g., `CLAUDE.md`, `AGENTS.md`, or similar). This gives agents the messaging syntax and patterns they need.
 
 ## Dashboard
 

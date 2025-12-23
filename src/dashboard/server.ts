@@ -77,6 +77,7 @@ export async function startDashboard(port: number, dataDir: string, teamDir: str
   const app = express();
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server, path: '/ws' });
+  const wssBridge = new WebSocketServer({ server, path: '/ws/bridge' });
   if (storage) {
     await storage.init();
   }
@@ -375,6 +376,29 @@ export async function startDashboard(port: number, dataDir: string, teamDir: str
     });
   };
 
+  // Bridge data broadcast for multi-project view
+  const getBridgeData = async () => {
+    const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+    if (fs.existsSync(bridgeStatePath)) {
+      try {
+        return JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+      } catch {
+        return { projects: [], messages: [], connected: false };
+      }
+    }
+    return { projects: [], messages: [], connected: false };
+  };
+
+  const broadcastBridgeData = async () => {
+    const data = await getBridgeData();
+    const payload = JSON.stringify(data);
+    wssBridge.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
+  };
+
   app.get('/api/data', (req, res) => {
     getAllData().then((data) => res.json(data)).catch((err) => {
       console.error('Failed to fetch dashboard data', err);
@@ -382,13 +406,44 @@ export async function startDashboard(port: number, dataDir: string, teamDir: str
     });
   });
 
+  // Bridge view route - serves bridge.html
+  app.get('/bridge', (req, res) => {
+    res.sendFile(path.join(publicDir, 'bridge.html'));
+  });
+
+  // Bridge API endpoint - returns multi-project data
+  // This is a placeholder that returns empty data when not in bridge mode
+  // The actual bridge data comes from MultiProjectClient when running `agent-relay bridge`
+  app.get('/api/bridge', async (req, res) => {
+    try {
+      // Check if bridge state file exists (written by bridge command)
+      const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+      if (fs.existsSync(bridgeStatePath)) {
+        const bridgeData = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+        res.json(bridgeData);
+      } else {
+        // No bridge running - return empty state
+        res.json({
+          projects: [],
+          messages: [],
+          connected: false,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch bridge data', err);
+      res.status(500).json({ error: 'Failed to load bridge data' });
+    }
+  });
+
   // Watch for changes
   if (storage) {
     setInterval(() => {
       broadcastData().catch((err) => console.error('Broadcast failed', err));
+      broadcastBridgeData().catch((err) => console.error('Bridge broadcast failed', err));
     }, 1000);
   } else {
     let fsWait: NodeJS.Timeout | null = null;
+    let bridgeFsWait: NodeJS.Timeout | null = null;
     try {
       if (fs.existsSync(dataDir)) {
           console.log(`Watching ${dataDir} for changes...`);
@@ -399,6 +454,14 @@ export async function startDashboard(port: number, dataDir: string, teamDir: str
                   fsWait = setTimeout(() => {
                       fsWait = null;
                       broadcastData();
+                  }, 100);
+              }
+              // Watch for bridge state changes
+              if (filename && filename.endsWith('bridge-state.json')) {
+                  if (bridgeFsWait) return;
+                  bridgeFsWait = setTimeout(() => {
+                      bridgeFsWait = null;
+                      broadcastBridgeData();
                   }, 100);
               }
           });
