@@ -51,7 +51,6 @@ program
   .option('-q, --quiet', 'Disable debug output', false)
   .option('-d, --detach', 'Start agent in background (detached mode)')
   .option('--prefix <pattern>', 'Relay prefix pattern (default: ->relay:)')
-  .option('--_daemon', 'Internal flag for daemon mode (do not use directly)')
   .argument('[command...]', 'Command to wrap (e.g., claude)')
   .action(async (commandParts, options) => {
     // If no command provided, show help
@@ -67,7 +66,8 @@ program
     const agentName = options.name ?? generateAgentName();
 
     // Handle detached mode - spawn daemon and exit
-    if (options.detach && !options._daemon) {
+    const isDaemonProcess = process.argv.includes('--_daemon');
+    if (options.detach && !isDaemonProcess) {
       const { spawn } = await import('node:child_process');
 
       // Build args for the daemon process
@@ -104,9 +104,6 @@ program
 
     const { TmuxWrapper } = await import('../wrapper/tmux-wrapper.js');
 
-    // Daemon mode: run wrapper without attaching to tmux
-    const isDaemon = Boolean(options._daemon);
-
     const wrapper = new TmuxWrapper({
       name: agentName,
       command: mainCommand,
@@ -116,7 +113,7 @@ program
       relayPrefix: options.prefix,
       useInbox: true,
       inboxDir: paths.dataDir, // Use the project-specific data directory for the inbox
-      detached: isDaemon, // Don't attach if running as daemon
+      detached: isDaemonProcess, // Don't attach if running as daemon
     });
 
     process.on('SIGINT', () => {
