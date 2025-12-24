@@ -3,11 +3,14 @@ import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import type { StorageAdapter, StoredMessage } from '../storage/adapter.js';
 import { RelayClient } from '../wrapper/client.js';
 import { computeNeedsAttention } from './needs-attention.js';
+import { MultiProjectClient } from '../bridge/multi-project-client.js';
+import type { ProjectConfig } from '../bridge/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -169,6 +172,73 @@ export async function startDashboard(port: number, dataDir: string, teamDir: str
   // Start relay client connection (non-blocking)
   connectRelayClient().catch(() => {});
 
+  // Bridge client for cross-project messaging
+  let bridgeClient: MultiProjectClient | undefined;
+  let bridgeClientConnecting = false;
+
+  const connectBridgeClient = async (): Promise<void> => {
+    if (bridgeClient || bridgeClientConnecting) return;
+
+    // Check if bridge-state.json exists and has projects
+    const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+    if (!fs.existsSync(bridgeStatePath)) {
+      return;
+    }
+
+    try {
+      const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+      if (!bridgeState.connected || !bridgeState.projects?.length) {
+        return;
+      }
+
+      bridgeClientConnecting = true;
+
+      // Build project configs from bridge state
+      const projectConfigs: ProjectConfig[] = bridgeState.projects.map((p: {
+        id: string;
+        path: string;
+        lead?: { name: string };
+      }) => {
+        // Compute socket path for each project
+        const projectHash = crypto.createHash('sha256').update(p.path).digest('hex').slice(0, 12);
+        const projectDataDir = path.join(path.dirname(dataDir), projectHash);
+        const socketPath = path.join(projectDataDir, 'relay.sock');
+
+        return {
+          id: p.id,
+          path: p.path,
+          socketPath,
+          leadName: p.lead?.name || 'Lead',
+          cli: 'dashboard-bridge',
+        };
+      });
+
+      // Filter to projects with existing sockets
+      const validConfigs = projectConfigs.filter((p: ProjectConfig) => fs.existsSync(p.socketPath));
+      if (validConfigs.length === 0) {
+        bridgeClientConnecting = false;
+        return;
+      }
+
+      bridgeClient = new MultiProjectClient(validConfigs, { reconnect: true });
+
+      bridgeClient.onProjectStateChange = (projectId, connected) => {
+        console.log(`[dashboard-bridge] Project ${projectId} ${connected ? 'connected' : 'disconnected'}`);
+      };
+
+      await bridgeClient.connect();
+      console.log('[dashboard] Bridge client connected to', validConfigs.length, 'project(s)');
+      bridgeClientConnecting = false;
+    } catch (err) {
+      console.error('[dashboard] Failed to connect bridge client:', err);
+      bridgeClient = undefined;
+      bridgeClientConnecting = false;
+    }
+  };
+
+  // Start bridge client connection (non-blocking)
+  connectBridgeClient().catch(() => {});
+
   // API endpoint to send messages
   app.post('/api/send', async (req, res) => {
     const { to, message, thread } = req.body;
@@ -195,6 +265,35 @@ export async function startDashboard(port: number, dataDir: string, teamDir: str
     } catch (err) {
       console.error('[dashboard] Failed to send message:', err);
       res.status(500).json({ error: 'Failed to send message' });
+    }
+  });
+
+  // API endpoint to send messages via bridge (cross-project)
+  app.post('/api/bridge/send', async (req, res) => {
+    const { projectId, to, message } = req.body;
+
+    if (!projectId || !to || !message) {
+      return res.status(400).json({ error: 'Missing "projectId", "to", or "message" field' });
+    }
+
+    // Try to connect bridge client if not connected
+    if (!bridgeClient) {
+      await connectBridgeClient();
+      if (!bridgeClient) {
+        return res.status(503).json({ error: 'Bridge not connected. Is the bridge command running?' });
+      }
+    }
+
+    try {
+      const sent = bridgeClient.sendToProject(projectId, to, message);
+      if (sent) {
+        res.json({ success: true });
+      } else {
+        res.status(500).json({ error: `Failed to send message to ${projectId}:${to}` });
+      }
+    } catch (err) {
+      console.error('[dashboard] Failed to send bridge message:', err);
+      res.status(500).json({ error: 'Failed to send bridge message' });
     }
   });
 

@@ -375,6 +375,32 @@
       opacity: 0.6;
     }
 
+    .project-card.selected {
+      border-color: var(--accent-primary);
+      background: var(--bg-card-hover);
+    }
+
+    .project-card {
+      cursor: pointer;
+    }
+
+    /* Header with back link */
+    .back-link {
+      color: var(--text-link);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 400;
+      margin-right: 8px;
+    }
+
+    .back-link:hover {
+      text-decoration: underline;
+    }
+
+    .project-title {
+      color: var(--text-primary);
+    }
+
     .card-header {
       display: flex;
       align-items: flex-start;
@@ -435,6 +461,15 @@
     .card-status.offline {
       background: rgba(97, 96, 97, 0.15);
       color: var(--status-offline);
+    }
+
+    .card-status.reconnecting {
+      background: rgba(232, 164, 39, 0.15);
+      color: var(--status-away);
+    }
+
+    .card-status.reconnecting .dot {
+      animation: pulse-glow 1.5s ease-in-out infinite;
     }
 
     .card-status .dot {
@@ -677,6 +712,122 @@
       font-size: 13px;
     }
 
+    /* Message Composer */
+    .message-composer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border-divider);
+      background: var(--bg-sidebar);
+    }
+
+    .composer-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .composer-label {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .composer-select {
+      flex: 1;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-family: var(--font-family);
+      color: var(--text-primary);
+      background: var(--bg-main);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .composer-select:hover {
+      border-color: var(--accent-primary);
+    }
+
+    .composer-select:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+
+    .composer-select:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .composer-input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .composer-input {
+      flex: 1;
+      padding: 8px 12px;
+      font-size: 14px;
+      font-family: var(--font-family);
+      color: var(--text-primary);
+      background: var(--bg-main);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+    }
+
+    .composer-input:hover:not(:disabled) {
+      border-color: var(--accent-primary);
+    }
+
+    .composer-input:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+
+    .composer-input:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .composer-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .composer-send {
+      padding: 8px 12px;
+      background: var(--accent-primary);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition-fast);
+    }
+
+    .composer-send:hover:not(:disabled) {
+      background: #0d4f7a;
+    }
+
+    .composer-send:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .composer-status {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      min-height: 16px;
+    }
+
+    .composer-status.success {
+      color: var(--status-online);
+    }
+
+    .composer-status.error {
+      color: var(--accent-red);
+    }
+
     .messages-footer {
       padding: 12px 16px;
       border-top: 1px solid var(--border-divider);
@@ -880,7 +1031,7 @@
     <main class="main-panel">
       <header class="channel-header">
         <div class="channel-info">
-          <h1 class="channel-name">All Projects</h1>
+          <h1 class="channel-name" id="channel-name">All Projects</h1>
         </div>
         <div class="channel-stats">
           <div class="stat-badge">
@@ -924,6 +1075,35 @@
         <div class="messages-empty">
           <p>No messages yet</p>
         </div>
+      </div>
+
+      <!-- Message Composer -->
+      <div class="message-composer" id="message-composer">
+        <div class="composer-header">
+          <span class="composer-label">Send to:</span>
+          <select class="composer-select" id="composer-project">
+            <option value="">Select a project...</option>
+          </select>
+          <select class="composer-select" id="composer-agent">
+            <option value="">Select agent...</option>
+          </select>
+        </div>
+        <div class="composer-input-row">
+          <input
+            type="text"
+            class="composer-input"
+            id="composer-message"
+            placeholder="Type a message..."
+            disabled
+          />
+          <button class="composer-send" id="composer-send" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+        <div class="composer-status" id="composer-status"></div>
       </div>
 
       <footer class="messages-footer">
@@ -1003,6 +1183,13 @@
     const paletteSearch = document.getElementById('palette-search');
     const paletteProjectsSection = document.getElementById('palette-projects-section');
     const paletteAgentsSection = document.getElementById('palette-agents-section');
+
+    // Composer elements
+    const composerProject = document.getElementById('composer-project');
+    const composerAgent = document.getElementById('composer-agent');
+    const composerMessage = document.getElementById('composer-message');
+    const composerSend = document.getElementById('composer-send');
+    const composerStatus = document.getElementById('composer-status');
 
     // Command Palette
     function openPalette() {
@@ -1141,6 +1328,158 @@
       return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
+    // Composer Functions
+    function updateComposerProjects() {
+      const projects = currentData.projects || [];
+      const connectedProjects = projects.filter(p => p.connected);
+
+      composerProject.innerHTML = '<option value="">Select a project...</option>' +
+        connectedProjects.map(p =>
+          `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || p.id)}</option>`
+        ).join('');
+    }
+
+    function updateComposerAgents() {
+      const projectId = composerProject.value;
+      if (!projectId) {
+        composerAgent.innerHTML = '<option value="">Select agent...</option>';
+        composerAgent.disabled = true;
+        composerMessage.disabled = true;
+        composerSend.disabled = true;
+        return;
+      }
+
+      const project = (currentData.projects || []).find(p => p.id === projectId);
+      const agents = project?.agents || [];
+
+      composerAgent.innerHTML = '<option value="">Select agent...</option>' +
+        '<option value="*">* (Broadcast to all)</option>' +
+        '<option value="lead">Lead</option>' +
+        agents.map(a =>
+          `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`
+        ).join('');
+
+      composerAgent.disabled = false;
+    }
+
+    function updateComposerState() {
+      const hasProject = !!composerProject.value;
+      const hasAgent = !!composerAgent.value;
+      const hasMessage = composerMessage.value.trim().length > 0;
+
+      composerMessage.disabled = !hasProject || !hasAgent;
+      composerSend.disabled = !hasProject || !hasAgent || !hasMessage;
+    }
+
+    async function sendBridgeMessage() {
+      const projectId = composerProject.value;
+      const to = composerAgent.value;
+      const message = composerMessage.value.trim();
+
+      if (!projectId || !to || !message) return;
+
+      composerSend.disabled = true;
+      composerStatus.textContent = 'Sending...';
+      composerStatus.className = 'composer-status';
+
+      try {
+        const response = await fetch('/api/bridge/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, to, message })
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          composerStatus.textContent = 'Message sent!';
+          composerStatus.className = 'composer-status success';
+          composerMessage.value = '';
+          setTimeout(() => {
+            composerStatus.textContent = '';
+            composerStatus.className = 'composer-status';
+          }, 2000);
+        } else {
+          throw new Error(result.error || 'Failed to send');
+        }
+      } catch (err) {
+        composerStatus.textContent = err.message || 'Failed to send message';
+        composerStatus.className = 'composer-status error';
+      }
+
+      updateComposerState();
+    }
+
+    // Composer event listeners
+    composerProject.addEventListener('change', () => {
+      updateComposerAgents();
+      updateComposerState();
+    });
+
+    composerAgent.addEventListener('change', updateComposerState);
+    composerMessage.addEventListener('input', updateComposerState);
+
+    composerSend.addEventListener('click', sendBridgeMessage);
+    composerMessage.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !composerSend.disabled) {
+        e.preventDefault();
+        sendBridgeMessage();
+      }
+    });
+
+    // Project selection state
+    let selectedProjectId = null;
+    const channelName = document.getElementById('channel-name');
+
+    function selectProject(projectId) {
+      selectedProjectId = projectId;
+
+      if (projectId) {
+        const project = (currentData.projects || []).find(p => p.id === projectId);
+        if (project) {
+          channelName.innerHTML = `
+            <span class="back-link" id="back-to-all">← All Projects</span>
+            <span class="project-title">${escapeHtml(project.name || project.id)}</span>
+          `;
+          // Auto-select project in composer
+          composerProject.value = projectId;
+          updateComposerAgents();
+          updateComposerState();
+        }
+      } else {
+        channelName.textContent = 'All Projects';
+        selectedProjectId = null;
+      }
+
+      // Update card selection state
+      document.querySelectorAll('.project-card').forEach(card => {
+        card.classList.toggle('selected', card.dataset.projectId === projectId);
+      });
+    }
+
+    // Handle project card clicks
+    cardsGrid.addEventListener('click', (e) => {
+      const card = e.target.closest('.project-card');
+      if (card) {
+        selectProject(card.dataset.projectId);
+      }
+    });
+
+    // Handle back link click
+    channelName.addEventListener('click', (e) => {
+      if (e.target.id === 'back-to-all' || e.target.classList.contains('back-link')) {
+        selectProject(null);
+      }
+    });
+
+    // Handle sidebar project clicks
+    projectList.addEventListener('click', (e) => {
+      const item = e.target.closest('.project-item');
+      if (item) {
+        selectProject(item.dataset.projectId);
+      }
+    });
+
     function formatUptime(ms) {
       const seconds = Math.floor(ms / 1000);
       if (seconds < 60) return `${seconds}s`;
@@ -1166,7 +1505,7 @@
       document.getElementById('project-count').textContent = projects.length;
 
       projectList.innerHTML = projects.map(p => `
-        <li class="project-item ${p.connected ? 'connected' : ''}">
+        <li class="project-item ${p.connected ? 'connected' : ''}" data-project-id="${escapeHtml(p.id)}">
           <span class="project-status-dot"></span>
           <span class="project-name">${escapeHtml(p.name || p.id)}</span>
         </li>
@@ -1210,9 +1549,9 @@
                   <div class="card-path">${escapeHtml(p.path || '')}</div>
                 </div>
               </div>
-              <div class="card-status ${p.connected ? 'online' : 'offline'}">
+              <div class="card-status ${p.connected ? 'online' : p.reconnecting ? 'reconnecting' : 'offline'}">
                 <span class="dot"></span>
-                <span>${p.connected ? 'Online' : 'Offline'}</span>
+                <span>${p.connected ? 'Online' : p.reconnecting ? 'Reconnecting...' : 'Offline'}</span>
               </div>
             </div>
 
@@ -1268,6 +1607,7 @@
       renderSidebarProjects(data.projects);
       renderProjectCards(data.projects);
       renderMessages(data.messages);
+      updateComposerProjects();
     }
 
     // WebSocket connection

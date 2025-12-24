@@ -279,6 +279,34 @@
       list-style: none;
     }
 
+    /* Sidebar Footer */
+    .sidebar-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border-divider);
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px;
+      border-radius: 6px;
+      transition: all var(--transition-fast);
+    }
+
+    .nav-link:hover {
+      background: var(--bg-channel-hover);
+      color: var(--text-primary);
+    }
+
+    .nav-link svg {
+      width: 16px;
+      height: 16px;
+    }
+
     .channel-item {
       display: flex;
       align-items: center;
@@ -1435,6 +1463,18 @@
             <!-- Agents injected here -->
           </ul>
         </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <a href="/bridge" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"/>
+            <rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+          </svg>
+          Bridge View
+        </a>
       </div>
     </aside>
 

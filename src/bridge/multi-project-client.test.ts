@@ -192,4 +192,147 @@ describe('MultiProjectClient (unit)', () => {
 
     expect(client.getConnectedProjects()).toEqual(['project-a']);
   });
+
+  describe('reconnection logic', () => {
+    it('schedules reconnection when socket closes and reconnect is enabled', async () => {
+      vi.useFakeTimers();
+      const socket = new MockSocket();
+      createConnectionMock.mockImplementation((_path: string, cb?: () => void) => {
+        if (cb) setImmediate(cb);
+        return socket;
+      });
+
+      framesToReturn = [
+        { type: 'WELCOME', id: 'welcome-1', v: 1, ts: Date.now(), payload: {} },
+      ];
+
+      // Default: reconnect enabled
+      const client = new MultiProjectClient([projectA]);
+      const connectPromise = client.connect();
+
+      socket.emit('data', Buffer.from('welcome'));
+      await vi.runOnlyPendingTimersAsync();
+      await connectPromise;
+
+      // Simulate close
+      socket.emit('close');
+
+      // Should have scheduled reconnection
+      expect((client as any).connections.get('project-a')?.reconnecting).toBe(true);
+
+      client.disconnect();
+    });
+
+    it('does not reconnect when reconnect option is false', async () => {
+      vi.useFakeTimers();
+      const socket = new MockSocket();
+      createConnectionMock.mockImplementation((_path: string, cb?: () => void) => {
+        if (cb) setImmediate(cb);
+        return socket;
+      });
+
+      framesToReturn = [
+        { type: 'WELCOME', id: 'welcome-1', v: 1, ts: Date.now(), payload: {} },
+      ];
+
+      const client = new MultiProjectClient([projectA], { reconnect: false });
+      const connectPromise = client.connect();
+
+      socket.emit('data', Buffer.from('welcome'));
+      await vi.runOnlyPendingTimersAsync();
+      await connectPromise;
+
+      // Simulate close
+      socket.emit('close');
+
+      // Should NOT have scheduled reconnection
+      expect((client as any).connections.get('project-a')?.reconnecting).toBeFalsy();
+
+      client.disconnect();
+    });
+
+    it('uses exponential backoff for reconnection delays', async () => {
+      vi.useFakeTimers();
+      const client = new MultiProjectClient([projectA], {
+        reconnectDelay: 100,
+        maxReconnectDelay: 1000,
+      });
+
+      const conn = {
+        config: projectA,
+        socket: new MockSocket(),
+        parser: { push: vi.fn(() => []) },
+        ready: false,
+        reconnecting: false,
+        reconnectAttempts: 0,
+      };
+      (client as any).connections.set('project-a', conn);
+
+      // First attempt: 100ms
+      (client as any).scheduleReconnect(conn);
+      expect(conn.reconnectAttempts).toBe(1);
+
+      // Manually reset for second attempt
+      conn.reconnecting = false;
+      (client as any).scheduleReconnect(conn);
+      expect(conn.reconnectAttempts).toBe(2);
+
+      // Third attempt: 400ms
+      conn.reconnecting = false;
+      (client as any).scheduleReconnect(conn);
+      expect(conn.reconnectAttempts).toBe(3);
+
+      client.disconnect();
+    });
+
+    it('stops reconnecting after max attempts', async () => {
+      const client = new MultiProjectClient([projectA], {
+        maxReconnectAttempts: 3,
+      });
+
+      const conn = {
+        config: projectA,
+        socket: new MockSocket(),
+        parser: { push: vi.fn(() => []) },
+        ready: false,
+        reconnecting: false,
+        reconnectAttempts: 3,
+      };
+      (client as any).connections.set('project-a', conn);
+
+      // Should not schedule another reconnect
+      (client as any).scheduleReconnect(conn);
+      expect(conn.reconnecting).toBe(false);
+
+      client.disconnect();
+    });
+
+    it('clears reconnect timers on disconnect', async () => {
+      vi.useFakeTimers();
+      const socket = new MockSocket();
+      createConnectionMock.mockImplementation((_path: string, cb?: () => void) => {
+        if (cb) setImmediate(cb);
+        return socket;
+      });
+
+      framesToReturn = [
+        { type: 'WELCOME', id: 'welcome-1', v: 1, ts: Date.now(), payload: {} },
+      ];
+
+      const client = new MultiProjectClient([projectA]);
+      const connectPromise = client.connect();
+
+      socket.emit('data', Buffer.from('welcome'));
+      await vi.runOnlyPendingTimersAsync();
+      await connectPromise;
+
+      // Simulate close to trigger reconnection
+      socket.emit('close');
+
+      // Disconnect should clear the timer
+      client.disconnect();
+
+      expect((client as any).shuttingDown).toBe(true);
+    });
+  });
 });

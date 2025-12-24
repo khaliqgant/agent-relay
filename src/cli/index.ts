@@ -545,6 +545,7 @@ program
       name: string;
       path: string;
       connected: boolean;
+      reconnecting?: boolean;
       lead?: { name: string; connected: boolean };
       agents: Array<{ name: string; status: string; task?: string }>;
     }
@@ -598,10 +599,17 @@ program
     const client = new MultiProjectClient(valid);
 
     // Track connection state changes (daemon connection, not agent registration)
+    // Also track "reconnecting" state for UI feedback
+    const wasConnected = new Map<string, boolean>();
+
     client.onProjectStateChange = (projectId, connected) => {
       const project = bridgeState.projects.find(p => p.id === projectId);
       if (project) {
+        const hadConnection = wasConnected.get(projectId) || false;
         project.connected = connected;
+        // Set reconnecting if we lost connection (had it before, now disconnected)
+        project.reconnecting = !connected && hadConnection;
+        wasConnected.set(projectId, connected);
         // Note: lead.connected should only be true when an actual lead agent registers
         // The bridge connecting to daemon doesn't mean a lead agent is active
       }
