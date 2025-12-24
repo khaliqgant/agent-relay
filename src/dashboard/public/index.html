@@ -307,6 +307,23 @@
       height: 16px;
     }
 
+    /* Back to Bridge link styling */
+    .nav-link.back-to-bridge {
+      background: rgba(18, 100, 163, 0.15);
+      color: var(--text-link);
+      border: 1px solid rgba(18, 100, 163, 0.3);
+    }
+
+    .nav-link.back-to-bridge:hover {
+      background: rgba(18, 100, 163, 0.25);
+      color: var(--text-link);
+    }
+
+    /* Project view mode indicator */
+    body.project-view .workspace-name {
+      color: var(--text-link);
+    }
+
     .channel-item {
       display: flex;
       align-items: center;
@@ -1465,15 +1482,15 @@
         </div>
       </div>
 
-      <div class="sidebar-footer">
-        <a href="/bridge" class="nav-link">
+      <div class="sidebar-footer" id="sidebar-footer">
+        <a href="/bridge" class="nav-link" id="bridge-nav-link">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="3" width="7" height="7"/>
             <rect x="14" y="3" width="7" height="7"/>
             <rect x="14" y="14" width="7" height="7"/>
             <rect x="3" y="14" width="7" height="7"/>
           </svg>
-          Bridge View
+          <span id="bridge-link-text">Bridge View</span>
         </a>
       </div>
     </aside>
@@ -1576,6 +1593,26 @@
         >
       </div>
       <div class="palette-results" id="palette-results">
+        <div class="palette-section">
+          <div class="palette-section-title">Navigation</div>
+          <div class="palette-item" data-command="bridge">
+            <div class="palette-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"/>
+                <rect x="14" y="3" width="7" height="7"/>
+                <rect x="14" y="14" width="7" height="7"/>
+                <rect x="3" y="14" width="7" height="7"/>
+              </svg>
+            </div>
+            <div class="palette-item-content">
+              <div class="palette-item-title">Go to Bridge</div>
+              <div class="palette-item-subtitle">Multi-project orchestration view</div>
+            </div>
+            <div class="palette-item-shortcut">
+              <kbd>⌘</kbd><kbd>B</kbd>
+            </div>
+          </div>
+        </div>
         <div class="palette-section">
           <div class="palette-section-title">Commands</div>
           <div class="palette-item" data-command="broadcast">

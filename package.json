@@ -21,7 +21,9 @@
   "scripts": {
     "postinstall": "npm rebuild better-sqlite3",
     "build": "npm run clean && tsc && npm run build:frontend",
-    "build:frontend": "esbuild src/dashboard/frontend/app.ts --bundle --outfile=src/dashboard/public/js/app.js --format=esm --target=es2022 --minify --sourcemap",
+    "build:frontend": "npm run build:frontend:dashboard && npm run build:frontend:bridge",
+    "build:frontend:dashboard": "esbuild src/dashboard/frontend/app.ts --bundle --outfile=src/dashboard/public/js/app.js --format=esm --target=es2022 --minify --sourcemap",
+    "build:frontend:bridge": "esbuild src/dashboard/frontend/bridge/app.ts --bundle --outfile=src/dashboard/public/js/bridge.js --format=esm --target=es2022 --minify --sourcemap",
     "postbuild": "cp -r src/dashboard/public dist/dashboard/ && chmod +x dist/cli/index.js",
     "dev": "tsc -w",
     "dev:local": "npm run build && npm link && echo '✓ agent-relay linked globally'",

@@ -267,6 +267,36 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      flex: 1;
+    }
+
+    .project-dashboard-btn {
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: all var(--transition-fast);
+    }
+
+    .project-item:hover .project-dashboard-btn {
+      opacity: 1;
+    }
+
+    .project-dashboard-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: var(--text-primary);
+    }
+
+    .project-dashboard-btn svg {
+      width: 14px;
+      height: 14px;
     }
 
     .sidebar-footer {
@@ -549,6 +579,52 @@
       color: var(--text-muted);
       background: rgba(255, 255, 255, 0.02);
       border-radius: 6px;
+    }
+
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-divider);
+    }
+
+    .card-action-btn {
+      flex: 1;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all var(--transition-fast);
+    }
+
+    .card-action-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-primary);
+      border-color: var(--accent-primary);
+    }
+
+    .card-action-btn.primary {
+      background: var(--accent-primary);
+      border-color: var(--accent-primary);
+      color: white;
+    }
+
+    .card-action-btn.primary:hover {
+      background: #0d4f7a;
+    }
+
+    .card-action-btn svg {
+      width: 14px;
+      height: 14px;
     }
 
     /* Empty State */
@@ -1166,12 +1242,27 @@
             </div>
           </div>
         </div>
+        <div class="palette-section" id="palette-navigation-section">
+          <div class="palette-section-title">Navigation</div>
+          <div class="palette-item" data-command="go-dashboard">
+            <div class="palette-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+              </svg>
+            </div>
+            <div class="palette-item-content">
+              <div class="palette-item-title">Go to Main Dashboard</div>
+              <div class="palette-item-subtitle">View single-project dashboard</div>
+            </div>
+          </div>
+        </div>
         <div class="palette-section" id="palette-projects-section">
-          <div class="palette-section-title">Jump to Project</div>
+          <div class="palette-section-title">Open Project Dashboard</div>
           <!-- Projects injected here -->
         </div>
         <div class="palette-section" id="palette-agents-section">
-          <div class="palette-section-title">Jump to Agent</div>
+          <div class="palette-section-title">Message Agent</div>
           <!-- Agents injected here -->
         </div>
       </div>
@@ -1226,23 +1317,28 @@
 
       if (filteredProjects.length > 0) {
         paletteProjectsSection.innerHTML = `
-          <div class="palette-section-title">Jump to Project</div>
+          <div class="palette-section-title">Open Project Dashboard</div>
           ${filteredProjects.map(p => `
-            <div class="palette-item" data-project="${escapeHtml(p.id)}">
+            <div class="palette-item" data-project="${escapeHtml(p.id)}" data-action="open-dashboard">
               <div class="palette-item-icon">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="3" y1="9" x2="21" y2="9"/>
+                  <line x1="9" y1="21" x2="9" y2="9"/>
                 </svg>
               </div>
               <div class="palette-item-content">
                 <div class="palette-item-title">${escapeHtml(p.name || p.id)}</div>
-                <div class="palette-item-subtitle">${p.connected ? 'Online' : 'Offline'} · ${(p.agents || []).length} agents</div>
+                <div class="palette-item-subtitle">${p.connected ? 'Online' : 'Offline'} · ${(p.agents || []).length} agents · Click to open dashboard</div>
+              </div>
+              <div class="palette-item-shortcut">
+                <kbd>⏎</kbd>
               </div>
             </div>
           `).join('')}
         `;
       } else {
-        paletteProjectsSection.innerHTML = '<div class="palette-section-title">Jump to Project</div>';
+        paletteProjectsSection.innerHTML = '<div class="palette-section-title">Open Project Dashboard</div>';
       }
 
       // Update agents section
@@ -1312,16 +1408,37 @@
       const command = item.dataset.command;
       const projectId = item.dataset.project;
       const agentName = item.dataset.agent;
+      const action = item.dataset.action;
 
       if (command === 'broadcast') {
         closePalette();
-        alert('Broadcast: Use the bridge CLI to send messages to all leads');
+        // Focus on message composer
+        composerMessage.focus();
+        composerStatus.textContent = 'Select a project and agent to send a message';
       } else if (command === 'refresh') {
         closePalette();
         location.reload();
+      } else if (command === 'go-dashboard') {
+        closePalette();
+        window.location.href = '/';
+      } else if (action === 'open-dashboard' && projectId) {
+        closePalette();
+        // Navigate to project-specific dashboard
+        window.location.href = `/project/${encodeURIComponent(projectId)}`;
+      } else if (agentName && projectId) {
+        closePalette();
+        // Pre-select project and agent in composer for messaging
+        composerProject.value = projectId;
+        updateComposerAgents();
+        setTimeout(() => {
+          composerAgent.value = agentName;
+          updateComposerState();
+          composerMessage.focus();
+        }, 50);
       } else if (projectId) {
         closePalette();
-        // Scroll to project card
+        // Select project and scroll to card
+        selectProject(projectId);
         const card = document.querySelector(`.project-card[data-project-id="${projectId}"]`);
         if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
@@ -1494,6 +1611,35 @@
 
     // Handle project card clicks
     cardsGrid.addEventListener('click', (e) => {
+      // Handle "Open Dashboard" button
+      const dashboardBtn = e.target.closest('[data-open-dashboard]');
+      if (dashboardBtn) {
+        e.stopPropagation();
+        const projectId = dashboardBtn.dataset.openDashboard;
+        if (projectId) {
+          window.location.href = `/project/${encodeURIComponent(projectId)}`;
+        }
+        return;
+      }
+
+      // Handle "Message Lead" button
+      const messageLeadBtn = e.target.closest('[data-message-lead]');
+      if (messageLeadBtn && !messageLeadBtn.disabled) {
+        e.stopPropagation();
+        const projectId = messageLeadBtn.dataset.messageLead;
+        if (projectId) {
+          // Pre-select project and lead in composer
+          composerProject.value = projectId;
+          updateComposerAgents();
+          setTimeout(() => {
+            composerAgent.value = 'lead';
+            updateComposerState();
+            composerMessage.focus();
+          }, 50);
+        }
+        return;
+      }
+
       const card = e.target.closest('.project-card');
       if (card) {
         selectProject(card.dataset.projectId);
@@ -1509,6 +1655,17 @@
 
     // Handle sidebar project clicks
     projectList.addEventListener('click', (e) => {
+      // Check if dashboard button was clicked
+      const dashboardBtn = e.target.closest('.project-dashboard-btn');
+      if (dashboardBtn) {
+        e.stopPropagation();
+        const projectId = dashboardBtn.dataset.dashboardProject;
+        if (projectId) {
+          window.location.href = `/project/${encodeURIComponent(projectId)}`;
+        }
+        return;
+      }
+
       const item = e.target.closest('.project-item');
       if (item) {
         selectProject(item.dataset.projectId);
@@ -1543,6 +1700,13 @@
         <li class="project-item ${p.connected ? 'connected' : ''} ${selectedProjectId === p.id ? 'active' : ''}" data-project-id="${escapeHtml(p.id)}">
           <span class="project-status-dot"></span>
           <span class="project-name">${escapeHtml(p.name || p.id)}</span>
+          <button class="project-dashboard-btn" data-dashboard-project="${escapeHtml(p.id)}" title="Open project dashboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <line x1="3" y1="9" x2="21" y2="9"/>
+              <line x1="9" y1="21" x2="9" y2="9"/>
+            </svg>
+          </button>
         </li>
       `).join('');
     }
@@ -1599,6 +1763,23 @@
               <div class="agents-list">
                 ${agentsHtml}
               </div>
+            </div>
+
+            <div class="card-actions">
+              <button class="card-action-btn" data-message-lead="${escapeHtml(p.id)}" ${!p.connected ? 'disabled' : ''}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                Message Lead
+              </button>
+              <button class="card-action-btn primary" data-open-dashboard="${escapeHtml(p.id)}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="3" y1="9" x2="21" y2="9"/>
+                  <line x1="9" y1="21" x2="9" y2="9"/>
+                </svg>
+                Open Dashboard
+              </button>
             </div>
           </div>
         `;
@@ -1693,5 +1874,8 @@
     // Start
     connect();
   </script>
+
+  <!-- Bridge Application (TypeScript bundled) - loaded after inline script for gradual migration -->
+  <!-- <script type="module" src="/js/bridge.js"></script> -->
 </body>
 </html>

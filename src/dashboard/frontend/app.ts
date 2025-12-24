@@ -29,10 +29,71 @@ import {
 import { state } from './state.js';
 
 /**
+ * Detect if we're viewing a project dashboard from bridge context
+ */
+function detectProjectContext(): { projectId: string | null; fromBridge: boolean } {
+  const pathname = window.location.pathname;
+  const match = pathname.match(/^\/project\/([^/]+)$/);
+
+  if (match) {
+    return { projectId: decodeURIComponent(match[1]), fromBridge: true };
+  }
+
+  return { projectId: null, fromBridge: false };
+}
+
+/**
+ * Update the UI for project context (when accessed from bridge)
+ */
+async function setupProjectContext(projectId: string): Promise<void> {
+  // Update workspace name to show project
+  const workspaceName = document.querySelector('.workspace-name');
+  if (workspaceName) {
+    // Fetch project info
+    try {
+      const response = await fetch(`/api/project/${encodeURIComponent(projectId)}`);
+      if (response.ok) {
+        const project = await response.json();
+        const nameSpan = workspaceName.querySelector(':not(.status-dot)');
+        if (nameSpan && nameSpan.nodeType === Node.TEXT_NODE) {
+          nameSpan.textContent = project.name || projectId;
+        } else {
+          // Replace text content after status-dot
+          const textNodes = Array.from(workspaceName.childNodes).filter(n => n.nodeType === Node.TEXT_NODE);
+          textNodes.forEach(n => n.textContent = '');
+          workspaceName.appendChild(document.createTextNode(' ' + (project.name || projectId)));
+        }
+      }
+    } catch {
+      // Fallback - just show project ID
+    }
+  }
+
+  // Update bridge nav link to show "Back to Bridge" with back arrow
+  const bridgeLinkText = document.getElementById('bridge-link-text');
+  const bridgeNavLink = document.getElementById('bridge-nav-link');
+  if (bridgeLinkText) {
+    bridgeLinkText.textContent = '← Back to Bridge';
+  }
+  if (bridgeNavLink) {
+    bridgeNavLink.classList.add('back-to-bridge');
+  }
+
+  // Add a subtle indicator that we're in project view
+  document.body.classList.add('project-view');
+}
+
+/**
  * Initialize the dashboard application
  */
 export function initApp(): void {
   const elements = initElements();
+
+  // Check if we're in project context (from bridge)
+  const { projectId, fromBridge } = detectProjectContext();
+  if (fromBridge && projectId) {
+    setupProjectContext(projectId);
+  }
 
   // Subscribe to state changes
   subscribe(() => {
@@ -196,7 +257,10 @@ function setupEventListeners(elements: ReturnType<typeof getElements>): void {
     item.addEventListener('click', () => {
       const command = item.dataset.command;
 
-      if (command === 'broadcast') {
+      if (command === 'bridge') {
+        // Navigate to bridge view
+        window.location.href = '/bridge';
+      } else if (command === 'broadcast') {
         // Pre-fill message input with @* for broadcast
         elements.messageInput.value = '@* ';
         elements.messageInput.focus();
@@ -206,6 +270,14 @@ function setupEventListeners(elements: ReturnType<typeof getElements>): void {
 
       closeCommandPalette();
     });
+  });
+
+  // Add Cmd/Ctrl+B shortcut for bridge navigation
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+      e.preventDefault();
+      window.location.href = '/bridge';
+    }
   });
 
   // Initialize palette channel click handlers

@@ -741,6 +741,57 @@ export async function startDashboard(port: number, dataDir: string, teamDir: str
     res.sendFile(path.join(publicDir, 'bridge.html'));
   });
 
+  // Project dashboard route - serves main dashboard with project context
+  app.get('/project/:projectId', (req, res) => {
+    // Serve the main index.html - it will detect the project context from URL
+    res.sendFile(path.join(publicDir, 'index.html'));
+  });
+
+  // API endpoint to get project info by ID (for project dashboard context)
+  app.get('/api/project/:projectId', async (req, res) => {
+    const { projectId } = req.params;
+
+    try {
+      const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+      if (fs.existsSync(bridgeStatePath)) {
+        const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+        const project = (bridgeState.projects || []).find((p: { id: string }) => p.id === projectId);
+
+        if (project) {
+          // Get project's data directory and enrich with agent info
+          const projectHash = crypto.createHash('sha256').update(project.path).digest('hex').slice(0, 12);
+          const projectDataDir = path.join(path.dirname(dataDir), projectHash);
+          const projectTeamDir = path.join(projectDataDir, 'team');
+          const agentsPath = path.join(projectTeamDir, 'agents.json');
+
+          let agents: { name: string; cli?: string; lastSeen?: string }[] = [];
+          if (fs.existsSync(agentsPath)) {
+            try {
+              const agentsData = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+              agents = agentsData.agents || [];
+            } catch {
+              // Ignore
+            }
+          }
+
+          res.json({
+            ...project,
+            agents,
+            socketPath: path.join(projectDataDir, 'relay.sock'),
+            dataDir: projectDataDir,
+          });
+        } else {
+          res.status(404).json({ error: 'Project not found' });
+        }
+      } else {
+        res.status(404).json({ error: 'Bridge not configured' });
+      }
+    } catch (err) {
+      console.error('Failed to get project info:', err);
+      res.status(500).json({ error: 'Failed to get project info' });
+    }
+  });
+
   // Bridge API endpoint - returns multi-project data
   // This is a placeholder that returns empty data when not in bridge mode
   // The actual bridge data comes from MultiProjectClient when running `agent-relay bridge`
