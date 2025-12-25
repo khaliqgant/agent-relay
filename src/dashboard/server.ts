@@ -11,6 +11,7 @@ import { RelayClient } from '../wrapper/client.js';
 import { computeNeedsAttention } from './needs-attention.js';
 import { MultiProjectClient } from '../bridge/multi-project-client.js';
 import type { ProjectConfig } from '../bridge/types.js';
+import { AgentSpawner } from '../bridge/spawner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -238,6 +239,160 @@ export async function startDashboard(port: number, dataDir: string, teamDir: str
 
   // Start bridge client connection (non-blocking)
   connectBridgeClient().catch(() => {});
+
+  // Agent spawners by project path
+  const spawners = new Map<string, AgentSpawner>();
+
+  /**
+   * Get or create a spawner for a project
+   */
+  const getSpawner = (projectPath: string): AgentSpawner => {
+    let spawner = spawners.get(projectPath);
+    if (!spawner) {
+      spawner = new AgentSpawner(projectPath);
+      spawners.set(projectPath, spawner);
+    }
+    return spawner;
+  };
+
+  /**
+   * Get the current project root from the data directory
+   * (For single-project dashboard, the project is the parent of the data dir)
+   */
+  const getCurrentProjectRoot = (): string => {
+    // The dataDir is typically ~/.agent-relay/<project-hash>/
+    // For bridge mode, projects have their own paths
+    // For now, try to detect from cwd or use parent of dataDir
+    return process.cwd();
+  };
+
+  // Supported CLI options
+  const SUPPORTED_CLIS = ['claude', 'codex', 'gemini'] as const;
+
+  // API endpoint to spawn a new agent
+  app.post('/api/agent/spawn', async (req, res) => {
+    const { name, cli, model, task, projectId, projectPath } = req.body;
+
+    if (!name || !cli) {
+      return res.status(400).json({ error: 'Missing "name" or "cli" field' });
+    }
+
+    // Validate CLI
+    if (!SUPPORTED_CLIS.includes(cli)) {
+      return res.status(400).json({
+        error: `Invalid CLI "${cli}". Supported: ${SUPPORTED_CLIS.join(', ')}`
+      });
+    }
+
+    // Determine the project root
+    let targetProjectPath = projectPath;
+    if (!targetProjectPath && projectId) {
+      // Look up project path from bridge state
+      const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+      if (fs.existsSync(bridgeStatePath)) {
+        try {
+          const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+          const project = (bridgeState.projects || []).find((p: { id: string }) => p.id === projectId);
+          if (project) {
+            targetProjectPath = project.path;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    }
+    if (!targetProjectPath) {
+      targetProjectPath = getCurrentProjectRoot();
+    }
+
+    // Build CLI string with optional model
+    let cliString = cli;
+    if (model) {
+      cliString = `${cli}:${model}`;
+    }
+
+    const spawner = getSpawner(targetProjectPath);
+
+    try {
+      const result = await spawner.spawn({
+        name,
+        cli: cliString,
+        task: task || `You are ${name}, an AI agent working on this project.`,
+        requestedBy: 'Dashboard',
+      });
+
+      if (result.success) {
+        res.json({
+          success: true,
+          name: result.name,
+          window: result.window,
+          projectPath: targetProjectPath,
+        });
+      } else {
+        res.status(400).json({ error: result.error || 'Failed to spawn agent' });
+      }
+    } catch (err: any) {
+      console.error('[dashboard] Failed to spawn agent:', err);
+      res.status(500).json({ error: err.message || 'Failed to spawn agent' });
+    }
+  });
+
+  // API endpoint to kill an agent
+  app.post('/api/agent/kill', async (req, res) => {
+    const { name, projectId, projectPath } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Missing "name" field' });
+    }
+
+    // Determine the project root
+    let targetProjectPath = projectPath;
+    if (!targetProjectPath && projectId) {
+      // Look up project path from bridge state
+      const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+      if (fs.existsSync(bridgeStatePath)) {
+        try {
+          const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+          const project = (bridgeState.projects || []).find((p: { id: string }) => p.id === projectId);
+          if (project) {
+            targetProjectPath = project.path;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    }
+    if (!targetProjectPath) {
+      targetProjectPath = getCurrentProjectRoot();
+    }
+
+    const spawner = getSpawner(targetProjectPath);
+
+    try {
+      const released = await spawner.release(name);
+      if (released) {
+        res.json({ success: true, name });
+      } else {
+        res.status(404).json({ error: `Agent "${name}" not found or already released` });
+      }
+    } catch (err: any) {
+      console.error('[dashboard] Failed to kill agent:', err);
+      res.status(500).json({ error: err.message || 'Failed to kill agent' });
+    }
+  });
+
+  // API endpoint to get spawned agents
+  app.get('/api/agents/spawned', (req, res) => {
+    const projectPath = req.query.projectPath as string || getCurrentProjectRoot();
+    const spawner = spawners.get(projectPath);
+
+    if (!spawner) {
+      res.json({ agents: [] });
+      return;
+    }
+
+    res.json({ agents: spawner.getActiveWorkers() });
+  });
 
   // API endpoint to send messages
   app.post('/api/send', async (req, res) => {

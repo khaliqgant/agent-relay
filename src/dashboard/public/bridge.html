@@ -1070,6 +1070,239 @@
     ::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.2);
     }
+
+    /* ========================================
+       Spawn Agent Modal
+       ======================================== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1100;
+    }
+
+    .modal-overlay.visible {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--bg-sidebar);
+      border-radius: 12px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+      width: 440px;
+      max-width: 90vw;
+      animation: modalSlideIn 0.2s ease-out;
+    }
+
+    @keyframes modalSlideIn {
+      from { opacity: 0; transform: scale(0.95) translateY(-10px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .modal-header {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--border-divider);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .modal-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition-fast);
+    }
+
+    .modal-close:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-primary);
+    }
+
+    .modal-body {
+      padding: 20px 24px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-main);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      font-size: 14px;
+      outline: none;
+      transition: border-color var(--transition-fast);
+    }
+
+    .form-input:focus {
+      border-color: var(--accent-primary);
+    }
+
+    .form-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .form-select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-main);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      font-size: 14px;
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ababad' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+    }
+
+    .form-select:focus {
+      border-color: var(--accent-primary);
+    }
+
+    .form-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .modal-footer {
+      padding: 16px 24px 20px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-family: var(--font-family);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+    }
+
+    .btn-primary {
+      background: var(--accent-primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #0b5d99;
+    }
+
+    .btn-primary:disabled {
+      background: var(--border-subtle);
+      cursor: not-allowed;
+    }
+
+    /* Spawn button in card */
+    .spawn-agent-btn {
+      padding: 8px 12px;
+      background: rgba(43, 172, 118, 0.15);
+      border: 1px solid rgba(43, 172, 118, 0.3);
+      border-radius: 6px;
+      color: var(--accent-green);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all var(--transition-fast);
+    }
+
+    .spawn-agent-btn:hover {
+      background: rgba(43, 172, 118, 0.25);
+      border-color: var(--accent-green);
+    }
+
+    .spawn-agent-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Kill button in agent item */
+    .agent-kill-btn {
+      width: 20px;
+      height: 20px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: all var(--transition-fast);
+      margin-left: auto;
+    }
+
+    .agent-item:hover .agent-kill-btn {
+      opacity: 1;
+    }
+
+    .agent-kill-btn:hover {
+      background: rgba(224, 30, 90, 0.2);
+      color: var(--accent-red);
+    }
+
+    .agent-kill-btn svg {
+      width: 12px;
+      height: 12px;
+    }
   </style>
 </head>
 <body>
@@ -1730,6 +1963,12 @@
                 <span class="agent-status-dot"></span>
                 <span class="agent-name">${escapeHtml(a.name)}</span>
                 <span class="agent-cli">${escapeHtml(a.cli || '')}</span>
+                <button class="agent-kill-btn" data-agent-name="${escapeHtml(a.name)}" data-project-id="${escapeHtml(p.id)}" title="Kill agent">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
               </div>
             `).join('')
           : '<div class="no-agents">No agents connected</div>';
@@ -1766,11 +2005,18 @@
             </div>
 
             <div class="card-actions">
+              <button class="spawn-agent-btn" data-spawn-project="${escapeHtml(p.id)}" ${!p.connected ? 'disabled' : ''}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Spawn
+              </button>
               <button class="card-action-btn" data-message-lead="${escapeHtml(p.id)}" ${!p.connected ? 'disabled' : ''}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                 </svg>
-                Message Lead
+                Message
               </button>
               <button class="card-action-btn primary" data-open-dashboard="${escapeHtml(p.id)}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1778,7 +2024,7 @@
                   <line x1="3" y1="9" x2="21" y2="9"/>
                   <line x1="9" y1="21" x2="9" y2="9"/>
                 </svg>
-                Open Dashboard
+                Dashboard
               </button>
             </div>
           </div>
@@ -1873,6 +2119,182 @@
 
     // Start
     connect();
+  </script>
+
+  <!-- Spawn Agent Modal -->
+  <div class="modal-overlay" id="spawn-modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Spawn New Agent</div>
+        <button class="modal-close" id="spawn-modal-close" title="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="spawn-project-id">
+        <div class="form-group">
+          <label class="form-label" for="spawn-agent-name">Agent Name</label>
+          <input type="text" id="spawn-agent-name" class="form-input" placeholder="e.g., Worker, Reviewer, Tester" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="spawn-agent-cli">CLI Tool</label>
+          <select id="spawn-agent-cli" class="form-select">
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="spawn-agent-model">Model (optional)</label>
+          <input type="text" id="spawn-agent-model" class="form-input" placeholder="e.g., opus, sonnet, gpt-4">
+          <div class="form-hint">Leave blank to use default model for the CLI</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="spawn-agent-task">Initial Task (optional)</label>
+          <textarea id="spawn-agent-task" class="form-input" rows="3" placeholder="Describe what this agent should work on..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="spawn-modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="spawn-modal-submit">Spawn Agent</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Spawn Modal Functions
+    const spawnModalOverlay = document.getElementById('spawn-modal-overlay');
+    const spawnProjectIdInput = document.getElementById('spawn-project-id');
+    const spawnNameInput = document.getElementById('spawn-agent-name');
+    const spawnCliSelect = document.getElementById('spawn-agent-cli');
+    const spawnModelInput = document.getElementById('spawn-agent-model');
+    const spawnTaskInput = document.getElementById('spawn-agent-task');
+    const spawnSubmitBtn = document.getElementById('spawn-modal-submit');
+
+    function openSpawnModal(projectId) {
+      spawnProjectIdInput.value = projectId || '';
+      spawnModalOverlay.classList.add('visible');
+      spawnNameInput.focus();
+    }
+
+    function closeSpawnModal() {
+      spawnModalOverlay.classList.remove('visible');
+      spawnNameInput.value = '';
+      spawnCliSelect.value = 'claude';
+      spawnModelInput.value = '';
+      spawnTaskInput.value = '';
+    }
+
+    async function handleSpawnAgent() {
+      const projectId = spawnProjectIdInput.value;
+      const name = spawnNameInput.value.trim();
+      const cli = spawnCliSelect.value;
+      const model = spawnModelInput.value.trim();
+      const task = spawnTaskInput.value.trim();
+
+      if (!name) {
+        alert('Please enter an agent name');
+        return;
+      }
+
+      spawnSubmitBtn.textContent = 'Spawning...';
+      spawnSubmitBtn.disabled = true;
+
+      try {
+        const response = await fetch('/api/agent/spawn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            cli,
+            model: model || undefined,
+            task: task || undefined,
+            projectId: projectId || undefined,
+          }),
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          closeSpawnModal();
+        } else {
+          alert(result.error || 'Failed to spawn agent');
+        }
+      } catch (err) {
+        console.error('Failed to spawn agent:', err);
+        alert('Failed to spawn agent');
+      } finally {
+        spawnSubmitBtn.textContent = 'Spawn Agent';
+        spawnSubmitBtn.disabled = false;
+      }
+    }
+
+    async function killAgent(agentName, projectId) {
+      if (!confirm(`Are you sure you want to kill agent "${agentName}"?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/agent/kill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: agentName,
+            projectId: projectId || undefined,
+          }),
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+          alert(result.error || 'Failed to kill agent');
+        }
+      } catch (err) {
+        console.error('Failed to kill agent:', err);
+        alert('Failed to kill agent');
+      }
+    }
+
+    // Spawn modal event listeners
+    document.getElementById('spawn-modal-close').addEventListener('click', closeSpawnModal);
+    document.getElementById('spawn-modal-cancel').addEventListener('click', closeSpawnModal);
+    spawnSubmitBtn.addEventListener('click', handleSpawnAgent);
+    spawnModalOverlay.addEventListener('click', (e) => {
+      if (e.target === spawnModalOverlay) closeSpawnModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && spawnModalOverlay.classList.contains('visible')) {
+        closeSpawnModal();
+      }
+    });
+    spawnNameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleSpawnAgent();
+    });
+
+    // Handle spawn/kill button clicks in cards (event delegation)
+    cardsGrid.addEventListener('click', (e) => {
+      // Spawn agent button
+      const spawnBtn = e.target.closest('[data-spawn-project]');
+      if (spawnBtn) {
+        e.stopPropagation();
+        openSpawnModal(spawnBtn.dataset.spawnProject);
+        return;
+      }
+
+      // Kill agent button
+      const killBtn = e.target.closest('.agent-kill-btn');
+      if (killBtn) {
+        e.stopPropagation();
+        const agentName = killBtn.dataset.agentName;
+        const projectId = killBtn.dataset.projectId;
+        if (agentName) {
+          killAgent(agentName, projectId);
+        }
+        return;
+      }
+    });
   </script>
 
   <!-- Bridge Application (TypeScript bundled) - loaded after inline script for gradual migration -->

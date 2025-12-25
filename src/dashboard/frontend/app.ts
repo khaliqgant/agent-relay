@@ -392,11 +392,204 @@ async function handleThreadSend(): Promise<void> {
   elements.threadSendBtn.disabled = false;
 }
 
+/**
+ * Spawn Agent Modal Management
+ */
+interface SpawnModalElements {
+  overlay: HTMLElement | null;
+  closeBtn: HTMLElement | null;
+  cancelBtn: HTMLElement | null;
+  submitBtn: HTMLElement | null;
+  nameInput: HTMLInputElement | null;
+  cliSelect: HTMLSelectElement | null;
+  modelInput: HTMLInputElement | null;
+  taskInput: HTMLTextAreaElement | null;
+}
+
+function getSpawnModalElements(): SpawnModalElements {
+  return {
+    overlay: document.getElementById('spawn-modal-overlay'),
+    closeBtn: document.getElementById('spawn-modal-close'),
+    cancelBtn: document.getElementById('spawn-modal-cancel'),
+    submitBtn: document.getElementById('spawn-modal-submit'),
+    nameInput: document.getElementById('spawn-agent-name') as HTMLInputElement,
+    cliSelect: document.getElementById('spawn-agent-cli') as HTMLSelectElement,
+    modelInput: document.getElementById('spawn-agent-model') as HTMLInputElement,
+    taskInput: document.getElementById('spawn-agent-task') as HTMLTextAreaElement,
+  };
+}
+
+function openSpawnModal(): void {
+  const modal = getSpawnModalElements();
+  if (modal.overlay) {
+    modal.overlay.classList.add('visible');
+    modal.nameInput?.focus();
+  }
+}
+
+function closeSpawnModal(): void {
+  const modal = getSpawnModalElements();
+  if (modal.overlay) {
+    modal.overlay.classList.remove('visible');
+    // Clear form
+    if (modal.nameInput) modal.nameInput.value = '';
+    if (modal.cliSelect) modal.cliSelect.value = 'claude';
+    if (modal.modelInput) modal.modelInput.value = '';
+    if (modal.taskInput) modal.taskInput.value = '';
+  }
+}
+
+async function handleSpawnAgent(): Promise<void> {
+  const modal = getSpawnModalElements();
+
+  const name = modal.nameInput?.value.trim();
+  const cli = modal.cliSelect?.value;
+  const model = modal.modelInput?.value.trim();
+  const task = modal.taskInput?.value.trim();
+
+  if (!name) {
+    alert('Please enter an agent name');
+    return;
+  }
+
+  if (!cli) {
+    alert('Please select a CLI tool');
+    return;
+  }
+
+  // Disable submit button
+  if (modal.submitBtn) {
+    modal.submitBtn.textContent = 'Spawning...';
+    (modal.submitBtn as HTMLButtonElement).disabled = true;
+  }
+
+  try {
+    const response = await fetch('/api/agent/spawn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        cli,
+        model: model || undefined,
+        task: task || undefined,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+      closeSpawnModal();
+      // Agent will appear in the list when it connects to the relay
+    } else {
+      alert(result.error || 'Failed to spawn agent');
+    }
+  } catch (err) {
+    console.error('Failed to spawn agent:', err);
+    alert('Failed to spawn agent. Check console for details.');
+  } finally {
+    if (modal.submitBtn) {
+      modal.submitBtn.textContent = 'Spawn Agent';
+      (modal.submitBtn as HTMLButtonElement).disabled = false;
+    }
+  }
+}
+
+/**
+ * Kill an agent
+ */
+async function killAgent(agentName: string): Promise<void> {
+  if (!confirm(`Are you sure you want to kill agent "${agentName}"?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/agent/kill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: agentName }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      alert(result.error || 'Failed to kill agent');
+    }
+    // Agent will disappear from the list when it disconnects
+  } catch (err) {
+    console.error('Failed to kill agent:', err);
+    alert('Failed to kill agent. Check console for details.');
+  }
+}
+
+/**
+ * Set up spawn modal event listeners
+ */
+function setupSpawnModalListeners(): void {
+  const modal = getSpawnModalElements();
+
+  // Spawn button in sidebar
+  const spawnBtn = document.getElementById('spawn-agent-btn');
+  if (spawnBtn) {
+    spawnBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openSpawnModal();
+    });
+  }
+
+  // Modal close buttons
+  modal.closeBtn?.addEventListener('click', closeSpawnModal);
+  modal.cancelBtn?.addEventListener('click', closeSpawnModal);
+
+  // Modal submit
+  modal.submitBtn?.addEventListener('click', handleSpawnAgent);
+
+  // Close on overlay click
+  modal.overlay?.addEventListener('click', (e) => {
+    if (e.target === modal.overlay) {
+      closeSpawnModal();
+    }
+  });
+
+  // Close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.overlay?.classList.contains('visible')) {
+      closeSpawnModal();
+    }
+  });
+
+  // Enter to submit (when name input is focused)
+  modal.nameInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      handleSpawnAgent();
+    }
+  });
+}
+
+/**
+ * Attach kill handlers to agent list items
+ * Called after agents are rendered
+ */
+export function attachKillHandlers(): void {
+  document.querySelectorAll<HTMLElement>('.agent-kill-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const agentName = btn.dataset.agent;
+      if (agentName) {
+        killAgent(agentName);
+      }
+    });
+  });
+}
+
 // Auto-initialize when DOM is ready
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initApp);
+    document.addEventListener('DOMContentLoaded', () => {
+      initApp();
+      setupSpawnModalListeners();
+    });
   } else {
     initApp();
+    setupSpawnModalListeners();
   }
 }

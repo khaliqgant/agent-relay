@@ -91,6 +91,14 @@ export function renderAgents(): void {
         </div>
         <span class="channel-name">${escapeHtml(agent.name)}</span>
         ${agent.needsAttention ? '<span class="attention-badge">Needs Input</span>' : ''}
+        <div class="agent-actions">
+          <button class="agent-action-btn kill-btn agent-kill-btn" data-agent="${escapeHtml(agent.name)}" title="Kill agent">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
       </li>
     `;
     })
@@ -102,7 +110,11 @@ export function renderAgents(): void {
 
   // Add click handlers
   elements.agentsList.querySelectorAll<HTMLElement>('.channel-item[data-agent]').forEach((item) => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
+      // Don't navigate if clicking on action buttons
+      if ((e.target as HTMLElement).closest('.agent-actions')) {
+        return;
+      }
       const agentName = item.dataset.agent;
       if (agentName) {
         selectChannel(agentName);
@@ -112,6 +124,13 @@ export function renderAgents(): void {
 
   // Update command palette agents
   updatePaletteAgents();
+
+  // Attach kill handlers (dynamically imported to avoid circular dependency)
+  import('./app.js').then(({ attachKillHandlers }) => {
+    attachKillHandlers();
+  }).catch(() => {
+    // Ignore if app.js not yet ready
+  });
 }
 
 /**
