@@ -785,14 +785,17 @@
     .composer {
       padding: 0 20px 20px;
       flex-shrink: 0;
+      position: relative;
+      z-index: 10;
     }
 
     .composer-container {
       background: var(--bg-input);
       border: 1px solid var(--border-subtle);
       border-radius: 8px;
-      overflow: hidden;
+      overflow: visible;
       transition: border-color var(--transition-fast);
+      position: relative;
     }
 
     .composer-container:focus-within {
@@ -902,7 +905,7 @@
       bottom: 100%;
       left: 0;
       right: 0;
-      margin-bottom: 4px;
+      margin-bottom: 8px;
       background: var(--bg-modal);
       border: 1px solid var(--border-subtle);
       border-radius: 8px;
@@ -910,7 +913,7 @@
       max-height: 240px;
       overflow-y: auto;
       display: none;
-      z-index: 100;
+      z-index: 500;
     }
 
     .mention-autocomplete.visible {
@@ -1402,6 +1405,240 @@
       clip: rect(0, 0, 0, 0);
       border: 0;
     }
+
+    /* ========================================
+       Spawn Modal
+       ======================================== */
+    .spawn-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .spawn-modal-overlay.visible {
+      display: flex;
+    }
+
+    .spawn-modal {
+      width: 480px;
+      max-width: 90vw;
+      background: var(--bg-modal);
+      border-radius: 12px;
+      box-shadow: var(--shadow-modal);
+      overflow: hidden;
+      animation: modalSlideIn 0.2s ease-out;
+    }
+
+    @keyframes modalSlideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .spawn-modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-divider);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .spawn-modal-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .spawn-modal-title svg {
+      color: var(--accent-green);
+    }
+
+    .spawn-modal-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition-fast);
+    }
+
+    .spawn-modal-close:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-primary);
+    }
+
+    .spawn-modal-body {
+      padding: 20px;
+    }
+
+    .spawn-form-group {
+      margin-bottom: 16px;
+    }
+
+    .spawn-form-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .spawn-form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .spawn-input,
+    .spawn-textarea {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      font-size: 14px;
+      transition: border-color var(--transition-fast);
+    }
+
+    .spawn-input:focus,
+    .spawn-textarea:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+
+    .spawn-input::placeholder,
+    .spawn-textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    .spawn-textarea {
+      resize: vertical;
+      min-height: 80px;
+      line-height: 1.4;
+    }
+
+    .spawn-hint {
+      display: block;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .spawn-status {
+      min-height: 20px;
+      font-size: 13px;
+      margin-top: 12px;
+    }
+
+    .spawn-status.success {
+      color: var(--accent-green);
+    }
+
+    .spawn-status.error {
+      color: var(--accent-red);
+    }
+
+    .spawn-status.loading {
+      color: var(--text-muted);
+    }
+
+    .spawn-modal-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border-divider);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .spawn-cancel-btn {
+      padding: 8px 16px;
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .spawn-cancel-btn:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+    }
+
+    .spawn-submit-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: var(--accent-green);
+      border: none;
+      border-radius: 6px;
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .spawn-submit-btn:hover:not(:disabled) {
+      background: #249966;
+    }
+
+    .spawn-submit-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Spawned Agent Indicator */
+    .channel-item .spawned-icon {
+      width: 14px;
+      height: 14px;
+      color: var(--accent-green);
+      flex-shrink: 0;
+    }
+
+    .channel-item .release-btn {
+      opacity: 0;
+      width: 18px;
+      height: 18px;
+      border: none;
+      background: var(--accent-red);
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity var(--transition-fast);
+      flex-shrink: 0;
+    }
+
+    .channel-item:hover .release-btn {
+      opacity: 1;
+    }
+
+    .channel-item .release-btn:hover {
+      background: #c41a4f;
+    }
   </style>
 </head>
 <body>
@@ -1458,14 +1695,30 @@
               </svg>
               Agents
             </div>
+            <button class="section-add-btn" id="spawn-btn" title="Spawn new agent" style="opacity: 1;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
           </div>
           <ul class="channel-list" id="agents-list">
             <!-- Agents injected here -->
           </ul>
         </div>
+
       </div>
 
       <div class="sidebar-footer">
+        <a href="/metrics" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 3v18h18"/>
+            <path d="M18 17V9"/>
+            <path d="M13 17V5"/>
+            <path d="M8 17v-3"/>
+          </svg>
+          Metrics
+        </a>
         <a href="/bridge" class="nav-link">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="3" width="7" height="7"/>
@@ -1678,6 +1931,72 @@
             <line x1="22" y1="2" x2="11" y2="13"/>
             <polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spawn Agent Modal -->
+  <div class="spawn-modal-overlay" id="spawn-modal-overlay">
+    <div class="spawn-modal">
+      <div class="spawn-modal-header">
+        <div class="spawn-modal-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+            <line x1="12" y1="11" x2="12" y2="17"/>
+            <line x1="9" y1="14" x2="15" y2="14"/>
+          </svg>
+          Spawn New Agent
+        </div>
+        <button class="spawn-modal-close" id="spawn-modal-close" title="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="spawn-modal-body">
+        <div class="spawn-form-group">
+          <label for="spawn-name-input">Agent Name</label>
+          <input
+            type="text"
+            id="spawn-name-input"
+            class="spawn-input"
+            placeholder="e.g., Developer, Reviewer, Tester"
+            autocomplete="off"
+          />
+        </div>
+        <div class="spawn-form-group">
+          <label for="spawn-cli-input">CLI Command</label>
+          <input
+            type="text"
+            id="spawn-cli-input"
+            class="spawn-input"
+            value="claude"
+            placeholder="e.g., claude, aider, cursor"
+          />
+          <span class="spawn-hint">The AI CLI tool to wrap</span>
+        </div>
+        <div class="spawn-form-group">
+          <label for="spawn-task-input">Initial Task (optional)</label>
+          <textarea
+            id="spawn-task-input"
+            class="spawn-textarea"
+            placeholder="Enter an initial task to send to the agent..."
+            rows="4"
+          ></textarea>
+          <span class="spawn-hint">This will be injected into the agent's terminal</span>
+        </div>
+        <div class="spawn-status" id="spawn-status"></div>
+      </div>
+      <div class="spawn-modal-footer">
+        <button class="spawn-cancel-btn" id="spawn-cancel-btn">Cancel</button>
+        <button class="spawn-submit-btn" id="spawn-submit-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Spawn Agent
         </button>
       </div>
     </div>

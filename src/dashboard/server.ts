@@ -9,6 +9,7 @@ import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import type { StorageAdapter, StoredMessage } from '../storage/adapter.js';
 import { RelayClient } from '../wrapper/client.js';
 import { computeNeedsAttention } from './needs-attention.js';
+import { computeSystemMetrics, formatPrometheusMetrics } from './metrics.js';
 import { MultiProjectClient } from '../bridge/multi-project-client.js';
 import { AgentSpawner } from '../bridge/spawner.js';
 import type { ProjectConfig, SpawnRequest, WorkerInfo } from '../bridge/types.js';
@@ -253,7 +254,10 @@ export async function startDashboard(
         return;
       }
 
-      bridgeClient = new MultiProjectClient(validConfigs, { reconnect: true });
+      bridgeClient = new MultiProjectClient(validConfigs, {
+        agentName: '__DashboardBridge__',  // Unique name to avoid conflict with CLI bridge
+        reconnect: true,
+      });
 
       bridgeClient.onProjectStateChange = (projectId, connected) => {
         console.log(`[dashboard-bridge] Project ${projectId} ${connected ? 'connected' : 'disconnected'}`);
@@ -767,6 +771,102 @@ export async function startDashboard(
       console.error('Failed to fetch dashboard data', err);
       res.status(500).json({ error: 'Failed to load data' });
     });
+  });
+
+  // ===== Metrics API =====
+
+  /**
+   * GET /api/metrics - JSON format metrics for dashboard
+   */
+  app.get('/api/metrics', async (req, res) => {
+    try {
+      // Read agent registry for message counts
+      const agentsPath = path.join(teamDir, 'agents.json');
+      let agentRecords: Array<{
+        name: string;
+        messagesSent: number;
+        messagesReceived: number;
+        firstSeen: string;
+        lastSeen: string;
+      }> = [];
+
+      if (fs.existsSync(agentsPath)) {
+        const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+        agentRecords = (data.agents || []).map((a: any) => ({
+          name: a.name,
+          messagesSent: a.messagesSent ?? 0,
+          messagesReceived: a.messagesReceived ?? 0,
+          firstSeen: a.firstSeen ?? new Date().toISOString(),
+          lastSeen: a.lastSeen ?? new Date().toISOString(),
+        }));
+      }
+
+      // Get messages for throughput calculation
+      const team = getTeamData();
+      const messages = team ? await getMessages(team.agents) : [];
+
+      // Get session data for lifecycle metrics
+      const sessions = storage?.getSessions
+        ? await storage.getSessions({ limit: 100 })
+        : [];
+
+      const metrics = computeSystemMetrics(agentRecords, messages, sessions);
+      res.json(metrics);
+    } catch (err) {
+      console.error('Failed to compute metrics', err);
+      res.status(500).json({ error: 'Failed to compute metrics' });
+    }
+  });
+
+  /**
+   * GET /api/metrics/prometheus - Prometheus exposition format
+   */
+  app.get('/api/metrics/prometheus', async (req, res) => {
+    try {
+      // Read agent registry for message counts
+      const agentsPath = path.join(teamDir, 'agents.json');
+      let agentRecords: Array<{
+        name: string;
+        messagesSent: number;
+        messagesReceived: number;
+        firstSeen: string;
+        lastSeen: string;
+      }> = [];
+
+      if (fs.existsSync(agentsPath)) {
+        const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+        agentRecords = (data.agents || []).map((a: any) => ({
+          name: a.name,
+          messagesSent: a.messagesSent ?? 0,
+          messagesReceived: a.messagesReceived ?? 0,
+          firstSeen: a.firstSeen ?? new Date().toISOString(),
+          lastSeen: a.lastSeen ?? new Date().toISOString(),
+        }));
+      }
+
+      // Get messages for throughput calculation
+      const team = getTeamData();
+      const messages = team ? await getMessages(team.agents) : [];
+
+      // Get session data for lifecycle metrics
+      const sessions = storage?.getSessions
+        ? await storage.getSessions({ limit: 100 })
+        : [];
+
+      const metrics = computeSystemMetrics(agentRecords, messages, sessions);
+      const prometheusOutput = formatPrometheusMetrics(metrics);
+
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(prometheusOutput);
+    } catch (err) {
+      console.error('Failed to compute Prometheus metrics', err);
+      res.status(500).send('# Error computing metrics\n');
+    }
+  });
+
+  // Metrics view route - serves metrics.html
+  app.get('/metrics', (req, res) => {
+    res.sendFile(path.join(publicDir, 'metrics.html'));
   });
 
   // Bridge view route - serves bridge.html

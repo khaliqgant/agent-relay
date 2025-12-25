@@ -12,67 +12,43 @@
        Design Tokens (matching index.html)
        ======================================== */
     :root {
-      /* Background colors */
       --bg-workspace: #1a1d21;
       --bg-sidebar: #19171d;
       --bg-channel-active: #1164a3;
       --bg-channel-hover: rgba(255, 255, 255, 0.04);
       --bg-main: #222529;
       --bg-message-hover: rgba(255, 255, 255, 0.03);
+      --bg-input: rgba(255, 255, 255, 0.04);
+      --bg-modal: #2a2d32;
       --bg-card: #2a2d32;
       --bg-card-hover: #32363c;
-
-      /* Text colors */
       --text-primary: #d1d2d3;
       --text-secondary: #ababad;
       --text-muted: #8d8d8e;
       --text-channel: #bcabbc;
       --text-channel-active: #ffffff;
       --text-link: #1d9bd1;
-
-      /* Accent colors */
       --accent-primary: #1264a3;
       --accent-green: #2bac76;
       --accent-yellow: #e8a427;
       --accent-red: #e01e5a;
       --accent-purple: #7c3aed;
-
-      /* Status colors */
       --status-online: #2bac76;
       --status-away: #e8a427;
       --status-offline: #616061;
-
-      /* Border colors */
       --border-subtle: rgba(255, 255, 255, 0.1);
       --border-divider: rgba(255, 255, 255, 0.06);
-
-      /* Dimensions */
       --sidebar-width: 260px;
       --header-height: 49px;
-
-      /* Typography */
       --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-
-      /* Transitions */
       --transition-fast: 0.1s ease;
       --transition-normal: 0.2s ease;
+      --shadow-modal: 0 18px 50px rgba(0, 0, 0, 0.6);
     }
 
-    /* ========================================
-       Reset & Base
-       ======================================== */
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    html, body {
-      height: 100%;
-      overflow: hidden;
-    }
-
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
     body {
       font-family: var(--font-family);
       font-size: 15px;
@@ -82,14 +58,7 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    /* ========================================
-       Layout Structure
-       ======================================== */
-    .app-container {
-      display: flex;
-      height: 100vh;
-      width: 100vw;
-    }
+    .app-container { display: flex; height: 100vh; width: 100vw; }
 
     /* Sidebar */
     .sidebar {
@@ -101,18 +70,6 @@
       border-right: 1px solid var(--border-divider);
     }
 
-    /* Main Content */
-    .main-panel {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      background: var(--bg-main);
-    }
-
-    /* ========================================
-       Sidebar Components
-       ======================================== */
     .workspace-header {
       height: var(--header-height);
       padding: 0 16px;
@@ -140,48 +97,7 @@
       flex-shrink: 0;
     }
 
-    .workspace-name .status-dot.offline {
-      background: var(--status-offline);
-    }
-
-    /* Command Palette Trigger */
-    .search-bar {
-      margin: 12px 12px 8px;
-      padding: 6px 12px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid transparent;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-    }
-
-    .search-bar:hover {
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    .search-bar svg {
-      width: 16px;
-      height: 16px;
-      color: var(--text-muted);
-    }
-
-    .search-bar span {
-      font-size: 13px;
-      color: var(--text-muted);
-      flex: 1;
-    }
-
-    .search-bar kbd {
-      font-family: var(--font-family);
-      font-size: 11px;
-      color: var(--text-muted);
-      background: rgba(255, 255, 255, 0.1);
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
+    .workspace-name .status-dot.offline { background: var(--status-offline); }
 
     .sidebar-content {
       flex: 1;
@@ -189,17 +105,14 @@
       padding: 12px 0;
     }
 
+    .section { margin-bottom: 8px; }
+
     .section-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 0 16px 0 12px;
       height: 26px;
-      cursor: pointer;
-    }
-
-    .section-header:hover {
-      background: var(--bg-channel-hover);
     }
 
     .section-title {
@@ -210,24 +123,27 @@
       color: var(--text-channel);
     }
 
-    .section-title svg {
-      width: 10px;
-      height: 10px;
-      opacity: 0.7;
-    }
+    .section-title svg { width: 10px; height: 10px; opacity: 0.7; }
 
-    .section-count {
-      font-size: 12px;
+    .section-add-btn {
+      width: 20px;
+      height: 20px;
+      border: none;
+      background: transparent;
       color: var(--text-muted);
-      font-family: var(--font-mono);
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition-fast);
     }
 
-    .project-list {
-      list-style: none;
-      padding: 4px 8px;
-    }
+    .section-add-btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); }
 
-    .project-item {
+    .channel-list { list-style: none; padding: 4px 8px; }
+
+    .channel-item {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -235,19 +151,12 @@
       border-radius: 6px;
       cursor: pointer;
       transition: background var(--transition-fast);
+      color: var(--text-channel);
+      font-size: 15px;
     }
 
-    .project-item:hover {
-      background: var(--bg-channel-hover);
-    }
-
-    .project-item.active {
-      background: var(--bg-channel-active);
-    }
-
-    .project-item.active .project-name {
-      color: var(--text-channel-active);
-    }
+    .channel-item:hover { background: var(--bg-channel-hover); }
+    .channel-item.active { background: var(--bg-channel-active); color: var(--text-channel-active); }
 
     .project-status-dot {
       width: 9px;
@@ -257,17 +166,37 @@
       flex-shrink: 0;
     }
 
-    .project-item.connected .project-status-dot {
-      background: var(--status-online);
+    .channel-item.connected .project-status-dot { background: var(--status-online); }
+    .channel-item.reconnecting .project-status-dot { background: var(--status-away); }
+
+    .channel-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .agent-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: white;
+      flex-shrink: 0;
+      position: relative;
     }
 
-    .project-name {
-      font-size: 15px;
-      color: var(--text-channel);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .presence-indicator {
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--status-offline);
+      border: 2px solid var(--bg-sidebar);
     }
+
+    .presence-indicator.online { background: var(--status-online); }
 
     .sidebar-footer {
       padding: 12px 16px;
@@ -286,19 +215,18 @@
       transition: background var(--transition-fast);
     }
 
-    .nav-link:hover {
-      background: var(--bg-channel-hover);
+    .nav-link:hover { background: var(--bg-channel-hover); }
+    .nav-link svg { width: 18px; height: 18px; opacity: 0.7; }
+
+    /* Main Panel */
+    .main-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: var(--bg-main);
     }
 
-    .nav-link svg {
-      width: 18px;
-      height: 18px;
-      opacity: 0.7;
-    }
-
-    /* ========================================
-       Main Panel Header
-       ======================================== */
     .channel-header {
       height: var(--header-height);
       padding: 0 20px;
@@ -309,48 +237,102 @@
       flex-shrink: 0;
     }
 
-    .channel-info {
+    .channel-header-name {
       display: flex;
       align-items: center;
-      gap: 12px;
-    }
-
-    .channel-name {
+      gap: 4px;
       font-size: 18px;
       font-weight: 700;
       color: var(--text-primary);
     }
 
+    .channel-header-name .prefix { color: var(--text-muted); font-weight: 400; }
+
     .channel-stats {
       display: flex;
-      gap: 16px;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--text-muted);
     }
 
     .stat-badge {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      background: rgba(255, 255, 255, 0.06);
-      border-radius: 12px;
-      font-size: 13px;
-      color: var(--text-secondary);
+      gap: 4px;
     }
 
     .stat-badge .value {
       font-weight: 600;
-      color: var(--text-primary);
+      color: var(--text-secondary);
       font-family: var(--font-mono);
     }
 
-    /* ========================================
-       Project Cards Grid
-       ======================================== */
-    .cards-container {
+    /* Messages Area - Dashboard Style */
+    .messages-area {
       flex: 1;
       overflow-y: auto;
       padding: 20px;
     }
+
+    .messages-list { display: flex; flex-direction: column; gap: 1px; }
+
+    .message {
+      display: flex;
+      gap: 12px;
+      padding: 8px 20px;
+      transition: background var(--transition-fast);
+    }
+
+    .message:hover { background: var(--bg-message-hover); }
+
+    .message-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    .message-content { flex: 1; min-width: 0; }
+
+    .message-header {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .message-sender { font-weight: 700; color: var(--text-primary); }
+    .message-recipient { font-size: 13px; color: var(--text-muted); }
+    .message-recipient .target { color: var(--text-secondary); }
+    .message-timestamp { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+
+    .message-body {
+      font-size: 15px;
+      color: var(--text-primary);
+      line-height: 1.46668;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
+    .project-badge {
+      display: inline-block;
+      padding: 1px 5px;
+      background: var(--accent-purple);
+      color: white;
+      font-size: 11px;
+      border-radius: 3px;
+      margin-right: 4px;
+      font-weight: 500;
+    }
+
+    /* Overview Cards (for All Projects view) */
+    .cards-container { flex: 1; overflow-y: auto; padding: 20px; }
 
     .cards-grid {
       display: grid;
@@ -363,43 +345,12 @@
       border: 1px solid var(--border-divider);
       border-radius: 8px;
       padding: 16px;
+      cursor: pointer;
       transition: all var(--transition-normal);
     }
 
-    .project-card:hover {
-      background: var(--bg-card-hover);
-      border-color: var(--border-subtle);
-    }
-
-    .project-card.offline {
-      opacity: 0.6;
-    }
-
-    .project-card.selected {
-      border-color: var(--accent-primary);
-      background: var(--bg-card-hover);
-    }
-
-    .project-card {
-      cursor: pointer;
-    }
-
-    /* Header with back link */
-    .back-link {
-      color: var(--text-link);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 400;
-      margin-right: 8px;
-    }
-
-    .back-link:hover {
-      text-decoration: underline;
-    }
-
-    .project-title {
-      color: var(--text-primary);
-    }
+    .project-card:hover { background: var(--bg-card-hover); border-color: var(--border-subtle); }
+    .project-card.offline { opacity: 0.6; }
 
     .card-header {
       display: flex;
@@ -408,11 +359,7 @@
       margin-bottom: 12px;
     }
 
-    .card-title-group {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
+    .card-title-group { display: flex; align-items: center; gap: 10px; }
 
     .card-icon {
       width: 36px;
@@ -425,23 +372,9 @@
       color: white;
     }
 
-    .card-icon svg {
-      width: 18px;
-      height: 18px;
-    }
-
-    .card-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .card-path {
-      font-size: 12px;
-      font-family: var(--font-mono);
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
+    .card-icon svg { width: 18px; height: 18px; }
+    .card-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+    .card-path { font-size: 12px; font-family: var(--font-mono); color: var(--text-muted); margin-top: 2px; }
 
     .card-status {
       display: flex;
@@ -453,67 +386,20 @@
       font-weight: 500;
     }
 
-    .card-status.online {
-      background: rgba(43, 172, 118, 0.15);
-      color: var(--status-online);
-    }
+    .card-status.online { background: rgba(43, 172, 118, 0.15); color: var(--status-online); }
+    .card-status.offline { background: rgba(97, 96, 97, 0.15); color: var(--status-offline); }
+    .card-status.reconnecting { background: rgba(232, 164, 39, 0.15); color: var(--status-away); }
+    .card-status .dot { width: 6px; height: 6px; background: currentColor; border-radius: 50%; }
 
-    .card-status.offline {
-      background: rgba(97, 96, 97, 0.15);
-      color: var(--status-offline);
-    }
+    .agents-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-divider); }
 
-    .card-status.reconnecting {
-      background: rgba(232, 164, 39, 0.15);
-      color: var(--status-away);
-    }
+    .agents-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .agents-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .agents-count { font-size: 12px; font-family: var(--font-mono); color: var(--text-muted); }
 
-    .card-status.reconnecting .dot {
-      animation: pulse-glow 1.5s ease-in-out infinite;
-    }
+    .card-agents-list { display: flex; flex-direction: column; gap: 6px; }
 
-    .card-status .dot {
-      width: 6px;
-      height: 6px;
-      background: currentColor;
-      border-radius: 50%;
-    }
-
-    /* Agent List in Card */
-    .agents-section {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid var(--border-divider);
-    }
-
-    .agents-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 8px;
-    }
-
-    .agents-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .agents-count {
-      font-size: 12px;
-      font-family: var(--font-mono);
-      color: var(--text-muted);
-    }
-
-    .agents-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .agent-item {
+    .card-agent-item {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -522,25 +408,9 @@
       border-radius: 6px;
     }
 
-    .agent-status-dot {
-      width: 8px;
-      height: 8px;
-      background: var(--status-online);
-      border-radius: 50%;
-    }
-
-    .agent-name {
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-primary);
-    }
-
-    .agent-cli {
-      margin-left: auto;
-      font-size: 12px;
-      font-family: var(--font-mono);
-      color: var(--text-muted);
-    }
+    .card-agent-dot { width: 8px; height: 8px; background: var(--status-online); border-radius: 50%; }
+    .card-agent-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+    .card-agent-cli { margin-left: auto; font-size: 12px; font-family: var(--font-mono); color: var(--text-muted); }
 
     .no-agents {
       padding: 12px;
@@ -562,177 +432,53 @@
       text-align: center;
     }
 
-    .empty-icon {
+    .empty-state-icon {
       width: 64px;
       height: 64px;
-      background: var(--bg-card);
-      border-radius: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       margin-bottom: 16px;
       color: var(--text-muted);
     }
 
-    .empty-title {
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 8px;
+    .empty-state-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+    .empty-state-text { font-size: 14px; color: var(--text-muted); max-width: 300px; }
+
+    /* Composer */
+    .message-composer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border-divider);
+      background: var(--bg-main);
     }
 
-    .empty-text {
-      font-size: 14px;
-      color: var(--text-muted);
-      max-width: 300px;
-      margin-bottom: 16px;
-    }
-
-    .empty-code {
-      font-family: var(--font-mono);
-      font-size: 13px;
-      padding: 10px 14px;
-      background: var(--bg-card);
-      border-radius: 6px;
-      color: var(--accent-green);
-    }
-
-    /* ========================================
-       Messages Panel
-       ======================================== */
-    .messages-panel {
-      width: 360px;
-      background: var(--bg-sidebar);
-      border-left: 1px solid var(--border-divider);
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-    }
-
-    .messages-header {
-      height: var(--header-height);
-      padding: 0 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border-divider);
-    }
-
-    .messages-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--text-primary);
-    }
-
-    .live-indicator {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--status-online);
-    }
-
-    .live-indicator .dot {
-      width: 6px;
-      height: 6px;
-      background: var(--status-online);
-      border-radius: 50%;
-      animation: pulse 2s ease-in-out infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    .messages-list {
-      flex: 1;
-      overflow-y: auto;
+    .composer-container {
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
       padding: 12px;
     }
 
-    .message-item {
-      padding: 10px 12px;
-      background: var(--bg-main);
-      border-radius: 8px;
-      margin-bottom: 8px;
-    }
-
-    .message-item:hover {
-      background: var(--bg-card);
-    }
-
-    .message-route {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 6px;
-      font-size: 12px;
-    }
-
-    .route-tag {
-      padding: 2px 6px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 4px;
-      font-family: var(--font-mono);
-      color: var(--text-secondary);
-    }
-
-    .route-agent {
-      font-weight: 500;
+    .composer-input {
+      width: 100%;
+      background: transparent;
+      border: none;
       color: var(--text-primary);
+      font-family: var(--font-family);
+      font-size: 15px;
+      resize: none;
+      outline: none;
+      min-height: 24px;
+      max-height: 200px;
     }
 
-    .route-arrow {
-      color: var(--text-muted);
-    }
+    .composer-input::placeholder { color: var(--text-muted); }
 
-    .route-time {
-      margin-left: auto;
-      font-family: var(--font-mono);
-      color: var(--text-muted);
-      font-size: 11px;
-    }
-
-    .message-body {
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.4;
-      word-wrap: break-word;
-      white-space: pre-wrap;
-    }
-
-    .messages-empty {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      color: var(--text-muted);
-      font-size: 13px;
-    }
-
-    /* Message Composer */
-    .message-composer {
-      padding: 12px 16px;
-      border-top: 1px solid var(--border-divider);
-      background: var(--bg-sidebar);
-    }
-
-    .composer-header {
+    .composer-row {
       display: flex;
       align-items: center;
       gap: 8px;
       margin-bottom: 8px;
     }
 
-    .composer-label {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
     .composer-select {
-      flex: 1;
       padding: 6px 10px;
       font-size: 13px;
       font-family: var(--font-family);
@@ -743,257 +489,171 @@
       cursor: pointer;
     }
 
-    .composer-select:hover {
-      border-color: var(--accent-primary);
-    }
+    .composer-select:hover { border-color: var(--accent-primary); }
+    .composer-select:focus { outline: none; border-color: var(--accent-primary); }
+    .composer-select:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    .composer-select:focus {
-      outline: none;
-      border-color: var(--accent-primary);
-    }
-
-    .composer-select:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .composer-select option {
-      background: #222529;
-      color: #d1d2d3;
-      padding: 8px;
-    }
-
-    .composer-select option:hover,
-    .composer-select option:checked {
-      background: #1164a3;
-      color: #fff;
-    }
-
-    .composer-input-row {
-      display: flex;
-      gap: 8px;
-    }
-
-    .composer-input {
-      flex: 1;
-      padding: 8px 12px;
-      font-size: 14px;
-      font-family: var(--font-family);
-      color: var(--text-primary);
-      background: var(--bg-main);
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-    }
-
-    .composer-input:hover:not(:disabled) {
-      border-color: var(--accent-primary);
-    }
-
-    .composer-input:focus {
-      outline: none;
-      border-color: var(--accent-primary);
-    }
-
-    .composer-input:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .composer-input::placeholder {
-      color: var(--text-muted);
-    }
-
-    .composer-send {
-      padding: 8px 12px;
-      background: var(--accent-primary);
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: var(--transition-fast);
-    }
-
-    .composer-send:hover:not(:disabled) {
-      background: #0d4f7a;
-    }
-
-    .composer-send:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .composer-status {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 6px;
-      min-height: 16px;
-    }
-
-    .composer-status.success {
-      color: var(--status-online);
-    }
-
-    .composer-status.error {
-      color: var(--accent-red);
-    }
-
-    .messages-footer {
-      padding: 12px 16px;
-      border-top: 1px solid var(--border-divider);
+    .composer-actions {
       display: flex;
       justify-content: space-between;
-      font-size: 12px;
-      font-family: var(--font-mono);
-      color: var(--text-muted);
-    }
-
-    /* ========================================
-       Command Palette
-       ======================================== */
-    .command-palette-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.6);
-      display: none;
-      align-items: flex-start;
-      justify-content: center;
-      padding-top: 15vh;
-      z-index: 1000;
-    }
-
-    .command-palette-overlay.visible {
-      display: flex;
-    }
-
-    .command-palette {
-      width: 600px;
-      max-width: 90vw;
-      background: var(--bg-sidebar);
-      border-radius: 8px;
-      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
-      overflow: hidden;
-      animation: paletteSlideIn 0.15s ease-out;
-    }
-
-    @keyframes paletteSlideIn {
-      from {
-        opacity: 0;
-        transform: translateY(-10px) scale(0.98);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-      }
-    }
-
-    .palette-search {
-      padding: 16px;
-      border-bottom: 1px solid var(--border-divider);
-    }
-
-    .palette-search-input {
-      width: 100%;
-      background: transparent;
-      border: none;
-      color: var(--text-primary);
-      font-family: var(--font-family);
-      font-size: 18px;
-      outline: none;
-    }
-
-    .palette-search-input::placeholder {
-      color: var(--text-muted);
-    }
-
-    .palette-results {
-      max-height: 400px;
-      overflow-y: auto;
-    }
-
-    .palette-section {
-      padding: 8px 0;
-    }
-
-    .palette-section-title {
-      padding: 8px 16px 4px;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .palette-item {
-      padding: 10px 16px;
-      display: flex;
       align-items: center;
-      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .composer-status { font-size: 12px; color: var(--text-muted); }
+    .composer-status.success { color: var(--status-online); }
+    .composer-status.error { color: var(--accent-red); }
+
+    .composer-send {
+      padding: 6px 16px;
+      background: var(--accent-green);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
       cursor: pointer;
       transition: background var(--transition-fast);
     }
 
-    .palette-item:hover,
-    .palette-item.selected {
-      background: rgba(255, 255, 255, 0.06);
-    }
+    .composer-send:hover:not(:disabled) { background: #249966; }
+    .composer-send:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    .palette-item-icon {
-      width: 20px;
-      height: 20px;
-      color: var(--text-muted);
-      display: flex;
+    /* Spawn Modal */
+    .spawn-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: none;
       align-items: center;
       justify-content: center;
+      z-index: 1000;
     }
 
-    .palette-item-content {
-      flex: 1;
+    .spawn-modal-overlay.visible { display: flex; }
+
+    .spawn-modal {
+      width: 480px;
+      max-width: 90vw;
+      background: var(--bg-modal);
+      border-radius: 12px;
+      box-shadow: var(--shadow-modal);
+      overflow: hidden;
+      animation: modalSlideIn 0.2s ease-out;
     }
 
-    .palette-item-title {
-      font-size: 14px;
+    @keyframes modalSlideIn {
+      from { opacity: 0; transform: translateY(-20px) scale(0.95); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .spawn-modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-divider);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .spawn-modal-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 600;
       color: var(--text-primary);
     }
 
-    .palette-item-subtitle {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
+    .spawn-modal-title svg { color: var(--accent-green); }
 
-    .palette-item-shortcut {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    .palette-item-shortcut kbd {
-      font-family: var(--font-family);
-      background: rgba(255, 255, 255, 0.1);
-      padding: 2px 6px;
-      border-radius: 3px;
-    }
-
-    /* ========================================
-       Scrollbars
-       ======================================== */
-    ::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
+    .spawn-modal-close {
+      width: 32px;
+      height: 32px;
+      border: none;
       background: transparent;
+      color: var(--text-muted);
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition-fast);
     }
 
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
+    .spawn-modal-close:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); }
+
+    .spawn-modal-body { padding: 20px; }
+
+    .spawn-form-group { margin-bottom: 16px; }
+    .spawn-form-group:last-child { margin-bottom: 0; }
+    .spawn-form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+
+    .spawn-input, .spawn-textarea, .spawn-select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      font-size: 14px;
+      transition: border-color var(--transition-fast);
     }
 
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(255, 255, 255, 0.2);
+    .spawn-input:focus, .spawn-textarea:focus, .spawn-select:focus { outline: none; border-color: var(--accent-primary); }
+    .spawn-input::placeholder, .spawn-textarea::placeholder { color: var(--text-muted); }
+    .spawn-textarea { resize: vertical; min-height: 80px; line-height: 1.4; }
+    .spawn-hint { display: block; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+    .spawn-status { min-height: 20px; font-size: 13px; margin-top: 12px; }
+    .spawn-status.success { color: var(--accent-green); }
+    .spawn-status.error { color: var(--accent-red); }
+    .spawn-status.loading { color: var(--text-muted); }
+
+    .spawn-modal-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border-divider);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
     }
+
+    .spawn-cancel-btn {
+      padding: 8px 16px;
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .spawn-cancel-btn:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+
+    .spawn-submit-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: var(--accent-green);
+      border: none;
+      border-radius: 6px;
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .spawn-submit-btn:hover:not(:disabled) { background: #249966; }
+    .spawn-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
   </style>
 </head>
 <body>
@@ -1003,38 +663,59 @@
       <div class="workspace-header">
         <div class="workspace-name">
           <span class="status-dot" id="status-dot"></span>
-          Bridge Mode
+          Bridge
         </div>
-      </div>
-
-      <div class="search-bar" id="search-bar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <span>Search...</span>
-        <kbd>⌘K</kbd>
       </div>
 
       <div class="sidebar-content">
-        <div class="section-header">
-          <div class="section-title">
-            <svg viewBox="0 0 10 10" fill="currentColor"><path d="M5 7L1 3h8z"/></svg>
-            Projects
+        <!-- Projects Section -->
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+              Projects
+            </div>
           </div>
-          <span class="section-count" id="project-count">0</span>
+          <ul class="channel-list" id="projects-list">
+            <li class="channel-item active" data-project="all">
+              <span class="project-status-dot" style="background: var(--accent-purple);"></span>
+              <span class="channel-name">All Projects</span>
+            </li>
+            <!-- Projects injected here -->
+          </ul>
         </div>
-        <ul class="project-list" id="project-list">
-          <!-- Projects injected here -->
-        </ul>
+
+        <!-- Agents Section (shown when project selected) -->
+        <div class="section" id="agents-section" style="display: none;">
+          <div class="section-header">
+            <div class="section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+              Agents
+            </div>
+            <button class="section-add-btn" id="spawn-btn" title="Spawn new agent">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          </div>
+          <ul class="channel-list" id="agents-list">
+            <!-- Agents injected here -->
+          </ul>
+        </div>
       </div>
 
       <div class="sidebar-footer">
         <a href="/" class="nav-link">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
           </svg>
-          Back to Dashboard
+          Local Dashboard
         </a>
       </div>
     </aside>
@@ -1042,290 +723,157 @@
     <!-- Main Panel -->
     <main class="main-panel">
       <header class="channel-header">
-        <div class="channel-info">
-          <h1 class="channel-name" id="channel-name">All Projects</h1>
+        <div class="channel-header-name">
+          <span class="prefix" id="header-prefix">#</span>
+          <span id="header-name">All Projects</span>
         </div>
         <div class="channel-stats">
+          <div class="stat-badge">
+            <span class="value" id="stat-projects">0</span>
+            <span>projects</span>
+          </div>
           <div class="stat-badge">
             <span class="value" id="stat-agents">0</span>
             <span>agents</span>
           </div>
-          <div class="stat-badge">
-            <span class="value" id="stat-messages">0</span>
-            <span>messages</span>
-          </div>
         </div>
       </header>
 
-      <div class="cards-container">
+      <!-- Cards View (for All Projects) -->
+      <div class="cards-container" id="cards-view">
         <div class="cards-grid" id="cards-grid">
           <div class="empty-state" id="empty-state">
-            <div class="empty-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4m0-6v6"/>
-              </svg>
-            </div>
-            <div class="empty-title">No Projects Connected</div>
-            <div class="empty-text">Start the bridge to orchestrate multiple projects</div>
-            <code class="empty-code">agent-relay bridge ./proj1 ./proj2</code>
+            <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4m0-6v6"/>
+            </svg>
+            <div class="empty-state-title">No Projects Connected</div>
+            <div class="empty-state-text">Start the bridge to orchestrate multiple projects</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Messages View (for individual project) -->
+      <div class="messages-area" id="messages-view" style="display: none;">
+        <div class="messages-list" id="messages-list">
+          <div class="empty-state">
+            <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <div class="empty-state-title">No messages yet</div>
+            <div class="empty-state-text">Messages in this project will appear here</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Message Composer (for individual project) -->
+      <div class="message-composer" id="composer" style="display: none;">
+        <div class="composer-container">
+          <div class="composer-row">
+            <span style="font-size: 13px; color: var(--text-muted);">To:</span>
+            <select class="composer-select" id="composer-agent">
+              <option value="">Select agent...</option>
+              <option value="*">* (Broadcast)</option>
+            </select>
+          </div>
+          <textarea class="composer-input" id="composer-message" placeholder="Type a message..." rows="1"></textarea>
+          <div class="composer-actions">
+            <span class="composer-status" id="composer-status"></span>
+            <button class="composer-send" id="composer-send" disabled>Send</button>
           </div>
         </div>
       </div>
     </main>
-
-    <!-- Messages Panel -->
-    <aside class="messages-panel">
-      <header class="messages-header">
-        <span class="messages-title">Message Flow</span>
-        <div class="live-indicator">
-          <span class="dot"></span>
-          <span>Live</span>
-        </div>
-      </header>
-
-      <div class="messages-list" id="messages-list">
-        <div class="messages-empty">
-          <p>No messages yet</p>
-        </div>
-      </div>
-
-      <!-- Message Composer -->
-      <div class="message-composer" id="message-composer">
-        <div class="composer-header">
-          <span class="composer-label">Send to:</span>
-          <select class="composer-select" id="composer-project">
-            <option value="">Select a project...</option>
-          </select>
-          <select class="composer-select" id="composer-agent">
-            <option value="">Select agent...</option>
-          </select>
-        </div>
-        <div class="composer-input-row">
-          <input
-            type="text"
-            class="composer-input"
-            id="composer-message"
-            placeholder="Type a message..."
-            disabled
-          />
-          <button class="composer-send" id="composer-send" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="22" y1="2" x2="11" y2="13"/>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-            </svg>
-          </button>
-        </div>
-        <div class="composer-status" id="composer-status"></div>
-      </div>
-
-      <footer class="messages-footer">
-        <span id="uptime">Uptime: --</span>
-      </footer>
-    </aside>
   </div>
 
-  <!-- Command Palette -->
-  <div class="command-palette-overlay" id="command-palette-overlay">
-    <div class="command-palette">
-      <div class="palette-search">
-        <input
-          type="text"
-          class="palette-search-input"
-          id="palette-search"
-          placeholder="Search projects, agents, or type a command..."
-          autocomplete="off"
-        >
+  <!-- Spawn Agent Modal -->
+  <div class="spawn-modal-overlay" id="spawn-modal-overlay">
+    <div class="spawn-modal">
+      <div class="spawn-modal-header">
+        <div class="spawn-modal-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+            <line x1="12" y1="11" x2="12" y2="17"/>
+            <line x1="9" y1="14" x2="15" y2="14"/>
+          </svg>
+          Spawn New Agent
+        </div>
+        <button class="spawn-modal-close" id="spawn-modal-close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
       </div>
-      <div class="palette-results" id="palette-results">
-        <div class="palette-section">
-          <div class="palette-section-title">Commands</div>
-          <div class="palette-item" data-command="broadcast">
-            <div class="palette-item-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-              </svg>
-            </div>
-            <div class="palette-item-content">
-              <div class="palette-item-title">/broadcast</div>
-              <div class="palette-item-subtitle">Send message to all leads</div>
-            </div>
-          </div>
-          <div class="palette-item" data-command="refresh">
-            <div class="palette-item-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M23 4v6h-6"/>
-                <path d="M1 20v-6h6"/>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-              </svg>
-            </div>
-            <div class="palette-item-content">
-              <div class="palette-item-title">/refresh</div>
-              <div class="palette-item-subtitle">Refresh all project data</div>
-            </div>
-          </div>
+      <div class="spawn-modal-body">
+        <div class="spawn-form-group">
+          <label>Project</label>
+          <select class="spawn-select" id="spawn-project">
+            <option value="">Select project...</option>
+          </select>
         </div>
-        <div class="palette-section" id="palette-projects-section">
-          <div class="palette-section-title">Jump to Project</div>
-          <!-- Projects injected here -->
+        <div class="spawn-form-group">
+          <label>Agent Name</label>
+          <input type="text" class="spawn-input" id="spawn-name" placeholder="e.g., Developer, Reviewer" autocomplete="off"/>
         </div>
-        <div class="palette-section" id="palette-agents-section">
-          <div class="palette-section-title">Jump to Agent</div>
-          <!-- Agents injected here -->
+        <div class="spawn-form-group">
+          <label>CLI Command</label>
+          <input type="text" class="spawn-input" id="spawn-cli" value="claude" placeholder="e.g., claude, aider"/>
+          <span class="spawn-hint">The AI CLI tool to wrap</span>
         </div>
+        <div class="spawn-form-group">
+          <label>Initial Task (optional)</label>
+          <textarea class="spawn-textarea" id="spawn-task" placeholder="Enter an initial task..." rows="3"></textarea>
+        </div>
+        <div class="spawn-status" id="spawn-status"></div>
+      </div>
+      <div class="spawn-modal-footer">
+        <button class="spawn-cancel-btn" id="spawn-cancel">Cancel</button>
+        <button class="spawn-submit-btn" id="spawn-submit">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Spawn Agent
+        </button>
       </div>
     </div>
   </div>
 
   <script>
     // State
-    let connectionStart = null;
-    let lastDataHash = '';
     let currentData = { projects: [], messages: [] };
+    let selectedProjectId = null;
 
     // Elements
     const statusDot = document.getElementById('status-dot');
-    const projectList = document.getElementById('project-list');
+    const projectsList = document.getElementById('projects-list');
+    const agentsSection = document.getElementById('agents-section');
+    const agentsList = document.getElementById('agents-list');
+    const cardsView = document.getElementById('cards-view');
     const cardsGrid = document.getElementById('cards-grid');
-    const emptyState = document.getElementById('empty-state');
+    const messagesView = document.getElementById('messages-view');
     const messagesList = document.getElementById('messages-list');
-    const searchBar = document.getElementById('search-bar');
-    const paletteOverlay = document.getElementById('command-palette-overlay');
-    const paletteSearch = document.getElementById('palette-search');
-    const paletteProjectsSection = document.getElementById('palette-projects-section');
-    const paletteAgentsSection = document.getElementById('palette-agents-section');
+    const composer = document.getElementById('composer');
+    const headerPrefix = document.getElementById('header-prefix');
+    const headerName = document.getElementById('header-name');
 
     // Composer elements
-    const composerProject = document.getElementById('composer-project');
     const composerAgent = document.getElementById('composer-agent');
     const composerMessage = document.getElementById('composer-message');
     const composerSend = document.getElementById('composer-send');
     const composerStatus = document.getElementById('composer-status');
 
-    // Command Palette
-    function openPalette() {
-      paletteOverlay.classList.add('visible');
-      paletteSearch.value = '';
-      paletteSearch.focus();
-      updatePaletteResults();
-    }
-
-    function closePalette() {
-      paletteOverlay.classList.remove('visible');
-    }
-
-    function updatePaletteResults() {
-      const query = paletteSearch.value.toLowerCase();
-
-      // Update projects section
-      const projects = currentData.projects || [];
-      const filteredProjects = query
-        ? projects.filter(p => (p.name || p.id).toLowerCase().includes(query))
-        : projects;
-
-      if (filteredProjects.length > 0) {
-        paletteProjectsSection.innerHTML = `
-          <div class="palette-section-title">Jump to Project</div>
-          ${filteredProjects.map(p => `
-            <div class="palette-item" data-project="${escapeHtml(p.id)}">
-              <div class="palette-item-icon">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                </svg>
-              </div>
-              <div class="palette-item-content">
-                <div class="palette-item-title">${escapeHtml(p.name || p.id)}</div>
-                <div class="palette-item-subtitle">${p.connected ? 'Online' : 'Offline'} · ${(p.agents || []).length} agents</div>
-              </div>
-            </div>
-          `).join('')}
-        `;
-      } else {
-        paletteProjectsSection.innerHTML = '<div class="palette-section-title">Jump to Project</div>';
-      }
-
-      // Update agents section
-      const allAgents = [];
-      projects.forEach(p => {
-        (p.agents || []).forEach(a => {
-          allAgents.push({ ...a, projectName: p.name || p.id, projectId: p.id });
-        });
-      });
-      const filteredAgents = query
-        ? allAgents.filter(a => a.name.toLowerCase().includes(query))
-        : allAgents;
-
-      if (filteredAgents.length > 0) {
-        paletteAgentsSection.innerHTML = `
-          <div class="palette-section-title">Jump to Agent</div>
-          ${filteredAgents.map(a => `
-            <div class="palette-item" data-agent="${escapeHtml(a.name)}" data-project="${escapeHtml(a.projectId)}">
-              <div class="palette-item-icon">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                  <circle cx="12" cy="7" r="4"/>
-                </svg>
-              </div>
-              <div class="palette-item-content">
-                <div class="palette-item-title">${escapeHtml(a.name)}</div>
-                <div class="palette-item-subtitle">${escapeHtml(a.projectName)} · ${escapeHtml(a.cli || 'unknown')}</div>
-              </div>
-            </div>
-          `).join('')}
-        `;
-      } else {
-        paletteAgentsSection.innerHTML = '<div class="palette-section-title">Jump to Agent</div>';
-      }
-    }
-
-    // Palette event listeners
-    searchBar.addEventListener('click', openPalette);
-
-    paletteOverlay.addEventListener('click', (e) => {
-      if (e.target === paletteOverlay) closePalette();
-    });
-
-    paletteSearch.addEventListener('input', updatePaletteResults);
-
-    document.addEventListener('keydown', (e) => {
-      // Cmd/Ctrl + K to open palette
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        if (paletteOverlay.classList.contains('visible')) {
-          closePalette();
-        } else {
-          openPalette();
-        }
-      }
-      // Escape to close
-      if (e.key === 'Escape' && paletteOverlay.classList.contains('visible')) {
-        closePalette();
-      }
-    });
-
-    // Handle palette item clicks
-    document.getElementById('palette-results').addEventListener('click', (e) => {
-      const item = e.target.closest('.palette-item');
-      if (!item) return;
-
-      const command = item.dataset.command;
-      const projectId = item.dataset.project;
-      const agentName = item.dataset.agent;
-
-      if (command === 'broadcast') {
-        closePalette();
-        alert('Broadcast: Use the bridge CLI to send messages to all leads');
-      } else if (command === 'refresh') {
-        closePalette();
-        location.reload();
-      } else if (projectId) {
-        closePalette();
-        // Scroll to project card
-        const card = document.querySelector(`.project-card[data-project-id="${projectId}"]`);
-        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    });
+    // Spawn modal elements
+    const spawnModalOverlay = document.getElementById('spawn-modal-overlay');
+    const spawnBtn = document.getElementById('spawn-btn');
+    const spawnModalClose = document.getElementById('spawn-modal-close');
+    const spawnCancel = document.getElementById('spawn-cancel');
+    const spawnSubmit = document.getElementById('spawn-submit');
+    const spawnProject = document.getElementById('spawn-project');
+    const spawnName = document.getElementById('spawn-name');
+    const spawnCli = document.getElementById('spawn-cli');
+    const spawnTask = document.getElementById('spawn-task');
+    const spawnStatus = document.getElementById('spawn-status');
 
     // Helpers
     function escapeHtml(text) {
@@ -1340,209 +888,90 @@
       return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
-    // Composer Functions
-    function updateComposerProjects() {
-      const projects = currentData.projects || [];
-      const connectedProjects = projects.filter(p => p.connected);
-
-      // Preserve current selection
-      const currentValue = composerProject.value;
-
-      composerProject.innerHTML = '<option value="">Select a project...</option>' +
-        connectedProjects.map(p =>
-          `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || p.id)}</option>`
-        ).join('');
-
-      // Restore selection if still valid
-      if (currentValue && connectedProjects.some(p => p.id === currentValue)) {
-        composerProject.value = currentValue;
-      } else if (selectedProjectId && connectedProjects.some(p => p.id === selectedProjectId)) {
-        // Sync with card selection
-        composerProject.value = selectedProjectId;
-        updateComposerAgents();
-      }
+    function getAvatarColor(name) {
+      const colors = ['#e01e5a', '#36c5f0', '#2eb67d', '#ecb22e', '#7c3aed', '#1264a3'];
+      let hash = 0;
+      for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+      return colors[Math.abs(hash) % colors.length];
     }
 
-    function updateComposerAgents() {
-      const projectId = composerProject.value;
-      if (!projectId) {
-        composerAgent.innerHTML = '<option value="">Select agent...</option>';
-        composerAgent.disabled = true;
-        composerMessage.disabled = true;
-        composerSend.disabled = true;
-        return;
-      }
-
-      // Preserve current agent selection
-      const currentAgent = composerAgent.value;
-
-      const project = (currentData.projects || []).find(p => p.id === projectId);
-      const agents = project?.agents || [];
-
-      composerAgent.innerHTML = '<option value="">Select agent...</option>' +
-        '<option value="*">* (Broadcast to all)</option>' +
-        '<option value="lead">Lead</option>' +
-        agents.map(a =>
-          `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`
-        ).join('');
-
-      composerAgent.disabled = false;
-
-      // Restore agent selection if still valid
-      if (currentAgent) {
-        const validAgents = ['*', 'lead', ...agents.map(a => a.name)];
-        if (validAgents.includes(currentAgent)) {
-          composerAgent.value = currentAgent;
-        }
-      }
+    function getInitials(name) {
+      return name.split(/[\s_-]+/).map(w => w[0]).join('').substring(0, 2).toUpperCase();
     }
 
-    function updateComposerState() {
-      const hasProject = !!composerProject.value;
-      const hasAgent = !!composerAgent.value;
-      const hasMessage = composerMessage.value.trim().length > 0;
-
-      composerMessage.disabled = !hasProject || !hasAgent;
-      composerSend.disabled = !hasProject || !hasAgent || !hasMessage;
-    }
-
-    async function sendBridgeMessage() {
-      const projectId = composerProject.value;
-      const to = composerAgent.value;
-      const message = composerMessage.value.trim();
-
-      if (!projectId || !to || !message) return;
-
-      composerSend.disabled = true;
-      composerStatus.textContent = 'Sending...';
-      composerStatus.className = 'composer-status';
-
-      try {
-        const response = await fetch('/api/bridge/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId, to, message })
-        });
-
-        const result = await response.json();
-
-        if (response.ok && result.success) {
-          composerStatus.textContent = 'Message sent!';
-          composerStatus.className = 'composer-status success';
-          composerMessage.value = '';
-          setTimeout(() => {
-            composerStatus.textContent = '';
-            composerStatus.className = 'composer-status';
-          }, 2000);
-        } else {
-          throw new Error(result.error || 'Failed to send');
-        }
-      } catch (err) {
-        composerStatus.textContent = err.message || 'Failed to send message';
-        composerStatus.className = 'composer-status error';
-      }
-
-      updateComposerState();
-    }
-
-    // Composer event listeners
-    composerProject.addEventListener('change', () => {
-      updateComposerAgents();
-      updateComposerState();
-    });
-
-    composerAgent.addEventListener('change', updateComposerState);
-    composerMessage.addEventListener('input', updateComposerState);
-
-    composerSend.addEventListener('click', sendBridgeMessage);
-    composerMessage.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !composerSend.disabled) {
-        e.preventDefault();
-        sendBridgeMessage();
-      }
-    });
-
-    // Project selection state
-    let selectedProjectId = null;
-    const channelName = document.getElementById('channel-name');
-
+    // Select project
     function selectProject(projectId) {
       selectedProjectId = projectId;
 
-      if (projectId) {
+      // Update sidebar active state
+      projectsList.querySelectorAll('.channel-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.project === projectId);
+      });
+
+      if (projectId === 'all' || !projectId) {
+        // Show all projects view
+        headerPrefix.textContent = '#';
+        headerName.textContent = 'All Projects';
+        cardsView.style.display = 'block';
+        messagesView.style.display = 'none';
+        composer.style.display = 'none';
+        agentsSection.style.display = 'none';
+        renderProjectCards(currentData.projects);
+      } else {
+        // Show project detail view
         const project = (currentData.projects || []).find(p => p.id === projectId);
         if (project) {
-          channelName.innerHTML = `
-            <span class="back-link" id="back-to-all">← All Projects</span>
-            <span class="project-title">${escapeHtml(project.name || project.id)}</span>
-          `;
-          // Auto-select project in composer
-          composerProject.value = projectId;
-          updateComposerAgents();
-          updateComposerState();
+          headerPrefix.textContent = '@';
+          headerName.textContent = project.name || project.id;
+          cardsView.style.display = 'none';
+          messagesView.style.display = 'block';
+          composer.style.display = 'block';
+          agentsSection.style.display = 'block';
+          renderAgentsList(project.agents || []);
+          renderProjectMessages(projectId);
+          updateComposerAgents(project.agents || []);
         }
-      } else {
-        channelName.textContent = 'All Projects';
-        selectedProjectId = null;
       }
-
-      // Update card selection state
-      document.querySelectorAll('.project-card').forEach(card => {
-        card.classList.toggle('selected', card.dataset.projectId === projectId);
-      });
-    }
-
-    // Handle project card clicks
-    cardsGrid.addEventListener('click', (e) => {
-      const card = e.target.closest('.project-card');
-      if (card) {
-        selectProject(card.dataset.projectId);
-      }
-    });
-
-    // Handle back link click
-    channelName.addEventListener('click', (e) => {
-      if (e.target.id === 'back-to-all' || e.target.classList.contains('back-link')) {
-        selectProject(null);
-      }
-    });
-
-    // Handle sidebar project clicks
-    projectList.addEventListener('click', (e) => {
-      const item = e.target.closest('.project-item');
-      if (item) {
-        selectProject(item.dataset.projectId);
-      }
-    });
-
-    function formatUptime(ms) {
-      const seconds = Math.floor(ms / 1000);
-      if (seconds < 60) return `${seconds}s`;
-      const minutes = Math.floor(seconds / 60);
-      if (minutes < 60) return `${minutes}m`;
-      const hours = Math.floor(minutes / 60);
-      return `${hours}h ${minutes % 60}m`;
-    }
-
-    // Update connection status
-    function updateConnectionStatus(connected) {
-      statusDot.classList.toggle('offline', !connected);
     }
 
     // Render sidebar projects
     function renderSidebarProjects(projects) {
-      if (!projects || projects.length === 0) {
-        projectList.innerHTML = '<li class="project-item" style="cursor: default; color: var(--text-muted);">No projects</li>';
-        document.getElementById('project-count').textContent = '0';
+      const allItem = '<li class="channel-item ' + (selectedProjectId === 'all' ? 'active' : '') + '" data-project="all"><span class="project-status-dot" style="background: var(--accent-purple);"></span><span class="channel-name">All Projects</span></li>';
+
+      const projectItems = (projects || []).map(p => {
+        const statusClass = p.connected ? 'connected' : (p.reconnecting ? 'reconnecting' : '');
+        const activeClass = selectedProjectId === p.id ? 'active' : '';
+        return `
+          <li class="channel-item ${statusClass} ${activeClass}" data-project="${escapeHtml(p.id)}">
+            <span class="project-status-dot"></span>
+            <span class="channel-name">${escapeHtml(p.name || p.id)}</span>
+          </li>
+        `;
+      }).join('');
+
+      projectsList.innerHTML = allItem + projectItems;
+
+      // Update stats
+      document.getElementById('stat-projects').textContent = projects?.length || 0;
+      let totalAgents = 0;
+      (projects || []).forEach(p => totalAgents += (p.agents || []).length);
+      document.getElementById('stat-agents').textContent = totalAgents;
+    }
+
+    // Render agents list for selected project
+    function renderAgentsList(agents) {
+      if (!agents || agents.length === 0) {
+        agentsList.innerHTML = '<li class="channel-item" style="color: var(--text-muted); cursor: default;">No agents</li>';
         return;
       }
 
-      document.getElementById('project-count').textContent = projects.length;
-
-      projectList.innerHTML = projects.map(p => `
-        <li class="project-item ${p.connected ? 'connected' : ''} ${selectedProjectId === p.id ? 'active' : ''}" data-project-id="${escapeHtml(p.id)}">
-          <span class="project-status-dot"></span>
-          <span class="project-name">${escapeHtml(p.name || p.id)}</span>
+      agentsList.innerHTML = agents.map(a => `
+        <li class="channel-item" data-agent="${escapeHtml(a.name)}">
+          <div class="agent-avatar" style="background: ${getAvatarColor(a.name)}">
+            ${getInitials(a.name)}
+            <span class="presence-indicator online"></span>
+          </div>
+          <span class="channel-name">${escapeHtml(a.name)}</span>
         </li>
       `).join('');
     }
@@ -1550,29 +979,24 @@
     // Render project cards
     function renderProjectCards(projects) {
       if (!projects || projects.length === 0) {
-        cardsGrid.innerHTML = '';
-        cardsGrid.appendChild(emptyState);
-        emptyState.style.display = 'flex';
+        cardsGrid.innerHTML = document.getElementById('empty-state').outerHTML;
         return;
       }
-
-      emptyState.style.display = 'none';
 
       cardsGrid.innerHTML = projects.map(p => {
         const agents = p.agents || [];
         const agentsHtml = agents.length > 0
           ? agents.map(a => `
-              <div class="agent-item">
-                <span class="agent-status-dot"></span>
-                <span class="agent-name">${escapeHtml(a.name)}</span>
-                <span class="agent-cli">${escapeHtml(a.cli || '')}</span>
+              <div class="card-agent-item">
+                <span class="card-agent-dot"></span>
+                <span class="card-agent-name">${escapeHtml(a.name)}</span>
+                <span class="card-agent-cli">${escapeHtml(a.cli || '')}</span>
               </div>
             `).join('')
           : '<div class="no-agents">No agents connected</div>';
 
-        const isSelected = selectedProjectId === p.id;
         return `
-          <div class="project-card ${p.connected ? '' : 'offline'} ${isSelected ? 'selected' : ''}" data-project-id="${escapeHtml(p.id)}">
+          <div class="project-card ${p.connected ? '' : 'offline'}" data-project-id="${escapeHtml(p.id)}">
             <div class="card-header">
               <div class="card-title-group">
                 <div class="card-icon">
@@ -1590,64 +1014,234 @@
                 <span>${p.connected ? 'Online' : p.reconnecting ? 'Reconnecting...' : 'Offline'}</span>
               </div>
             </div>
-
             <div class="agents-section">
               <div class="agents-header">
                 <span class="agents-label">Agents</span>
                 <span class="agents-count">${agents.length} active</span>
               </div>
-              <div class="agents-list">
-                ${agentsHtml}
-              </div>
+              <div class="card-agents-list">${agentsHtml}</div>
             </div>
           </div>
         `;
       }).join('');
     }
 
-    // Render messages
-    function renderMessages(messages) {
-      if (!messages || messages.length === 0) {
-        messagesList.innerHTML = '<div class="messages-empty"><p>No messages yet</p></div>';
+    // Render messages for a project
+    function renderProjectMessages(projectId) {
+      // Filter messages for this project
+      const messages = (currentData.messages || []).filter(m =>
+        m.sourceProject === projectId || m.targetProject === projectId || !m.sourceProject
+      );
+
+      if (messages.length === 0) {
+        messagesList.innerHTML = `
+          <div class="empty-state">
+            <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <div class="empty-state-title">No messages yet</div>
+            <div class="empty-state-text">Messages in this project will appear here</div>
+          </div>
+        `;
         return;
       }
 
-      messagesList.innerHTML = messages.slice(-50).reverse().map(m => `
-        <div class="message-item">
-          <div class="message-route">
-            <span class="route-tag">${escapeHtml(m.sourceProject || 'local')}</span>
-            <span class="route-agent">${escapeHtml(m.from)}</span>
-            <span class="route-arrow">→</span>
-            <span class="route-agent">${escapeHtml(m.to || '*')}</span>
-            <span class="route-time">${formatTime(m.timestamp)}</span>
+      messagesList.innerHTML = messages.slice(-50).map(m => {
+        const isBroadcast = m.to === '*';
+        const recipientDisplay = isBroadcast ? '@everyone' : `@${escapeHtml(m.to || '')}`;
+        const projectBadge = m.sourceProject && m.sourceProject !== projectId
+          ? `<span class="project-badge">${escapeHtml(m.sourceProject)}</span>`
+          : '';
+
+        return `
+          <div class="message">
+            <div class="message-avatar" style="background: ${getAvatarColor(m.from || 'Unknown')}">
+              ${getInitials(m.from || '?')}
+            </div>
+            <div class="message-content">
+              <div class="message-header">
+                <span class="message-sender">${projectBadge}@${escapeHtml(m.from || 'Unknown')}</span>
+                <span class="message-recipient">→ <span class="target">${recipientDisplay}</span></span>
+                <span class="message-timestamp">${formatTime(m.timestamp)}</span>
+              </div>
+              <div class="message-body">${escapeHtml(m.body || '')}</div>
+            </div>
           </div>
-          <div class="message-body">${escapeHtml(m.body || '')}</div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
+
+      // Scroll to bottom
+      messagesView.scrollTop = messagesView.scrollHeight;
     }
+
+    // Update composer agents dropdown
+    function updateComposerAgents(agents) {
+      composerAgent.innerHTML = '<option value="">Select agent...</option><option value="*">* (Broadcast)</option>' +
+        (agents || []).map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join('');
+    }
+
+    // Send message
+    async function sendMessage() {
+      if (!selectedProjectId || selectedProjectId === 'all') return;
+
+      const to = composerAgent.value;
+      const message = composerMessage.value.trim();
+      if (!to || !message) return;
+
+      composerSend.disabled = true;
+      composerStatus.textContent = 'Sending...';
+      composerStatus.className = 'composer-status';
+
+      try {
+        const response = await fetch('/api/bridge/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: selectedProjectId, to, message })
+        });
+
+        const result = await response.json();
+        if (response.ok && result.success) {
+          composerMessage.value = '';
+          composerStatus.textContent = 'Sent!';
+          composerStatus.className = 'composer-status success';
+          setTimeout(() => { composerStatus.textContent = ''; }, 2000);
+        } else {
+          throw new Error(result.error || 'Failed');
+        }
+      } catch (err) {
+        composerStatus.textContent = err.message;
+        composerStatus.className = 'composer-status error';
+      }
+
+      composerSend.disabled = false;
+    }
+
+    // Spawn modal
+    function openSpawnModal() {
+      // Populate project dropdown
+      const connectedProjects = (currentData.projects || []).filter(p => p.connected);
+      spawnProject.innerHTML = '<option value="">Select project...</option>' +
+        connectedProjects.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || p.id)}</option>`).join('');
+
+      // Pre-select current project if viewing one
+      if (selectedProjectId && selectedProjectId !== 'all') {
+        spawnProject.value = selectedProjectId;
+      }
+
+      spawnName.value = '';
+      spawnCli.value = 'claude';
+      spawnTask.value = '';
+      spawnStatus.textContent = '';
+      spawnModalOverlay.classList.add('visible');
+      spawnName.focus();
+    }
+
+    function closeSpawnModal() {
+      spawnModalOverlay.classList.remove('visible');
+    }
+
+    async function submitSpawn() {
+      const projectId = spawnProject.value;
+      const name = spawnName.value.trim();
+      const cli = spawnCli.value.trim() || 'claude';
+      const task = spawnTask.value.trim();
+
+      if (!projectId) {
+        spawnStatus.textContent = 'Please select a project';
+        spawnStatus.className = 'spawn-status error';
+        return;
+      }
+      if (!name) {
+        spawnStatus.textContent = 'Agent name is required';
+        spawnStatus.className = 'spawn-status error';
+        return;
+      }
+
+      spawnSubmit.disabled = true;
+      spawnStatus.textContent = 'Spawning...';
+      spawnStatus.className = 'spawn-status loading';
+
+      try {
+        // Note: This calls the local dashboard's spawn API
+        // For bridge-level spawning, we'd need project-specific spawn endpoints
+        const response = await fetch('/api/spawn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, cli, task })
+        });
+
+        const result = await response.json();
+        if (response.ok && result.success) {
+          spawnStatus.textContent = `Agent "${name}" spawned!`;
+          spawnStatus.className = 'spawn-status success';
+          setTimeout(closeSpawnModal, 1000);
+        } else {
+          throw new Error(result.error || 'Failed to spawn');
+        }
+      } catch (err) {
+        spawnStatus.textContent = err.message;
+        spawnStatus.className = 'spawn-status error';
+      }
+
+      spawnSubmit.disabled = false;
+    }
+
+    // Event listeners
+    projectsList.addEventListener('click', (e) => {
+      const item = e.target.closest('.channel-item');
+      if (item) selectProject(item.dataset.project);
+    });
+
+    cardsGrid.addEventListener('click', (e) => {
+      const card = e.target.closest('.project-card');
+      if (card) selectProject(card.dataset.projectId);
+    });
+
+    composerAgent.addEventListener('change', () => {
+      composerSend.disabled = !composerAgent.value || !composerMessage.value.trim();
+    });
+
+    composerMessage.addEventListener('input', () => {
+      composerSend.disabled = !composerAgent.value || !composerMessage.value.trim();
+    });
+
+    composerMessage.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !composerSend.disabled) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    composerSend.addEventListener('click', sendMessage);
+
+    spawnBtn.addEventListener('click', openSpawnModal);
+    spawnModalClose.addEventListener('click', closeSpawnModal);
+    spawnCancel.addEventListener('click', closeSpawnModal);
+    spawnSubmit.addEventListener('click', submitSpawn);
+    spawnModalOverlay.addEventListener('click', (e) => {
+      if (e.target === spawnModalOverlay) closeSpawnModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && spawnModalOverlay.classList.contains('visible')) {
+        closeSpawnModal();
+      }
+    });
 
     // Main render
     function render(data) {
-      // Store data for command palette
       currentData = data;
-
-      // Count agents across all projects
-      let agentsCount = 0;
-      (data.projects || []).forEach(p => {
-        agentsCount += (p.agents || []).length;
-      });
-
-      document.getElementById('stat-agents').textContent = agentsCount;
-      document.getElementById('stat-messages').textContent = data.messages?.length || 0;
-
       renderSidebarProjects(data.projects);
-      renderProjectCards(data.projects);
-      renderMessages(data.messages);
-      updateComposerProjects();
-      // Keep agent dropdown in sync if project is selected
-      if (composerProject.value) {
-        updateComposerAgents();
-        updateComposerState();
+
+      if (selectedProjectId === 'all' || !selectedProjectId) {
+        renderProjectCards(data.projects);
+      } else {
+        const project = (data.projects || []).find(p => p.id === selectedProjectId);
+        if (project) {
+          renderAgentsList(project.agents || []);
+          renderProjectMessages(selectedProjectId);
+          updateComposerAgents(project.agents || []);
+        }
       }
     }
 
@@ -1656,24 +1250,11 @@
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws/bridge`);
 
-      ws.onopen = () => {
-        connectionStart = Date.now();
-        updateConnectionStatus(true);
-      };
-
-      ws.onclose = () => {
-        updateConnectionStatus(false);
-        setTimeout(connect, 3000);
-      };
-
-      ws.onerror = () => {
-        updateConnectionStatus(false);
-      };
+      ws.onopen = () => statusDot.classList.remove('offline');
+      ws.onclose = () => { statusDot.classList.add('offline'); setTimeout(connect, 3000); };
+      ws.onerror = () => statusDot.classList.add('offline');
 
       ws.onmessage = (e) => {
-        if (e.data === lastDataHash) return;
-        lastDataHash = e.data;
-
         try {
           const data = JSON.parse(e.data);
           render(data);
@@ -1683,14 +1264,8 @@
       };
     }
 
-    // Update uptime
-    setInterval(() => {
-      if (connectionStart) {
-        document.getElementById('uptime').textContent = `Uptime: ${formatUptime(Date.now() - connectionStart)}`;
-      }
-    }, 1000);
-
-    // Start
+    // Initialize
+    selectProject('all');
     connect();
   </script>
 </body>
