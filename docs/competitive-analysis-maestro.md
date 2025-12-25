@@ -1,8 +1,9 @@
-# Competitive Analysis: Maestro Projects vs agent-relay
+# Competitive Analysis: Agent Orchestration Tools vs agent-relay
 
-This document analyzes two different "Maestro" projects:
+This document analyzes three agent orchestration projects:
 1. **pedramamini/Maestro** - Electron desktop app for agent orchestration
 2. **23blocks-OS/ai-maestro** - Web dashboard for distributed agent management
+3. **steipete/Clawdis** - Personal AI assistant with multi-surface delivery
 
 ---
 
@@ -770,7 +771,7 @@ agent-relay export agent-name > agent-backup.json
 
 ---
 
-## Three-Way Comparison
+## Maestro Projects Comparison
 
 | Feature | pedramamini/Maestro | 23blocks/ai-maestro | agent-relay |
 |---------|---------------------|---------------------|-------------|
@@ -782,6 +783,8 @@ agent-relay export agent-name > agent-backup.json
 | **Code Intelligence** | No | Yes (AST) | No |
 | **Setup Complexity** | High | Medium | Low |
 | **Latency** | ~100ms | ~500ms (file) | <5ms |
+
+*See Part 4 for full four-way comparison including Clawdis.*
 
 ---
 
@@ -817,3 +820,294 @@ agent-relay export agent-name > agent-backup.json
 ### 23blocks-OS/ai-maestro
 - [ai-maestro GitHub Repository](https://github.com/23blocks-OS/ai-maestro)
 - [ai-maestro Website](https://ai-maestro.23blocks.com/)
+
+---
+
+---
+
+# Part 3: steipete/Clawdis
+
+## Executive Summary
+
+| Aspect | Clawdis | agent-relay |
+|--------|---------|-------------|
+| **Type** | Personal AI Assistant (Node.js + Electron) | CLI Tool (Node.js) |
+| **Architecture** | Gateway Hub + RPC Agent | PTY wrapper + Unix socket daemon |
+| **Agent Integration** | Pi runtime (RPC mode) | Universal (pattern-based) |
+| **Communication** | WebSocket JSON-RPC | Unix socket IPC |
+| **Multi-Surface** | WhatsApp, Telegram, WebChat | CLI only |
+| **Distributed** | Node pairing via TCP bridge | No (local only) |
+| **Target User** | Personal assistant across devices | Developers coordinating agents |
+
+---
+
+## Architecture Deep Dive
+
+### Clawdis: Gateway Hub Model
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    GATEWAY (Control Plane)                           │
+│                    ws://127.0.0.1:18789                             │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │              HTTP + WebSocket Server                            │ │
+│  │  ├─ 41+ RPC Methods (config, sessions, chat, agent, cron)      │ │
+│  │  ├─ 11 Event Types (agent, chat, presence, health, node.pair)  │ │
+│  │  ├─ AJV validates frames against TypeBox schemas               │ │
+│  │  └─ Idempotency: TTL 5min, cap 1000 entries                    │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                              │                                       │
+│         ┌────────────────────┼────────────────────┐                 │
+│         ▼                    ▼                    ▼                 │
+│   ┌───────────┐       ┌───────────┐       ┌───────────┐            │
+│   │  Provider │       │  Provider │       │  Provider │            │
+│   │ WhatsApp  │       │ Telegram  │       │  WebChat  │            │
+│   └───────────┘       └───────────┘       └───────────┘            │
+└─────────────────────────────────────────────────────────────────────┘
+           │                                          │
+           │ WebSocket                                │ TCP Bridge
+           ▼                                          ▼ (port 18790)
+┌───────────────────┐                    ┌─────────────────────────┐
+│  Pi Agent Runtime │                    │     Remote Nodes        │
+│  (embedded RPC)   │                    │  (iOS/Android/macOS)    │
+│  ├─ bash-tools    │                    │  ├─ Node pairing        │
+│  ├─ skills        │                    │  ├─ Canvas rendering    │
+│  └─ clawdis-tools │                    │  └─ Voice wake          │
+└───────────────────┘                    └─────────────────────────┘
+```
+
+---
+
+## How Communication Works (Clawdis)
+
+**Key Insight:** Clawdis has **NO direct agent-to-agent or device-to-agent communication**. Everything is mediated by the Gateway.
+
+### Hub-Mediated Flow
+
+```
+User (WhatsApp) → Gateway → Pi Agent → Gateway → User (WhatsApp)
+                    ↑                      │
+                    └──────────────────────┘
+                    (all through gateway)
+```
+
+### WebSocket Protocol
+
+**Frame Structure:**
+```typescript
+{
+  type: "event" | "request" | "response",
+  method: string,        // RPC method name
+  event: string,         // for broadcasts
+  payload: any,          // data
+  seq: number,           // deduplication
+  stateVersion: number   // presence tracking
+}
+```
+
+**Key RPC Methods (41+):**
+| Category | Methods |
+|----------|---------|
+| Config | `config.get`, `config.set` |
+| Sessions | `sessions.list`, `sessions.patch`, `sessions.reset`, `sessions.compact` |
+| Chat | `chat.send`, `chat.history`, `chat.abort` |
+| Agent | `agent`, `send`, `wake` |
+| Node Pairing | `node.pair.request`, `node.pair.approve`, `node.pair.verify` |
+
+### Node Pairing Protocol
+
+```
+Remote Node                              Gateway
+    │                                       │
+    │──── Pairing Request ─────────────────>│
+    │     (platform, version, capabilities) │
+    │                                       │ (pending 5min TTL)
+    │                                       │
+    │<─── Approval + Token ─────────────────│
+    │     (UUID-based token)                │
+    │                                       │
+    │──── Subsequent Connections ──────────>│
+    │     (nodeId + token verification)     │
+```
+
+### Idempotency System
+
+Clawdis prevents duplicate messages on reconnect:
+- TTL cache: 5 minutes
+- Max entries: 1000
+- Required for: `send`, `agent`, `chat.send`
+
+---
+
+## Key Features
+
+### 1. Multi-Surface Delivery
+Same agent answers on WhatsApp, Telegram, and WebChat simultaneously.
+
+### 2. Single Agent Runtime (Pi)
+Only ONE agent runtime - no agent-to-agent messaging.
+
+### 3. Node Pairing
+Secure device registration with token-based authentication for iOS/Android/macOS.
+
+### 4. Canvas Host
+Real-time collaborative visualization at `/canvas/`.
+
+---
+
+## Comparison with agent-relay
+
+| Feature | Clawdis | agent-relay |
+|---------|---------|-------------|
+| **Direct A2A** | No | Yes |
+| **Multi-Surface** | Yes (WhatsApp/Telegram/Web) | No (CLI only) |
+| **Node Pairing** | Yes (TCP bridge) | No |
+| **Idempotency** | Yes (5min TTL) | No |
+| **Latency** | ~50-100ms (WebSocket) | <5ms (Unix socket) |
+| **Agent Count** | 1 (Pi only) | Unlimited |
+
+---
+
+## Key Insights from Clawdis
+
+### What It Does Better
+
+1. **Idempotency Layer** - Prevents duplicate sends on reconnect
+2. **Multi-Surface Abstraction** - One agent, many delivery channels
+3. **Node Pairing Protocol** - Secure distributed device registration
+4. **Schema Validation** - AJV + TypeBox for all frames
+
+### What agent-relay Does Better
+
+1. **Direct A2A Messaging** - Agents talk directly, not via hub
+2. **Multiple Agents** - Coordinate many agents, not just one
+3. **Ultra-Low Latency** - <5ms vs ~100ms
+4. **Universal Agents** - Works with any CLI agent
+
+---
+
+---
+
+# Part 4: Consolidated Recommendations
+
+## Four-Way Comparison
+
+| Feature | pedramamini/Maestro | 23blocks/ai-maestro | Clawdis | agent-relay |
+|---------|---------------------|---------------------|---------|-------------|
+| **Type** | Desktop (Electron) | Web (Next.js) | Assistant (Node) | CLI (Node.js) |
+| **Agent A2A** | No (moderator) | Yes (file+tmux) | No (single agent) | Yes (pattern) |
+| **Distributed** | No | Yes | Yes (node pairing) | No |
+| **Automation** | Playbooks | No | Cron jobs | No |
+| **Session Resume** | Yes | No | Yes | No |
+| **Multi-Surface** | No | No | Yes | No |
+| **Idempotency** | No | No | Yes | No |
+| **Setup** | High | Medium | Medium | Low |
+| **Latency** | ~100ms | ~500ms | ~100ms | <5ms |
+
+---
+
+## What agent-relay Should Adopt
+
+### Tier 1: High Value, Low Effort
+
+| Feature | Source | Why | Implementation |
+|---------|--------|-----|----------------|
+| **Message Priority** | 23blocks | Urgent messages shouldn't wait | `->relay:Bob [urgent] message` |
+| **Message Types** | 23blocks | Distinguish request vs notification | `->relay:Bob [type:request] message` |
+| **Read/Unread Tracking** | 23blocks | Don't re-show seen messages | Add `read` flag to SQLite |
+| **Idempotency Keys** | Clawdis | Prevent duplicate sends on reconnect | TTL cache (5min, 1000 entries) |
+
+### Tier 2: High Value, Medium Effort
+
+| Feature | Source | Why | Implementation |
+|---------|--------|-----|----------------|
+| **Session Resume** | Maestro | Continue past conversations | Track session IDs, `agent-relay resume <id>` |
+| **Simple Autorun** | Maestro | Batch process task lists | `agent-relay autorun tasks.md` |
+| **Agent Metadata** | All three | Know what each agent does | Store program, model, capabilities |
+
+### Tier 3: Future Considerations
+
+| Feature | Source | Why | Effort |
+|---------|--------|-----|--------|
+| **Multi-Surface Delivery** | Clawdis | Slack/Discord integration | High |
+| **Node Pairing** | Clawdis | Distributed instances | High |
+| **Moderator Mode** | Maestro | AI-synthesized group responses | High |
+
+---
+
+## Proposed Enhanced Pattern Syntax
+
+```bash
+# Current (unchanged, backwards compatible)
+->relay:Bob message
+
+# Priority levels
+->relay:Bob [urgent] Fix production NOW
+->relay:Bob [high] Please review PR
+->relay:Bob [normal] FYI - tests passing
+->relay:Bob [low] Nice to have
+
+# Message types
+->relay:Bob [type:request] Can you review?
+->relay:Bob [type:response] Done, approved
+->relay:Bob [type:notification] Build complete
+->relay:Bob [type:update] Progress: 50%
+
+# Combined
+->relay:Bob [urgent] [type:request] CRITICAL: Fix auth bug
+
+# Reply reference
+->relay:Bob [ref:abc123] Here's the fix you requested
+```
+
+**Parsing:**
+```typescript
+const RELAY_PATTERN = /^->relay:(\S+)\s*(\[[\w:]+\]\s*)*(.+)$/;
+```
+
+---
+
+## Implementation Roadmap
+
+### Phase 1: Message Enhancements (Week 1-2)
+- [ ] Parse priority: `[urgent|high|normal|low]`
+- [ ] Parse type: `[type:request|response|notification|update]`
+- [ ] Add `read` column to messages table
+- [ ] Implement idempotency cache (5min TTL, 1000 cap)
+
+### Phase 2: Session Management (Week 3-4)
+- [ ] Track session IDs per agent
+- [ ] Add `agent-relay resume <session>` command
+- [ ] Add `agent-relay sessions` list command
+
+### Phase 3: Simple Automation (Week 5-6)
+- [ ] Parse markdown checklists
+- [ ] `agent-relay autorun tasks.md`
+- [ ] Fresh context per task option
+
+---
+
+## Final Positioning
+
+| Use Case | Best Tool |
+|----------|-----------|
+| **Quick local coordination** | agent-relay |
+| **Long autonomous sessions** | pedramamini/Maestro |
+| **Distributed team agents** | 23blocks/ai-maestro |
+| **Personal multi-device assistant** | Clawdis |
+| **Minimal dependencies** | agent-relay |
+| **Code intelligence** | 23blocks/ai-maestro |
+
+**agent-relay's niche:** Fast, simple, direct agent-to-agent messaging with universal agent support.
+
+**Key differentiator to maintain:** <5ms latency + zero-config pattern detection.
+
+**Key features to add:** Message metadata, idempotency, session resume.
+
+---
+
+## Sources
+
+### steipete/Clawdis
+- [Clawdis GitHub Repository](https://github.com/steipete/clawdis)
+- [Clawdis Documentation](https://clawdis.ai/)
