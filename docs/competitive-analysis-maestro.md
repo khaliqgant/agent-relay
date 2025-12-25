@@ -1,4 +1,12 @@
-# Competitive Analysis: Maestro vs agent-relay
+# Competitive Analysis: Maestro Projects vs agent-relay
+
+This document analyzes two different "Maestro" projects:
+1. **pedramamini/Maestro** - Electron desktop app for agent orchestration
+2. **23blocks-OS/ai-maestro** - Web dashboard for distributed agent management
+
+---
+
+# Part 1: pedramamini/Maestro
 
 ## Executive Summary
 
@@ -105,6 +113,88 @@
 ```
 
 **Key Difference:** agent-relay wraps any agent transparently via pattern detection, while Maestro spawns agents in controlled batch mode with provider-specific adapters.
+
+---
+
+## How Agent-to-Agent Communication Works (pedramamini/Maestro)
+
+**Critical Insight:** pedramamini's Maestro does **NOT** have direct agent-to-agent messaging. Instead, it uses a **moderator-mediated group chat** pattern.
+
+### Group Chat Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         USER                                      │
+│                          │                                        │
+│                          ▼                                        │
+│              ┌───────────────────────┐                           │
+│              │    Moderator AI       │  (dedicated Claude session)│
+│              │  - Receives question  │                           │
+│              │  - Parses @mentions   │                           │
+│              │  - Spawns agents      │                           │
+│              └───────────┬───────────┘                           │
+│                          │                                        │
+│         ┌────────────────┼────────────────┐                      │
+│         │                │                │                      │
+│         ▼                ▼                ▼                      │
+│   ┌──────────┐    ┌──────────┐    ┌──────────┐                  │
+│   │ Agent A  │    │ Agent B  │    │ Agent C  │                  │
+│   │ (spawn)  │    │ (spawn)  │    │ (spawn)  │                  │
+│   └────┬─────┘    └────┬─────┘    └────┬─────┘                  │
+│        │               │               │                         │
+│        └───────────────┼───────────────┘                         │
+│                        ▼                                          │
+│              ┌───────────────────────┐                           │
+│              │    Moderator AI       │  (synthesizes responses)  │
+│              │  - Collects responses │                           │
+│              │  - May @mention again │                           │
+│              │  - Returns to user    │                           │
+│              └───────────────────────┘                           │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Communication Flow
+
+1. **User asks question** → Moderator AI receives it with full chat history
+2. **Moderator parses @mentions** → Identifies which agents to query
+3. **Agents spawned in parallel** → Each runs as separate child process
+4. **Agents respond asynchronously** → Router tracks pending responses
+5. **Moderator synthesizes** → Either:
+   - **@mentions more agents** (loop continues)
+   - **No @mentions** (returns final answer to user)
+
+### Session ID Pattern
+
+Messages are tracked by session IDs:
+```
+group-chat-{chatId}-moderator-{timestamp}     # Moderator messages
+group-chat-{chatId}-participant-{name}-{timestamp}  # Agent responses
+```
+
+### Key Limitation
+
+**Agents cannot talk directly to each other.** All communication is mediated by:
+1. The **Moderator AI** (decides who to ask)
+2. The **ProcessManager** (spawns/collects responses)
+
+This is fundamentally different from agent-relay's peer-to-peer model where Alice can message Bob directly.
+
+### IPC Implementation
+
+Maestro uses Electron's IPC for internal communication:
+```
+Renderer (React) ──IPC──> Preload Script ──> Main Process ──> ProcessManager
+                                                                    │
+                                                    ┌───────────────┴───────────────┐
+                                                    ▼                               ▼
+                                              AI Process                      Terminal Process
+                                           (child_process)                       (node-pty)
+```
+
+Events emitted:
+- `onData` - Agent output chunks
+- `onAssistantChunk` - Streaming thinking (when "Show Thinking" enabled)
+- `onResult` - Final response
 
 ---
 
@@ -373,9 +463,357 @@ agent-relay could adopt Maestro's best ideas (session resume, simple autorun) wh
 
 ---
 
+---
+
+# Part 2: 23blocks-OS/ai-maestro
+
+## Executive Summary
+
+| Aspect | ai-maestro (23blocks) | agent-relay |
+|--------|----------------------|-------------|
+| **Type** | Web Dashboard (Next.js) | CLI Tool (Node.js) |
+| **Architecture** | Manager/Worker + tmux | PTY wrapper + Unix socket daemon |
+| **Agent Integration** | tmux session discovery | Pattern-based detection |
+| **Communication** | File-based + tmux injection | Unix socket IPC |
+| **Distributed** | Yes (Tailscale VPN) | No (local only) |
+| **Persistence** | CozoDB + file system | SQLite |
+| **Complexity** | ~10,000+ lines | ~7,000 lines |
+| **Target User** | Teams with distributed agents | Developers with local agents |
+
+---
+
+## Architecture Deep Dive
+
+### 23blocks ai-maestro: Manager/Worker Model
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Manager Machine                               │
+│                    (localhost:23000)                             │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │              Next.js Web Dashboard                         │  │
+│  │  ├─ Agent list (3-level hierarchy)                        │  │
+│  │  ├─ Real-time terminal streaming (WebSocket)              │  │
+│  │  ├─ Message inbox/outbox UI                               │  │
+│  │  └─ Code graph visualization                              │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                              │                                   │
+│                    ┌─────────┴─────────┐                        │
+│                    ▼                   ▼                        │
+│             ┌───────────┐       ┌───────────────┐               │
+│             │  CozoDB   │       │  File System  │               │
+│             │ (memory)  │       │ (messages)    │               │
+│             └───────────┘       └───────────────┘               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+              ▼               ▼               ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  Local Worker   │  │  Remote Worker  │  │  Remote Worker  │
+│  (tmux sessions)│  │  (via Tailscale)│  │  (via SSH)      │
+│                 │  │                 │  │                 │
+│ ┌─────────────┐ │  │ ┌─────────────┐ │  │ ┌─────────────┐ │
+│ │ Claude Code │ │  │ │   Aider     │ │  │ │   Cursor    │ │
+│ │ (tmux sess) │ │  │ │ (tmux sess) │ │  │ │ (tmux sess) │ │
+│ └─────────────┘ │  │ └─────────────┘ │  │ └─────────────┘ │
+│ ┌─────────────┐ │  │                 │  │                 │
+│ │   Copilot   │ │  │                 │  │                 │
+│ │ (tmux sess) │ │  │                 │  │                 │
+│ └─────────────┘ │  │                 │  │                 │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+```
+
+---
+
+## How Agent-to-Agent Communication Works (23blocks ai-maestro)
+
+**Key Insight:** 23blocks ai-maestro has **TRUE** agent-to-agent messaging via a dual-channel system.
+
+### Dual-Channel Communication Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CHANNEL 1: FILE-BASED (Persistent)            │
+│                                                                  │
+│  ~/.aimaestro/messages/                                         │
+│  ├── inbox/                                                     │
+│  │   ├── agent-alice/                                           │
+│  │   │   ├── msg-001.json  (from Bob, priority: urgent)        │
+│  │   │   └── msg-002.json  (from Charlie, priority: normal)    │
+│  │   └── agent-bob/                                             │
+│  │       └── msg-003.json  (from Alice, type: request)         │
+│  └── outbox/                                                    │
+│      ├── agent-alice/                                           │
+│      └── agent-bob/                                             │
+│                                                                  │
+│  Message Format:                                                 │
+│  {                                                               │
+│    "from": "agent-alice",                                        │
+│    "to": "agent-bob",                                            │
+│    "priority": "urgent|high|normal|low",                        │
+│    "type": "request|response|notification|update",              │
+│    "content": "...",                                             │
+│    "metadata": {...},                                            │
+│    "read": false                                                 │
+│  }                                                               │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    CHANNEL 2: TMUX INJECTION (Real-time)        │
+│                                                                  │
+│  Methods:                                                        │
+│  ├── display  → Non-intrusive popup (auto-dismisses)            │
+│  ├── inject   → Message in terminal scrollback                  │
+│  └── echo     → Formatted critical alert                        │
+│                                                                  │
+│  Tool: send-tmux-message.sh                                      │
+│  Usage: ./send-tmux-message.sh <agent-name> "message" [method]  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Communication Flow
+
+```
+Alice wants to message Bob:
+
+Option A: File-Based (Persistent)
+┌─────────┐  send-aimaestro-message.sh  ┌──────────────────────────┐
+│  Alice  │ ─────────────────────────→ │ ~/.aimaestro/messages/   │
+└─────────┘                             │   inbox/agent-bob/       │
+                                        │     msg-new.json         │
+                                        └────────────┬─────────────┘
+                                                     │
+┌─────────┐  check-and-show-messages.sh              │
+│   Bob   │ ←────────────────────────────────────────┘
+└─────────┘  (polls or triggered)
+
+Option B: Tmux Injection (Immediate)
+┌─────────┐  send-tmux-message.sh       ┌─────────┐
+│  Alice  │ ─────────────────────────→ │   Bob   │
+└─────────┘  (tmux send-keys)           │ (sees   │
+                                        │  alert) │
+                                        └─────────┘
+```
+
+### CLI Tools for Agents
+
+| Tool | Purpose |
+|------|---------|
+| `send-aimaestro-message.sh` | Send structured JSON message to inbox |
+| `forward-aimaestro-message.sh` | Forward message preserving context |
+| `check-and-show-messages.sh` | Display unread messages |
+| `check-new-messages-arrived.sh` | Get unread count |
+| `send-tmux-message.sh` | Instant terminal notification |
+
+### Claude Code Integration
+
+Agents can use natural language via a Claude skill:
+```
+"Send a message to backend-architect asking them to implement POST /api/users"
+```
+
+The skill translates this to the appropriate shell command.
+
+### Key Difference from pedramamini/Maestro
+
+| Aspect | pedramamini/Maestro | 23blocks/ai-maestro |
+|--------|---------------------|---------------------|
+| **Direct A2A** | No (moderator only) | Yes (file + tmux) |
+| **Persistence** | Via moderator context | JSON files on disk |
+| **Real-time** | No | Yes (tmux injection) |
+| **Protocol** | Electron IPC | File system + tmux |
+
+---
+
+## Feature Comparison with agent-relay
+
+### 1. Agent-to-Agent Messaging
+
+| Feature | ai-maestro (23blocks) | agent-relay |
+|---------|----------------------|-------------|
+| **Direct Messaging** | Yes (file + tmux) | Yes (pattern-based) |
+| **Persistence** | JSON files in inbox | SQLite |
+| **Real-time** | tmux injection | Unix socket |
+| **Priority Levels** | urgent/high/normal/low | None |
+| **Message Types** | request/response/notification/update | None |
+| **Read Tracking** | Auto-mark as read | None |
+
+**Winner: ai-maestro** - Richer message metadata and dual-channel approach.
+
+### 2. Distributed Architecture
+
+| Feature | ai-maestro (23blocks) | agent-relay |
+|---------|----------------------|-------------|
+| **Multi-machine** | Yes (manager/worker) | No |
+| **VPN Support** | Tailscale built-in | None |
+| **Remote Workers** | SSH + WebSocket proxy | None |
+| **Mobile Access** | Yes (touch-optimized) | Dashboard only |
+
+**Winner: ai-maestro** - True distributed architecture.
+
+### 3. Agent Discovery
+
+| Feature | ai-maestro (23blocks) | agent-relay |
+|---------|----------------------|-------------|
+| **Auto-discovery** | tmux session scanning | HELLO handshake |
+| **Naming** | 3-level hierarchy (project-module-task) | Flat names |
+| **Grouping** | Dynamic color-coded groups | None |
+| **Health Monitoring** | Connection indicators | Online/offline |
+
+**Winner: ai-maestro** - Better organization for many agents.
+
+### 4. Intelligence Features
+
+| Feature | ai-maestro (23blocks) | agent-relay |
+|---------|----------------------|-------------|
+| **Code Graph** | AST parsing (Ruby, TS, Python) | None |
+| **Delta Indexing** | Yes (~100ms updates) | None |
+| **Semantic Search** | Across all conversations | None |
+| **Auto-docs** | Extracted from code | None |
+
+**Winner: ai-maestro** - Significant code intelligence layer.
+
+### 5. Portability
+
+| Feature | ai-maestro (23blocks) | agent-relay |
+|---------|----------------------|-------------|
+| **Export** | .zip with metadata | None |
+| **Import** | Conflict detection | None |
+| **Cross-host** | Yes | No |
+| **Clone/Backup** | Yes | None |
+
+**Winner: ai-maestro** - Full agent portability.
+
+### 6. Setup & Simplicity
+
+| Feature | ai-maestro (23blocks) | agent-relay |
+|---------|----------------------|-------------|
+| **One-liner Install** | Yes (curl script) | npm install |
+| **Dependencies** | Node.js, tmux, PM2 | Node.js only |
+| **Config** | .env.local + scripts | Minimal |
+| **Learning Curve** | Moderate | Very low |
+
+**Winner: agent-relay** - Simpler to understand and use.
+
+---
+
+## Key Insights from 23blocks ai-maestro
+
+### What It Does Better Than agent-relay
+
+1. **True Distributed Architecture**
+   - Manager/worker model across machines
+   - Tailscale VPN for secure remote access
+   - WebSocket proxying for remote terminals
+
+2. **Dual-Channel Messaging**
+   - Persistent file-based with priorities
+   - Real-time tmux injection
+   - Best of both worlds
+
+3. **Rich Message Metadata**
+   - Priority levels (urgent/high/normal/low)
+   - Message types (request/response/notification/update)
+   - Auto-read tracking
+
+4. **Agent Hierarchy & Organization**
+   - 3-level naming (project-backend-api)
+   - Auto-grouping with color coding
+   - Better for 10+ agents
+
+5. **Code Intelligence**
+   - Multi-language AST parsing
+   - Delta indexing (100ms updates)
+   - Semantic conversation search
+
+6. **Agent Portability**
+   - Export to .zip with full metadata
+   - Import with conflict detection
+   - Cross-machine transfer
+
+### What agent-relay Does Better
+
+1. **Zero Dependencies** - Just Node.js, no tmux/PM2 required
+2. **Ultra-Low Latency** - <5ms vs file system polling
+3. **Universal Agents** - Pattern works with any CLI agent
+4. **Simpler Mental Model** - One pattern (`->relay:`) vs multiple tools
+5. **Lighter Footprint** - No database, no background services
+
+---
+
+## Recommended Adoptions for agent-relay
+
+### From 23blocks ai-maestro
+
+| Priority | Feature | Effort | Impact |
+|----------|---------|--------|--------|
+| P1 | Message priority levels | Low | Medium |
+| P1 | Message type classification | Low | Medium |
+| P1 | Read/unread tracking | Low | Medium |
+| P2 | Agent hierarchy naming | Medium | Medium |
+| P2 | Agent export/import | Medium | Low |
+| P3 | Distributed workers | High | Medium |
+
+### Suggested Implementation
+
+```
+# Enhanced message pattern
+->relay:Bob [priority:urgent] [type:request] Please review PR #123
+
+# Agent hierarchy
+agent-relay -n project-backend-api claude
+
+# Export agent state
+agent-relay export agent-name > agent-backup.json
+```
+
+---
+
+## Three-Way Comparison
+
+| Feature | pedramamini/Maestro | 23blocks/ai-maestro | agent-relay |
+|---------|---------------------|---------------------|-------------|
+| **Type** | Desktop (Electron) | Web (Next.js) | CLI (Node.js) |
+| **Agent A2A** | No (moderator) | Yes (file+tmux) | Yes (pattern) |
+| **Distributed** | No | Yes | No |
+| **Automation** | Playbooks | No | No |
+| **Session Resume** | Yes | No | No |
+| **Code Intelligence** | No | Yes (AST) | No |
+| **Setup Complexity** | High | Medium | Low |
+| **Latency** | ~100ms | ~500ms (file) | <5ms |
+
+---
+
+## Conclusion
+
+**pedramamini/Maestro** is best for: Power users running long autonomous sessions with playbook automation and session management. No direct A2A - relies on AI moderator.
+
+**23blocks/ai-maestro** is best for: Teams with distributed agents across machines needing rich messaging and code intelligence. True A2A via file+tmux.
+
+**agent-relay** is best for: Developers wanting fast, simple, direct agent coordination with minimal setup. True A2A via patterns.
+
+### Positioning Matrix
+
+| Use Case | Recommended Tool |
+|----------|------------------|
+| Local quick coordination | agent-relay |
+| Long autonomous sessions | pedramamini/Maestro |
+| Distributed team agents | 23blocks/ai-maestro |
+| Code intelligence | 23blocks/ai-maestro |
+| Playbook automation | pedramamini/Maestro |
+| Minimal dependencies | agent-relay |
+
+---
+
 ## Sources
 
+### pedramamini/Maestro
 - [Maestro GitHub Repository](https://github.com/pedramamini/Maestro)
 - [Maestro README](https://raw.githubusercontent.com/pedramamini/Maestro/main/README.md)
 - [Maestro ARCHITECTURE.md](https://raw.githubusercontent.com/pedramamini/Maestro/main/ARCHITECTURE.md)
 - [Maestro AGENT_SUPPORT.md](https://raw.githubusercontent.com/pedramamini/Maestro/main/AGENT_SUPPORT.md)
+
+### 23blocks-OS/ai-maestro
+- [ai-maestro GitHub Repository](https://github.com/23blocks-OS/ai-maestro)
+- [ai-maestro Website](https://ai-maestro.23blocks.com/)
