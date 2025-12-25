@@ -3,13 +3,13 @@
  * Extracts relay commands from agent terminal output.
  *
  * Supports two formats:
- * 1. Inline: @relay:<target> <message> (single line, start of line only)
+ * 1. Inline: ->relay:<target> <message> (single line, start of line only)
  * 2. Block: [[RELAY]]{ json }[[/RELAY]] (multi-line, structured)
  *
  * Rules:
  * - Inline only matches at start of line (after whitespace)
  * - Ignores content inside code fences
- * - Escape with \@relay: to output literal
+ * - Escape with \->relay: to output literal
  * - Block format is preferred for structured data
  */
 
@@ -22,16 +22,19 @@ export interface ParsedCommand {
   data?: Record<string, unknown>;
   /** Optional thread ID for grouping related messages */
   thread?: string;
+  /** Optional project for cross-project messaging (e.g., ->relay:project:agent) */
+  project?: string;
   raw: string;
+  meta?: ParsedMessageMetadata;
 }
 
 export interface ParserOptions {
   maxBlockBytes?: number;
   enableInline?: boolean;
   enableBlock?: boolean;
-  /** Relay prefix pattern (default: '@relay:') */
+  /** Relay prefix pattern (default: '->relay:') */
   prefix?: string;
-  /** Thinking prefix pattern (default: '@thinking:') */
+  /** Thinking prefix pattern (default: '->thinking:') */
   thinkingPrefix?: string;
 }
 
@@ -39,13 +42,19 @@ const DEFAULT_OPTIONS: Required<ParserOptions> = {
   maxBlockBytes: 1024 * 1024, // 1 MiB
   enableInline: true,
   enableBlock: true,
-  prefix: '@relay:',
-  thinkingPrefix: '@thinking:',
+  prefix: '->relay:',
+  thinkingPrefix: '->thinking:',
 };
 
 // Static patterns (not prefix-dependent)
 const BLOCK_END = /\[\[\/RELAY\]\]/;
-const CODE_FENCE = /^```/;
+const BLOCK_METADATA_START = '[[RELAY_METADATA]]';
+const BLOCK_METADATA_END = /\[\[\/RELAY_METADATA\]\]/;
+const CODE_FENCE = /^```/;// Continuation helpers
+const BULLET_OR_NUMBERED_LIST = /^[ \t]*([\-*•◦‣⏺◆◇○□■]|[0-9]+[.)])\s+/;
+const PROMPTISH_LINE = /^[\s]*[>$%#➜›»][\s]*$/;
+const RELAY_INJECTION_PREFIX = /^\s*Relay message from /;
+const MAX_INLINE_CONTINUATION_LINES = 30;
 
 /**
  * Escape special regex characters in a string
@@ -56,19 +65,20 @@ function escapeRegex(str: string): string {
 
 /**
  * Build inline pattern for a given prefix
- * Allow common input prefixes: >, $, %, #, →, ➜, bullets (●•◦‣⁃-*⏺◆◇○□■), and their variations
+ * Allow common input prefixes: >, $, %, #, →, ➜, bullets (●•◦‣⁃-*⏺◆◇○□■), box chars (│┃┆┇┊┋╎╏), and their variations
  *
- * Supports optional thread syntax: @relay:Target [thread:id] message
+ * Supports optional thread syntax: ->relay:Target [thread:id] message
  * Thread IDs can contain alphanumeric chars, hyphens, underscores
  */
 function buildInlinePattern(prefix: string): RegExp {
   const escaped = escapeRegex(prefix);
   // Group 1: target, Group 2: optional thread ID (without brackets), Group 3: message body
-  return new RegExp(`^(?:\\s*(?:[>$%#→➜›»●•◦‣⁃\\-*⏺◆◇○□■]\\s*)*)?${escaped}(\\S+)(?:\\s+\\[thread:([\\w-]+)\\])?\\s+(.+)$`);
+  // Includes box drawing characters (│┃┆┇┊┋╎╏) and sparkle (✦) for Gemini CLI output
+  return new RegExp(`^(?:\\s*(?:[>$%#→➜›»●•◦‣⁃\\-*⏺◆◇○□■│┃┆┇┊┋╎╏✦]\\s*)*)?${escaped}(\\S+)(?:\\s+\\[thread:([\\w-]+)\\])?\\s+(.+)$`);
 }
 
 /**
- * Build escape pattern for a given prefix (e.g., \@relay: or \>>)
+ * Build escape pattern for a given prefix (e.g., \->relay: or \->)
  */
 function buildEscapePattern(prefix: string, thinkingPrefix: string): RegExp {
   // Extract the first character(s) that would be escaped
@@ -82,6 +92,29 @@ function buildEscapePattern(prefix: string, thinkingPrefix: string): RegExp {
 const ANSI_PATTERN = /\x1b\[[0-9;?]*[a-zA-Z]|\x1b\].*?(?:\x07|\x1b\\)|\r/g;
 
 /**
+ * Parse a target string that may contain cross-project syntax.
+ * Supports: "agent" (local) or "project:agent" (cross-project)
+ *
+ * @param target The raw target string from the relay command
+ * @returns Object with `to` (agent name) and optional `project`
+ */
+function parseTarget(target: string): { to: string; project?: string } {
+  // Check for cross-project syntax: project:agent
+  // Only split on FIRST colon to allow agent names with colons
+  const colonIndex = target.indexOf(':');
+
+  if (colonIndex > 0 && colonIndex < target.length - 1) {
+    // Has a colon with content on both sides
+    const project = target.substring(0, colonIndex);
+    const agent = target.substring(colonIndex + 1);
+    return { to: agent, project };
+  }
+
+  // Local target (no colon or malformed)
+  return { to: target };
+}
+
+/**
  * Strip ANSI escape codes from a string for pattern matching.
  */
 function stripAnsi(str: string): string {
@@ -93,6 +126,8 @@ export class OutputParser {
   private inCodeFence = false;
   private inBlock = false;
   private blockBuffer = '';
+  private blockType: 'RELAY' | 'RELAY_METADATA' | null = null;
+  private lastParsedMetadata: ParsedMessageMetadata | null = null;
 
   // Dynamic patterns based on prefix configuration
   private inlineRelayPattern: RegExp;
@@ -127,17 +162,17 @@ export class OutputParser {
     let output = '';
 
     // If we're inside a block, accumulate until we see the end
-    if (this.inBlock) {
-      return this.parseInBlockMode(data, commands);
+    if (this.inBlock && this.blockType) {
+      return this.parseInBlockMode(data, commands, this.blockType);
     }
 
-    // Find [[RELAY]] that's at the start of a line (or start of input)
-    // and NOT inside a code fence
-    const blockStartIdx = this.findBlockStart(data);
+    // Find [[RELAY_METADATA]] or [[RELAY]] that's at the start of a line
+    const blockStart = this.findBlockStart(data);
 
-    if (this.options.enableBlock && blockStartIdx !== -1) {
-      const before = data.substring(0, blockStartIdx);
-      const after = data.substring(blockStartIdx + '[[RELAY]]'.length);
+    if (this.options.enableBlock && blockStart.index !== -1 && blockStart.identifier) {
+      const blockStartIdentifier = blockStart.identifier;
+      const before = data.substring(0, blockStart.index);
+      const after = data.substring(blockStart.index + blockStartIdentifier.length);
 
       // Output everything before the block start
       if (before) {
@@ -147,6 +182,7 @@ export class OutputParser {
 
       // Enter block mode
       this.inBlock = true;
+      this.blockType = blockStartIdentifier === BLOCK_METADATA_START ? 'RELAY_METADATA' : 'RELAY';
       this.blockBuffer = after;
 
       // Check size limit before processing
@@ -154,12 +190,14 @@ export class OutputParser {
         console.error('[parser] Block too large, discarding');
         this.inBlock = false;
         this.blockBuffer = '';
+        this.blockType = null;
         return { commands, output };
       }
 
       // Check if block ends in same chunk
-      if (BLOCK_END.test(this.blockBuffer)) {
-        const blockResult = this.finishBlock();
+      const blockEndPattern = this.blockType === 'RELAY_METADATA' ? BLOCK_METADATA_END : BLOCK_END;
+      if (blockEndPattern.test(this.blockBuffer)) {
+        const blockResult = this.finishBlock(this.blockType);
         if (blockResult.command) {
           commands.push(blockResult.command);
         }
@@ -180,66 +218,76 @@ export class OutputParser {
   }
 
   /**
-   * Find [[RELAY]] that's at the start of a line and not inside a code fence.
-   * Returns the index, or -1 if not found.
+   * Find [[RELAY_METADATA]] or [[RELAY]] that's at the start of a line and not inside a code fence.
+   * Returns the index and identifier, or -1 and null if not found.
    */
-  private findBlockStart(data: string): number {
+  private findBlockStart(data: string): { index: number; identifier: string | null } {
     // Track code fence state through the data
     let inFence = this.inCodeFence;
     let searchStart = 0;
 
-    while (searchStart < data.length) {
-      // Look for next [[RELAY]] or code fence
-      const relayIdx = data.indexOf('[[RELAY]]', searchStart);
-      const fenceIdx = data.indexOf('```', searchStart);
+    // Prioritize RELAY_METADATA over RELAY
+    const blockIdentifiers = [BLOCK_METADATA_START, '[[RELAY]]'];
 
-      // No more [[RELAY]] found
-      if (relayIdx === -1) {
-        // Still update code fence state for remaining data
-        while (fenceIdx !== -1) {
-          const nextFence = data.indexOf('```', searchStart);
-          if (nextFence === -1) break;
-          inFence = !inFence;
-          searchStart = nextFence + 3;
+    while (searchStart < data.length) {
+      let earliestBlockIdx = -1;
+      let earliestBlockIdentifier: string | null = null;
+
+      for (const identifier of blockIdentifiers) {
+        const currentBlockIdx = data.indexOf(identifier, searchStart);
+        if (currentBlockIdx !== -1 && (earliestBlockIdx === -1 || currentBlockIdx < earliestBlockIdx)) {
+          earliestBlockIdx = currentBlockIdx;
+          earliestBlockIdentifier = identifier;
         }
-        return -1;
       }
 
-      // Process any code fences before this [[RELAY]]
+      // No more blocks found
+      if (earliestBlockIdx === -1) {
+        // Still update code fence state for remaining data
+        let fenceIdx = data.indexOf('```', searchStart);
+        while (fenceIdx !== -1) {
+          inFence = !inFence;
+          searchStart = fenceIdx + 3;
+          fenceIdx = data.indexOf('```', searchStart);
+        }
+        return { index: -1, identifier: null };
+      }
+
+      // Process any code fences before this block
       let tempIdx = searchStart;
       while (true) {
         const nextFence = data.indexOf('```', tempIdx);
-        if (nextFence === -1 || nextFence >= relayIdx) break;
+        if (nextFence === -1 || nextFence >= earliestBlockIdx) break;
         inFence = !inFence;
         tempIdx = nextFence + 3;
       }
 
-      // If we're inside a code fence, skip this [[RELAY]]
+      // If we're inside a code fence, skip this block
       if (inFence) {
-        searchStart = relayIdx + 9; // Skip past [[RELAY]]
+        searchStart = earliestBlockIdx + (earliestBlockIdentifier?.length ?? 0); // Skip past the block
         continue;
       }
 
-      // Check if [[RELAY]] is at start of a line
-      if (relayIdx === 0) {
-        return 0; // At very start
+      // Check if block is at start of a line
+      if (earliestBlockIdx === 0) {
+        return { index: 0, identifier: earliestBlockIdentifier }; // At very start
       }
 
       // Look backwards for the start of line
-      const beforeRelay = data.substring(0, relayIdx);
-      const lastNewline = beforeRelay.lastIndexOf('\n');
-      const lineStart = beforeRelay.substring(lastNewline + 1);
+      const beforeBlock = data.substring(0, earliestBlockIdx);
+      const lastNewline = beforeBlock.lastIndexOf('\n');
+      const lineStart = beforeBlock.substring(lastNewline + 1);
 
-      // Must be only whitespace before [[RELAY]] on this line
+      // Must be only whitespace before block on this line
       if (/^\s*$/.test(lineStart)) {
-        return relayIdx;
+        return { index: earliestBlockIdx, identifier: earliestBlockIdentifier };
       }
 
       // Not at start of line, keep searching
-      searchStart = relayIdx + 9;
+      searchStart = earliestBlockIdx + (earliestBlockIdentifier?.length ?? 0);
     }
 
-    return -1;
+    return { index: -1, identifier: null };
   }
 
   /**
@@ -256,6 +304,61 @@ export class OutputParser {
    // Simple approach: split data, check each line (complete or not), rebuild output
     const lines = data.split('\n');
     const hasTrailingNewline = data.endsWith('\n');
+
+    const isInlineStart = (line: string): boolean => {
+      return this.inlineRelayPattern.test(line) || this.inlineThinkingPattern.test(line);
+    };
+
+    const isBlockMarker = (line: string): boolean => {
+      return CODE_FENCE.test(line) || line.includes('[[RELAY]]') || BLOCK_END.test(line);
+    };
+
+    const shouldStopContinuation = (line: string, continuationCount: number, lines: string[], currentIndex: number): boolean => {
+      const trimmed = line.trim();
+      if (isInlineStart(line)) return true;
+      if (isBlockMarker(line)) return true;
+      if (PROMPTISH_LINE.test(trimmed)) return true;
+      if (RELAY_INJECTION_PREFIX.test(line)) return true; // Avoid swallowing injected inbound messages
+
+      // Allow blank lines only in structured content like tables or between numbered sections
+      if (trimmed === '') {
+        // If we haven't started continuation yet, stop on blank
+        if (continuationCount === 0) return true;
+
+        // Look ahead to see if there's more content that looks like structured markdown
+        for (let j = currentIndex + 1; j < lines.length; j++) {
+          const nextLine = lines[j].trim();
+          if (nextLine === '') {
+            // Double blank line always stops
+            return true;
+          }
+          // Only continue for table rows or numbered list items after blank
+          if (/^\|/.test(nextLine)) return false; // Table row
+          if (/^\d+[.)]\s/.test(nextLine)) return false; // Numbered list like "1." or "2)"
+          // Stop for anything else after a blank line
+          return true;
+        }
+        return true; // No more content, stop
+      }
+      return false;
+    };
+
+    const isContinuationLine = (
+      original: string,
+      stripped: string,
+      prevStripped: string,
+      continuationCount: number
+    ): boolean => {
+      // Note: shouldStopContinuation is already checked in the main loop before calling this
+      if (/^[ \t]/.test(original)) return true; // Indented lines from TUI wrapping
+      if (BULLET_OR_NUMBERED_LIST.test(stripped)) return true; // Bullet/numbered lists after ->relay:
+      const prevTrimmed = prevStripped.trimEnd();
+      const prevSuggestsContinuation = prevTrimmed !== '' && /[:;,\-–—…]$/.test(prevTrimmed);
+      if (prevSuggestsContinuation) return true;
+      // If we've already continued once, allow subsequent lines until a stop condition
+      if (continuationCount > 0) return true;
+      return false;
+    };
 
     const outputLines: string[] = [];
     let strippedCount = 0;
@@ -284,6 +387,7 @@ export class OutputParser {
           let body = result.command.body;
           const rawLines = [result.command.raw];
           let consumed = 0;
+          let continuationLines = 0;
 
           while (i + 1 < lines.length) {
             const nextIsLast = i + 1 === lines.length - 1;
@@ -295,32 +399,25 @@ export class OutputParser {
             }
 
             const nextStripped = stripAnsi(nextLine);
+            const prevStripped = stripAnsi(rawLines[rawLines.length - 1] ?? '');
 
-            // Stop at empty lines - they end the continuation
-            if (nextStripped.trim() === '') {
+            // Stop if this line clearly marks a new block, prompt, or inline command
+            if (shouldStopContinuation(nextStripped, continuationLines, lines, i + 1)) {
               break;
             }
 
-            // Stop if the next line starts another inline command, code fence, or block marker
-            if (
-              this.inlineRelayPattern.test(nextStripped) ||
-              this.inlineThinkingPattern.test(nextStripped) ||
-              CODE_FENCE.test(nextStripped) ||
-              nextStripped.includes('[[RELAY]]') ||
-              BLOCK_END.test(nextStripped)
-            ) {
+            if (continuationLines >= MAX_INLINE_CONTINUATION_LINES) {
               break;
             }
 
-            // Only consume as continuation if the line is INDENTED (starts with whitespace)
-            // This handles TUI wrapping where continuation lines are indented
-            // Non-indented lines are regular output, not continuation
-            if (!/^[ \t]/.test(nextLine)) {
+            // Consume as continuation if it looks like it belongs to the ->relay message
+            if (!isContinuationLine(nextLine, nextStripped, prevStripped, continuationLines)) {
               break;
             }
 
             consumed++;
             i++; // Skip the consumed continuation line
+            continuationLines++;
             body += '\n' + nextLine;
             rawLines.push(nextLine);
           }
@@ -360,7 +457,7 @@ export class OutputParser {
   /**
    * Parse while inside a [[RELAY]] block - buffer until we see [[/RELAY]].
    */
-  private parseInBlockMode(data: string, commands: ParsedCommand[]): { commands: ParsedCommand[]; output: string } {
+  private parseInBlockMode(data: string, commands: ParsedCommand[], blockType: 'RELAY' | 'RELAY_METADATA'): { commands: ParsedCommand[]; output: string } {
     this.blockBuffer += data;
 
     // Check size limit
@@ -368,12 +465,14 @@ export class OutputParser {
       console.error('[parser] Block too large, discarding');
       this.inBlock = false;
       this.blockBuffer = '';
+      this.blockType = null;
       return { commands, output: '' };
     }
 
     // Check for block end
-    if (BLOCK_END.test(this.blockBuffer)) {
-      const result = this.finishBlock();
+    const blockEndPattern = blockType === 'RELAY_METADATA' ? BLOCK_METADATA_END : BLOCK_END;
+    if (blockEndPattern.test(this.blockBuffer)) {
+      const result = this.finishBlock(blockType);
       if (result.command) {
         commands.push(result.command);
       }
@@ -428,12 +527,14 @@ export class OutputParser {
       const relayMatch = stripped.match(this.inlineRelayPattern);
       if (relayMatch) {
         const [raw, target, threadId, body] = relayMatch;
+        const { to, project } = parseTarget(target);
         return {
           command: {
-            to: target,
+            to,
             kind: 'message',
             body,
             thread: threadId || undefined, // undefined if no thread specified
+            project, // undefined if local, set if cross-project
             raw,
           },
           output: null, // Don't output relay commands
@@ -443,12 +544,14 @@ export class OutputParser {
       const thinkingMatch = stripped.match(this.inlineThinkingPattern);
       if (thinkingMatch) {
         const [raw, target, threadId, body] = thinkingMatch;
+        const { to, project } = parseTarget(target);
         return {
           command: {
-            to: target,
+            to,
             kind: 'thinking',
             body,
             thread: threadId || undefined,
+            project,
             raw,
           },
           output: null,
@@ -464,37 +567,72 @@ export class OutputParser {
    * Finish processing a block and extract command.
    * Returns the command (if valid) and any remaining content after [[/RELAY]].
    */
-  private finishBlock(): { command: ParsedCommand | null; remaining: string | null } {
-    const endIdx = this.blockBuffer.indexOf('[[/RELAY]]');
+  private finishBlock(blockType: 'RELAY' | 'RELAY_METADATA'): { command: ParsedCommand | null; remaining: string | null; metadata: ParsedMessageMetadata | null } {
+    const blockEndIdentifier = blockType === 'RELAY_METADATA' ? BLOCK_METADATA_END.source : BLOCK_END.source;
+    const endIdx = this.blockBuffer.indexOf(blockEndIdentifier.replace(/\\/g, '')); // Remove regex escapes for indexOf
     const jsonStr = this.blockBuffer.substring(0, endIdx).trim();
-    const remaining = this.blockBuffer.substring(endIdx + '[[/RELAY]]'.length) || null;
+    const remaining = this.blockBuffer.substring(endIdx + blockEndIdentifier.replace(/\\/g, '').length) || null;
 
     this.inBlock = false;
     this.blockBuffer = '';
+    this.blockType = null;
 
-    try {
-      const parsed = JSON.parse(jsonStr);
-
-      // Validate required fields
-      if (!parsed.to || !parsed.type) {
-        console.error('[parser] Block missing required fields (to, type)');
-        return { command: null, remaining };
+    if (blockType === 'RELAY_METADATA') {
+      try {
+        const metadata = JSON.parse(jsonStr) as ParsedMessageMetadata;
+        this.lastParsedMetadata = metadata;
+        return { command: null, remaining, metadata };
+      } catch (err) {
+        console.error('[parser] Invalid JSON in RELAY_METADATA block:', err);
+        this.lastParsedMetadata = null;
+        return { command: null, remaining, metadata: null };
       }
+    } else { // blockType === 'RELAY'
+      try {
+        const parsed = JSON.parse(jsonStr);
 
-      return {
-        command: {
-          to: parsed.to,
+        // Validate required fields
+        if (!parsed.to || !parsed.type) {
+          console.error('[parser] Block missing required fields (to, type)');
+          this.lastParsedMetadata = null; // Clear metadata even if RELAY block is invalid
+          return { command: null, remaining, metadata: null };
+        }
+
+        // Handle cross-project syntax in block format
+        // Supports both explicit "project" field and "project:agent" in "to" field
+        let to = parsed.to;
+        let project = parsed.project;
+
+        if (!project && typeof to === 'string') {
+          // Check if "to" field uses project:agent syntax
+          const targetParsed = parseTarget(to);
+          to = targetParsed.to;
+          project = targetParsed.project;
+        }
+
+        const command: ParsedCommand = {
+          to,
           kind: parsed.type as PayloadKind,
           body: parsed.body ?? parsed.text ?? '',
           data: parsed.data,
           thread: parsed.thread || undefined,
+          project: project || undefined,
           raw: jsonStr,
-        },
-        remaining,
-      };
-    } catch (err) {
-      console.error('[parser] Invalid JSON in block:', err);
-      return { command: null, remaining };
+          meta: this.lastParsedMetadata || undefined, // Attach last parsed metadata
+        };
+
+        this.lastParsedMetadata = null; // Clear after use
+
+        return {
+          command,
+          remaining,
+          metadata: null,
+        };
+      } catch (err) {
+        console.error('[parser] Invalid JSON in RELAY block:', err);
+        this.lastParsedMetadata = null;
+        return { command: null, remaining, metadata: null };
+      }
     }
   }
 
@@ -505,6 +643,8 @@ export class OutputParser {
     const result = this.parse('\n');
     this.inBlock = false;
     this.blockBuffer = '';
+    this.blockType = null;
+    this.lastParsedMetadata = null;
     this.inCodeFence = false;
     return result;
   }
@@ -515,6 +655,8 @@ export class OutputParser {
   reset(): void {
     this.inBlock = false;
     this.blockBuffer = '';
+    this.blockType = null;
+    this.lastParsedMetadata = null;
     this.inCodeFence = false;
   }
 }
@@ -525,4 +667,154 @@ export class OutputParser {
 export function formatIncomingMessage(from: string, body: string, kind: PayloadKind = 'message'): string {
   const prefix = kind === 'thinking' ? '[THINKING]' : '[MSG]';
   return `\n${prefix} from ${from}: ${body}\n`;
+}
+
+/**
+ * Parsed message metadata block from agent output.
+ */
+export interface ParsedMessageMetadata {
+  subject?: string;
+  importance?: number;
+  replyTo?: string;
+  ackRequired?: boolean;
+}
+
+/**
+ * Result of attempting to parse a RELAY_METADATA block.
+ */
+export interface MetadataParseResult {
+  found: boolean;
+  valid: boolean;
+  metadata: ParsedMessageMetadata | null;
+  rawContent: string | null;  // Raw block content for deduplication
+}
+
+/**
+ * Parse [[RELAY_METADATA]]...[[/RELAY_METADATA]] blocks from agent output.
+ * Agents can output metadata to enhance messages.
+ *
+ * Format:
+ * [[RELAY_METADATA]]
+ * {
+ *   "subject": "Task update",
+ *   "importance": 80,
+ *   "replyTo": "msg-abc123",
+ *   "ackRequired": true
+ * }
+ * [[/RELAY_METADATA]]
+ */
+export function parseRelayMetadataFromOutput(output: string): MetadataParseResult {
+  const match = output.match(/\[\[RELAY_METADATA\]\]([\s\S]*?)\[\[\/RELAY_METADATA\]\]/);
+
+  if (!match) {
+    return { found: false, valid: false, metadata: null, rawContent: null };
+  }
+
+  const rawContent = match[1].trim();
+
+  try {
+    const metadata = JSON.parse(rawContent) as ParsedMessageMetadata;
+    return { found: true, valid: true, metadata, rawContent };
+  } catch {
+    return { found: true, valid: false, metadata: null, rawContent };
+  }
+}
+
+/**
+ * Parsed summary block from agent output.
+ */
+export interface ParsedSummary {
+  currentTask?: string;
+  completedTasks?: string[];
+  decisions?: string[];
+  context?: string;
+  files?: string[];
+}
+
+/**
+ * Result of attempting to parse a SUMMARY block.
+ */
+export interface SummaryParseResult {
+  found: boolean;
+  valid: boolean;
+  summary: ParsedSummary | null;
+  rawContent: string | null;  // Raw block content for deduplication
+}
+
+/**
+ * Parse [[SUMMARY]]...[[/SUMMARY]] blocks from agent output.
+ * Agents can output summaries to keep a running context of their work.
+ *
+ * Format:
+ * [[SUMMARY]]
+ * {
+ *   "currentTask": "Working on auth module",
+ *   "context": "Completed login flow, now implementing logout",
+ *   "files": ["src/auth.ts", "src/session.ts"]
+ * }
+ * [[/SUMMARY]]
+ */
+export function parseSummaryFromOutput(output: string): ParsedSummary | null {
+  const result = parseSummaryWithDetails(output);
+  return result.summary;
+}
+
+/**
+ * Parse SUMMARY block with full details for deduplication.
+ * Returns raw content to allow caller to dedupe before logging errors.
+ */
+export function parseSummaryWithDetails(output: string): SummaryParseResult {
+  const match = output.match(/\[\[SUMMARY\]\]([\s\S]*?)\[\[\/SUMMARY\]\]/);
+
+  if (!match) {
+    return { found: false, valid: false, summary: null, rawContent: null };
+  }
+
+  const rawContent = match[1].trim();
+
+  try {
+    const summary = JSON.parse(rawContent) as ParsedSummary;
+    return { found: true, valid: true, summary, rawContent };
+  } catch {
+    return { found: true, valid: false, summary: null, rawContent };
+  }
+}
+
+/**
+ * Session end marker from agent output.
+ */
+export interface SessionEndMarker {
+  summary?: string;
+  completedTasks?: string[];
+}
+
+/**
+ * Parse [[SESSION_END]]...[[/SESSION_END]] blocks from agent output.
+ * Agents output this to explicitly mark their session as complete.
+ *
+ * Format:
+ * [[SESSION_END]]
+ * {"summary": "Completed auth module implementation", "completedTasks": ["login", "logout"]}
+ * [[/SESSION_END]]
+ *
+ * Or simply: [[SESSION_END]][[/SESSION_END]] for a clean close without summary.
+ */
+export function parseSessionEndFromOutput(output: string): SessionEndMarker | null {
+  const match = output.match(/\[\[SESSION_END\]\]([\s\S]*?)\[\[\/SESSION_END\]\]/);
+
+  if (!match) {
+    return null;
+  }
+
+  const content = match[1].trim();
+  if (!content) {
+    return {}; // Empty marker = session ended without summary
+  }
+
+  try {
+    return JSON.parse(content) as SessionEndMarker;
+  } catch {
+    // If not valid JSON, treat the content as a plain summary string
+    return { summary: content };
+  }
 }

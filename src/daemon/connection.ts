@@ -27,11 +27,15 @@ export type ConnectionState = 'CONNECTING' | 'HANDSHAKING' | 'ACTIVE' | 'CLOSING
 export interface ConnectionConfig {
   maxFrameBytes: number;
   heartbeatMs: number;
+  /** Multiplier for heartbeat timeout (timeout = heartbeatMs * multiplier). Default: 6 (30s with 5s heartbeat) */
+  heartbeatTimeoutMultiplier: number;
 }
 
 export const DEFAULT_CONFIG: ConnectionConfig = {
   maxFrameBytes: 1024 * 1024,
   heartbeatMs: 5000,
+  // 6x multiplier = 30 second timeout, more tolerant for AI agents processing long responses
+  heartbeatTimeoutMultiplier: 6,
 };
 
 export class Connection {
@@ -43,6 +47,10 @@ export class Connection {
   private _state: ConnectionState = 'CONNECTING';
   private _agentName?: string;
   private _cli?: string;
+  private _program?: string;
+  private _model?: string;
+  private _task?: string;
+  private _workingDirectory?: string;
   private _sessionId: string;
   private _resumeToken: string;
 
@@ -58,6 +66,7 @@ export class Connection {
   onError?: (error: Error) => void;
   onActive?: () => void; // Fires when connection transitions to ACTIVE state
   onAck?: (envelope: Envelope<AckPayload>) => void;
+  onPong?: () => void; // Fires on successful heartbeat response
 
   constructor(socket: net.Socket, config: Partial<ConnectionConfig> = {}) {
     this.id = uuid();
@@ -81,6 +90,22 @@ export class Connection {
 
   get cli(): string | undefined {
     return this._cli;
+  }
+
+  get program(): string | undefined {
+    return this._program;
+  }
+
+  get model(): string | undefined {
+    return this._model;
+  }
+
+  get task(): string | undefined {
+    return this._task;
+  }
+
+  get workingDirectory(): string | undefined {
+    return this._workingDirectory;
   }
 
   get sessionId(): string {
@@ -139,6 +164,10 @@ export class Connection {
 
     this._agentName = envelope.payload.agent;
     this._cli = envelope.payload.cli;
+    this._program = envelope.payload.program;
+    this._model = envelope.payload.model;
+    this._task = envelope.payload.task;
+    this._workingDirectory = envelope.payload.workingDirectory;
 
     // Check for session resume
     if (envelope.payload.session?.resume_token) {
@@ -147,6 +176,9 @@ export class Connection {
     }
 
     // Send WELCOME
+    // Note: resume_token is omitted because session resume is not yet implemented.
+    // Sending a token would cause clients to attempt resume on reconnect,
+    // triggering a RESUME_TOO_OLD -> new token -> reconnect loop.
     const welcome: Envelope<WelcomePayload> = {
       v: PROTOCOL_VERSION,
       type: 'WELCOME',
@@ -154,7 +186,6 @@ export class Connection {
       ts: Date.now(),
       payload: {
         session_id: this._sessionId,
-        resume_token: this._resumeToken,
         server: {
           max_frame_bytes: this.config.maxFrameBytes,
           heartbeat_ms: this.config.heartbeatMs,
@@ -188,6 +219,9 @@ export class Connection {
   private handlePong(_envelope: Envelope<PongPayload>): void {
     // Note: envelope.payload.nonce could be used for RTT calculation in the future
     this.lastPongReceived = Date.now();
+    if (this.onPong) {
+      this.onPong();
+    }
   }
 
   private startHeartbeat(): void {
@@ -196,9 +230,10 @@ export class Connection {
 
       const now = Date.now();
 
-      // Check for missed pong
-      if (this.lastPongReceived && now - this.lastPongReceived > this.config.heartbeatMs * 2) {
-        this.handleError(new Error('Heartbeat timeout'));
+      // Check for missed pong - use configurable timeout multiplier
+      const timeoutMs = this.config.heartbeatMs * this.config.heartbeatTimeoutMultiplier;
+      if (this.lastPongReceived && now - this.lastPongReceived > timeoutMs) {
+        this.handleError(new Error(`Heartbeat timeout (no pong in ${timeoutMs}ms)`));
         return;
       }
 

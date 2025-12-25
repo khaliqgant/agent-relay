@@ -8,6 +8,8 @@
 
 Agent Relay enables AI coding assistants (Claude, Codex, Gemini) running in separate terminals to **discover each other and communicate autonomously** - without any code changes to the AI systems.
 
+**Key differentiator:** agent-relay is a **composable messaging layer**, not a monolithic solution. It does one thing exceptionally well (<5ms real-time messaging) and integrates with best-of-breed tools for memory, UI, and workflows.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                                                                         │
@@ -34,7 +36,7 @@ Agent Relay enables AI coding assistants (Claude, Codex, Gemini) running in sepa
 **Agents already produce text.** By watching for a simple pattern in their output, we can extract communication intent:
 
 ```
-Agent Output:  "I'll ask Bob for help. @relay:Bob Can you review auth.ts?"
+Agent Output:  "I'll ask Bob for help. ->relay:Bob Can you review auth.ts?"
                                         ▲
                                         │
                             Relay captures this, routes to Bob
@@ -54,7 +56,7 @@ No API integration. No agent modification. Just pattern matching on stdout.
 │                                                                          │
 │  agent-relay               Background                  Daemon            │
 │  -n Alice claude    ───▶   polling     ───▶   finds   routes    ───▶    │
-│                            captures          @relay:   message          │
+│                            captures          ->relay:   message          │
 │  Agent runs in             output            Bob...    to Bob           │
 │  tmux session                                                            │
 │                                                                          │
@@ -67,7 +69,7 @@ No API integration. No agent modification. Just pattern matching on stdout.
 │  message                   terminal                    as input          │
 │                                                                          │
 │                            "Relay message              Can reply with    │
-│                             from Alice:                @relay:Alice      │
+│                             from Alice:                ->relay:Alice      │
 │                             Can you..."                                  │
 │                                                                          │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -88,7 +90,7 @@ agent-relay -n Alice claude
 agent-relay -n Bob claude
 ```
 
-Alice can now send: `@relay:Bob Can you help with the auth module?`
+Alice can now send: `->relay:Bob Can you help with the auth module?`
 
 Bob receives: `Relay message from Alice [abc123]: Can you help with the auth module?`
 
@@ -117,7 +119,7 @@ Bob receives: `Relay message from Alice [abc123]: Can you help with the auth mod
 │  │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │   │
 │  │   │TmuxWrapper  │  │OutputParser │  │RelayClient  │            │   │
 │  │   │             │  │             │  │             │            │   │
-│  │   │• Runs agent │  │• @relay:    │  │• Socket I/O │            │   │
+│  │   │• Runs agent │  │• ->relay:    │  │• Socket I/O │            │   │
 │  │   │  in tmux    │  │  patterns   │  │• Reconnect  │            │   │
 │  │   │• Captures   │  │• ANSI strip │  │• Handshake  │            │   │
 │  │   │  output     │  │• Dedup      │  │             │            │   │
@@ -160,7 +162,7 @@ Bob receives: `Relay message from Alice [abc123]: Can you help with the auth mod
   Alice (Claude)                    Daemon                      Bob (Codex)
        │                              │                              │
        │  Agent outputs:              │                              │
-       │  "@relay:Bob review auth"    │                              │
+       │  "->relay:Bob review auth"    │                              │
        │                              │                              │
        ├──────────────────────────────┤                              │
        │     TmuxWrapper captures     │                              │
@@ -186,7 +188,7 @@ Bob receives: `Relay message from Alice [abc123]: Can you help with the auth mod
        │                              │              └───────────────┤
        │                              │                              │
        │                              │     Bob can respond:         │
-       │                              │     "@relay:Alice Done!"     │
+       │                              │     "->relay:Alice Done!"     │
        │                              │                              │
        │                              │◀─────────────────────────────┤
        │◀─────────────────────────────┤                              │
@@ -261,12 +263,12 @@ Bob receives: `Relay message from Alice [abc123]: Can you help with the auth mod
 
 ### Direct Message
 ```
-@relay:Bob Please review the authentication module
+->relay:Bob Please review the authentication module
 ```
 
 ### Broadcast
 ```
-@relay:* I've completed the database migration - all tests passing
+->relay:* I've completed the database migration - all tests passing
 ```
 
 ### Structured (Block Format)
@@ -276,10 +278,10 @@ Bob receives: `Relay message from Alice [abc123]: Can you help with the auth mod
 
 ### Common Conventions
 ```
-@relay:* STATUS: Starting work on auth module
-@relay:* DONE: Auth module complete
-@relay:Reviewer REVIEW: Please check src/auth/*.ts
-@relay:Architect QUESTION: Should we use JWT or sessions?
+->relay:* STATUS: Starting work on auth module
+->relay:* DONE: Auth module complete
+->relay:Reviewer REVIEW: Please check src/auth/*.ts
+->relay:Architect QUESTION: Should we use JWT or sessions?
 ```
 
 ---
@@ -321,7 +323,7 @@ agent-relay/
 │   ├── wrapper/
 │   │   ├── tmux-wrapper.ts    # Tmux session management
 │   │   ├── client.ts          # Daemon client
-│   │   └── parser.ts          # @relay: pattern matching
+│   │   └── parser.ts          # ->relay: pattern matching
 │   ├── protocol/
 │   │   ├── types.ts           # Message types
 │   │   └── framing.ts         # Wire format
@@ -349,6 +351,7 @@ agent-relay/
 
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Complete technical deep-dive
 - **[README.md](./README.md)** - Quick start guide
+- **[docs/COMPETITIVE_ANALYSIS.md](./docs/COMPETITIVE_ANALYSIS.md)** - Comparison with 16 multi-agent tools
 
 ---
 

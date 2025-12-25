@@ -74,8 +74,62 @@ relay wrap -n PlayerO claude
 
 ### Why tmux?
 - Real terminal: you attach directly to tmux (no double PTY).
-- Background capture/parse of `@relay:` without touching stdout.
+- Background capture/parse of `->relay:` without touching stdout.
 - Reliable injection via `tmux send-keys`.
+
+---
+
+## Agent Role Auto-Detection
+
+When you start an agent with `-n`, the name is matched against agent definitions in your project. If a matching agent file exists, the agent automatically assumes that role.
+
+**Supported locations:**
+- `.claude/agents/<name>.md` - Claude Code agents
+- `.openagents/<name>.md` - OpenAgents format
+
+### Example
+
+```bash
+# If .claude/agents/lead.md exists:
+relay wrap -n lead claude
+# → Agent automatically assumes the Lead role defined in lead.md
+
+# If .claude/agents/implementer.md exists:
+relay wrap -n implementer claude
+# → Agent assumes the Implementer role
+
+# No matching file? Agent starts with default behavior
+relay wrap -n CustomName claude
+# → Standard agent, no role injection
+```
+
+### How It Works
+
+1. Agent name from `-n` flag is matched **case-insensitively**
+2. System checks for `<project>/.claude/agents/<name>.md` or `<project>/.openagents/<name>.md`
+3. If found, the agent definition is injected into the agent's initial context
+4. Agent assumes the persona, instructions, and behaviors defined in the file
+
+**Case insensitive matching:**
+```bash
+relay wrap -n Lead claude      # matches lead.md
+relay wrap -n LEAD claude      # matches lead.md
+relay wrap -n lead claude      # matches lead.md
+```
+
+### Creating Role Agents
+
+Create agent files for your team roles:
+
+```
+.claude/agents/
+├── lead.md          # Coordinator, delegates work
+├── implementer.md   # Writes code, fixes bugs
+├── designer.md      # UI/UX, frontend work
+└── reviewer.md      # Code review, quality checks
+```
+
+Each file follows the standard Claude agent format with frontmatter and instructions.
 
 ---
 
@@ -107,8 +161,8 @@ relay team status
 
 **Inline format** (simple messages):
 ```
-@relay:AgentName Your message here
-@relay:* Broadcast to all agents
+->relay:AgentName Your message here
+->relay:* Broadcast to all agents
 ```
 
 **Block format** (structured data):
@@ -137,11 +191,11 @@ Use this when you're wrapped with `relay wrap`.
 
 ### CRITICAL: How to Send Messages
 
-**You (the AI agent) must OUTPUT the @relay pattern as part of your response.** Do not wait for user input. The pattern is detected from your terminal output.
+**You (the AI agent) must OUTPUT the ->relay pattern as part of your response.** Do not wait for user input. The pattern is detected from your terminal output.
 
 **Correct - Output this directly:**
 ```
-@relay:PlayerO I've finished the API refactor. Ready for your review.
+->relay:PlayerO I've finished the API refactor. Ready for your review.
 ```
 
 **Wrong - Don't use bash commands for real-time messaging:**
@@ -152,28 +206,28 @@ relay team send -n MyName -t PlayerO -m "message"
 
 ### Pattern Requirements
 
-The `@relay:` pattern must appear on its own line. It can have common terminal/markdown prefixes:
+The `->relay:` pattern must appear on its own line. It can have common terminal/markdown prefixes:
 
 ```
-@relay:AgentName message          Works
-  @relay:AgentName message        Works (leading whitespace OK)
-> @relay:AgentName message        Works (input prompt OK)
-$ @relay:AgentName message        Works (shell prompt OK)
-- @relay:AgentName message        Works (list items OK)
-* @relay:AgentName message        Works (asterisk lists OK)
-Some text @relay:AgentName msg    Won't work (not at line start)
+->relay:AgentName message          Works
+  ->relay:AgentName message        Works (leading whitespace OK)
+> ->relay:AgentName message        Works (input prompt OK)
+$ ->relay:AgentName message        Works (shell prompt OK)
+- ->relay:AgentName message        Works (list items OK)
+* ->relay:AgentName message        Works (asterisk lists OK)
+Some text ->relay:AgentName msg    Won't work (not at line start)
 ```
 
 ### Examples
 
 **Direct message:**
 ```
-@relay:PlayerO Your turn! I played X at center.
+->relay:PlayerO Your turn! I played X at center.
 ```
 
 **Broadcast to all agents:**
 ```
-@relay:* I've completed the authentication module. Ready for review.
+->relay:* I've completed the authentication module. Ready for review.
 ```
 
 **Structured data:**
@@ -190,7 +244,7 @@ When another agent sends you a message, it appears in your terminal as:
 Relay message from PlayerO: Their message content here
 ```
 
-Respond by outputting another `@relay:` pattern.
+Respond by outputting another `->relay:` pattern.
 
 ### IMPORTANT: Handling Truncated Messages
 
@@ -217,9 +271,9 @@ This retrieves the complete message from the database.
 
 ### Escaping
 
-To output literal `@relay:` without triggering the parser:
+To output literal `->relay:` without triggering the parser:
 ```
-\@relay: This won't be sent as a message
+\->relay: This won't be sent as a message
 ```
 
 ---
@@ -317,7 +371,7 @@ Just 4 commands:
 ### Task Handoff
 
 ```
-@relay:Developer TASK: Implement user registration endpoint
+->relay:Developer TASK: Implement user registration endpoint
 Requirements:
 - POST /api/register
 - Validate email format
@@ -328,29 +382,29 @@ Requirements:
 ### Status Updates
 
 ```
-@relay:* STATUS: Starting work on authentication module
-@relay:* DONE: Authentication module complete, ready for review
-@relay:Reviewer REVIEW: Please review src/auth/*.ts
+->relay:* STATUS: Starting work on authentication module
+->relay:* DONE: Authentication module complete, ready for review
+->relay:Reviewer REVIEW: Please review src/auth/*.ts
 ```
 
 ### Requesting Help
 
 ```
-@relay:Architect QUESTION: Should we use JWT or session-based auth?
-@relay:* BLOCKED: Need database credentials to proceed
+->relay:Architect QUESTION: Should we use JWT or session-based auth?
+->relay:* BLOCKED: Need database credentials to proceed
 ```
 
 ### Code Review Flow
 
 ```
 # Developer requests review
-@relay:Reviewer REVIEW: src/api/users.ts - Added pagination support
+->relay:Reviewer REVIEW: src/api/users.ts - Added pagination support
 
 # Reviewer provides feedback
-@relay:Developer FEEDBACK: Line 45 - Consider using cursor-based pagination for better performance
+->relay:Developer FEEDBACK: Line 45 - Consider using cursor-based pagination for better performance
 
 # Developer confirms fix
-@relay:Reviewer FIXED: Updated to cursor-based pagination, please re-review
+->relay:Reviewer FIXED: Updated to cursor-based pagination, please re-review
 ```
 
 ---

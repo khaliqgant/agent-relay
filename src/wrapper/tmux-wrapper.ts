@@ -5,7 +5,7 @@
  * 1. Start agent in detached tmux session
  * 2. Attach user to tmux (they see real terminal)
  * 3. Background: poll capture-pane silently (no stdout writes)
- * 4. Background: parse @relay commands, send to daemon
+ * 4. Background: parse ->relay commands, send to daemon
  * 5. Background: inject messages via send-keys
  *
  * The key insight: user sees the REAL tmux session, not a proxy.
@@ -13,14 +13,27 @@
  */
 
 import { exec, execSync, spawn, ChildProcess } from 'node:child_process';
+import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { RelayClient } from './client.js';
-import { OutputParser, type ParsedCommand } from './parser.js';
+import { OutputParser, type ParsedCommand, parseSummaryWithDetails, parseSessionEndFromOutput, ParsedMessageMetadata } from './parser.js';
 import { InboxManager } from './inbox.js';
-import type { SendPayload } from '../protocol/types.js';
+import type { SendPayload, SendMeta } from '../protocol/types.js';
+import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
+import { getProjectPaths } from '../utils/project-namespace.js';
 
 const execAsync = promisify(exec);
 const escapeRegex = (str: string): string => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Constants for cursor stability detection in waitForClearInput
+/** Number of consecutive polls with stable cursor before assuming input is clear */
+const STABLE_CURSOR_THRESHOLD = 3;
+/** Maximum cursor X position that indicates a prompt (typical prompts are 1-4 chars) */
+const MAX_PROMPT_CURSOR_POSITION = 4;
+/** Maximum characters to show in debug log truncation */
+const DEBUG_LOG_TRUNCATE_LENGTH = 40;
+/** Maximum characters to show in relay command log truncation */
+const RELAY_LOG_TRUNCATE_LENGTH = 50;
 
 export interface TmuxWrapperConfig {
   name: string;
@@ -31,6 +44,12 @@ export interface TmuxWrapperConfig {
   rows?: number;
   cwd?: string;
   env?: Record<string, string>;
+  /** Optional program identifier (e.g., 'claude', 'gpt-4o') */
+  program?: string;
+  /** Optional model identifier (e.g., 'claude-3-opus') */
+  model?: string;
+  /** Optional task/role description for dashboard/registry */
+  task?: string;
   /** Use file-based inbox in addition to injection */
   useInbox?: boolean;
   /** Custom inbox directory */
@@ -47,27 +66,35 @@ export interface TmuxWrapperConfig {
   injectRetryMs?: number;
   /** How long with no output before marking session idle (ms) */
   activityIdleThresholdMs?: number;
+  /** Max time to wait for clear input before injecting (ms) */
+  inputWaitTimeoutMs?: number;
+  /** Polling interval when waiting for clear input (ms) */
+  inputWaitPollMs?: number;
   /** CLI type for special handling (auto-detected from command if not set) */
   cliType?: 'claude' | 'codex' | 'gemini' | 'other';
   /** Enable tmux mouse mode for scroll passthrough (default: true) */
   mouseMode?: boolean;
-  /** Relay prefix pattern (default: '@relay:' or '>>' for Gemini) */
+  /** Relay prefix pattern (default: '->relay:') */
   relayPrefix?: string;
+  /** Run in detached mode (don't attach to tmux, run as background daemon) */
+  detached?: boolean;
+  /** Callback for spawn commands (@relay:spawn WorkerName cli "task") */
+  onSpawn?: (name: string, cli: string, task: string) => Promise<void>;
+  /** Callback for release commands (@relay:release WorkerName) */
+  onRelease?: (name: string) => Promise<void>;
+  /** Max time to wait for stable pane output before injection (ms) */
+  outputStabilityTimeoutMs?: number;
+  /** Poll interval when checking pane stability before injection (ms) */
+  outputStabilityPollMs?: number;
 }
 
 /**
  * Get the default relay prefix for a given CLI type.
- * Gemini uses '>>' to avoid conflict with @ file references.
+ * All agents now use '->relay:' as the unified prefix.
  */
 export function getDefaultPrefix(cliType: 'claude' | 'codex' | 'gemini' | 'other'): string {
-  switch (cliType) {
-    case 'gemini':
-      return '>>'; // Avoid @ conflict with Gemini file references
-    case 'claude':
-    case 'codex':
-    default:
-      return '@relay:'; // Original, works fine
-  }
+  // Unified prefix for all agent types
+  return '->relay:';
 }
 
 export class TmuxWrapper {
@@ -76,6 +103,8 @@ export class TmuxWrapper {
   private client: RelayClient;
   private parser: OutputParser;
   private inbox?: InboxManager;
+  private storage?: SqliteStorageAdapter;
+  private storageReady: Promise<boolean>; // Resolves true if storage initialized, false if failed
   private running = false;
   private pollTimer?: NodeJS.Timeout;
   private attachProcess?: ChildProcess;
@@ -85,13 +114,21 @@ export class TmuxWrapper {
   private activityState: 'active' | 'idle' | 'disconnected' = 'disconnected';
   private recentlySentMessages: Map<string, number> = new Map();
   private sentMessageHashes: Set<string> = new Set(); // Permanent dedup
-  private messageQueue: Array<{ from: string; body: string; messageId: string }> = [];
+  private messageQueue: Array<{ from: string; body: string; messageId: string; thread?: string; importance?: number }> = [];
   private isInjecting = false;
   // Track processed output to avoid re-parsing
   private processedOutputLength = 0;
   private lastDebugLog = 0;
   private cliType: 'claude' | 'codex' | 'gemini' | 'other';
   private relayPrefix: string;
+  private lastSummaryHash = ''; // Dedup summary saves
+  private lastSummaryRawContent = ''; // Dedup invalid JSON error logging
+  private sessionEndProcessed = false; // Track if we've already processed session end
+  private pendingRelayCommands: ParsedCommand[] = [];
+  private queuedMessageHashes: Set<string> = new Set(); // For offline queue dedup
+  private readonly MAX_PENDING_RELAY_COMMANDS = 50;
+  private processedSpawnCommands: Set<string> = new Set(); // Dedup spawn commands
+  private processedReleaseCommands: Set<string> = new Set(); // Dedup release commands
 
   constructor(config: TmuxWrapperConfig) {
     this.config = {
@@ -100,10 +137,12 @@ export class TmuxWrapper {
       pollInterval: 200, // Slightly slower polling since we're not displaying
       idleBeforeInjectMs: 1500,
       injectRetryMs: 500,
-      debug: true,
+      debug: false,
       debugLogIntervalMs: 0,
       mouseMode: true, // Enable mouse scroll passthrough by default
       activityIdleThresholdMs: 30_000, // Consider idle after 30s with no output
+      outputStabilityTimeoutMs: 2000,
+      outputStabilityPollMs: 200,
       ...config,
     };
 
@@ -124,13 +163,18 @@ export class TmuxWrapper {
     // Determine relay prefix: explicit config > auto-detect from CLI type
     this.relayPrefix = config.relayPrefix ?? getDefaultPrefix(this.cliType);
 
-    // Generate unique session name
-    this.sessionName = `relay-${config.name}-${process.pid}`;
+    // Session name (one agent per name - starting a duplicate kills the existing one)
+    this.sessionName = `relay-${config.name}`;
 
     this.client = new RelayClient({
       agentName: config.name,
       socketPath: config.socketPath,
       cli: this.cliType,
+      program: this.config.program,
+      model: this.config.model,
+      task: this.config.task,
+      workingDirectory: this.config.cwd ?? process.cwd(),
+      quiet: true, // Keep stdout clean; we log to stderr via wrapper
     });
 
     this.parser = new OutputParser({ prefix: this.relayPrefix });
@@ -143,15 +187,32 @@ export class TmuxWrapper {
       });
     }
 
+    // Initialize storage for session/summary persistence
+    const projectPaths = getProjectPaths();
+    this.storage = new SqliteStorageAdapter({ dbPath: projectPaths.dbPath });
+    // Initialize asynchronously (don't block constructor) - methods await storageReady
+    this.storageReady = this.storage.init().then(() => true).catch(err => {
+      this.logStderr(`Failed to initialize storage: ${err.message}`, true);
+      this.storage = undefined;
+      return false;
+    });
+
     // Handle incoming messages from relay
-    this.client.onMessage = (from: string, payload: SendPayload, messageId: string) => {
-      this.handleIncomingMessage(from, payload, messageId);
+    this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
+      this.handleIncomingMessage(from, payload, messageId, meta);
     };
 
     this.client.onStateChange = (state) => {
       // Only log to stderr, never stdout (user is in tmux)
       if (state === 'READY') {
-        this.logStderr(`Connected to relay daemon`);
+        this.logStderr('Connected to relay daemon');
+        this.flushQueuedRelayCommands();
+      } else if (state === 'BACKOFF') {
+        this.logStderr('Relay unavailable, will retry (backoff)');
+      } else if (state === 'DISCONNECTED') {
+        this.logStderr('Relay disconnected (offline mode)');
+      } else if (state === 'CONNECTING') {
+        this.logStderr('Connecting to relay daemon...');
       }
     };
   }
@@ -160,7 +221,7 @@ export class TmuxWrapper {
    * Log to stderr (safe - doesn't interfere with tmux display)
    */
   private logStderr(msg: string, force = false): void {
-    if (!force && this.config.debug === false) return;
+    if (!force && !this.config.debug) return;
 
     const now = Date.now();
     if (!force && this.config.debugLogIntervalMs && this.config.debugLogIntervalMs > 0) {
@@ -219,8 +280,9 @@ export class TmuxWrapper {
     }
 
     // Connect to relay daemon (in background, don't block)
-    this.client.connect().catch(() => {
-      // Silent - relay connection is optional
+    this.client.connect().catch((err: Error) => {
+      // Connection failures will retry via client backoff; surface once to stderr.
+      this.logStderr(`Relay connect failed: ${err.message}. Will retry if enabled.`, true);
     });
 
     // Kill any existing session with this name
@@ -250,6 +312,8 @@ export class TmuxWrapper {
         'setw -g alternate-screen on',        // Ensure alternate screen works
         // Pass through mouse scroll to application in alternate screen mode
         'set -ga terminal-overrides ",xterm*:Tc"',
+        'set -g status-left-length 100',      // Provide ample space for agent name in status bar
+        'set -g mode-keys vi',                // Predictable key table (avoid copy-mode surprises)
       ];
 
       // Add mouse mode if enabled (allows scroll passthrough to CLI apps)
@@ -263,6 +327,25 @@ export class TmuxWrapper {
           execSync(`tmux ${setting}`, { stdio: 'pipe' });
         } catch {
           // Some settings may not be available in older tmux versions
+        }
+      }
+
+      // Mouse scroll should work for both TUIs (alternate screen) and plain shells.
+      // If the pane is in alternate screen, pass scroll to the app; otherwise enter copy-mode and scroll tmux history.
+      const tmuxMouseBindings = [
+        'unbind -T root WheelUpPane',
+        'unbind -T root WheelDownPane',
+        'unbind -T root MouseDrag1Pane',
+        'bind -T root WheelUpPane if-shell -F "#{alternate_on}" "send-keys -M" "copy-mode -e; send-keys -X scroll-up"',
+        'bind -T root WheelDownPane if-shell -F "#{alternate_on}" "send-keys -M" "send-keys -X scroll-down"',
+        'bind -T root MouseDrag1Pane if-shell -F "#{alternate_on}" "send-keys -M" "copy-mode -e"',
+      ];
+
+      for (const setting of tmuxMouseBindings) {
+        try {
+          execSync(`tmux ${setting}`, { stdio: 'pipe' });
+        } catch {
+          // Ignore on older tmux versions lacking these key tables
         }
       }
 
@@ -301,6 +384,15 @@ export class TmuxWrapper {
     // Start background polling (silent - no stdout writes)
     this.startSilentPolling();
 
+    // In detached mode, don't attach - just keep polling in background
+    if (this.config.detached) {
+      this.logStderr('Running in detached mode (daemon)', true);
+      this.logStderr(`Attach with: tmux attach -t ${this.sessionName}`, true);
+      // Keep the process alive
+      await new Promise(() => {}); // Never resolves - keeps daemon running
+      return;
+    }
+
     // Attach user to tmux session
     // This takes over stdin/stdout - user sees the real terminal
     this.attachToSession();
@@ -315,8 +407,9 @@ export class TmuxWrapper {
     const instructions = [
       `[Agent Relay] You are "${this.config.name}" - connected for real-time messaging.`,
       `SEND: ${this.relayPrefix}AgentName message (or ${this.relayPrefix}* to broadcast)`,
-      `RECEIVE: "Relay message from X [id]: content"`,
-      `TRUNCATED: Run "agent-relay read <id>" if message seems cut off`,
+      `RECEIVE: Messages appear as "Relay message from X [id]: content"`,
+      `SUMMARY: Periodically output [[SUMMARY]]{"currentTask":"...","context":"..."}[[/SUMMARY]] to track progress`,
+      `END: Output [[SESSION_END]]{"summary":"..."}[[/SESSION_END]] when your task is complete`,
     ].join(' | ');
 
     try {
@@ -413,7 +506,7 @@ export class TmuxWrapper {
   }
 
   /**
-   * Start silent polling for @relay commands
+   * Start silent polling for ->relay commands
    * Does NOT write to stdout - just parses and sends to daemon
    */
   private startSilentPolling(): void {
@@ -425,7 +518,7 @@ export class TmuxWrapper {
   }
 
   /**
-   * Poll for @relay commands in output (silent)
+   * Poll for ->relay commands in output (silent)
    */
   private async pollForRelayCommands(): Promise<void> {
     if (!this.running) return;
@@ -433,11 +526,11 @@ export class TmuxWrapper {
     try {
       // Capture scrollback
       const { stdout } = await execAsync(
-        // -J joins wrapped lines to avoid truncating @relay commands mid-line
+        // -J joins wrapped lines to avoid truncating ->relay commands mid-line
         `tmux capture-pane -t ${this.sessionName} -p -J -S - 2>/dev/null`
       );
 
-      // Always parse the FULL capture for @relay commands
+      // Always parse the FULL capture for ->relay commands
       // This handles terminal UIs that rewrite content in place
       const cleanContent = this.stripAnsi(stdout);
       // Join continuation lines that TUIs split across multiple lines
@@ -455,6 +548,15 @@ export class TmuxWrapper {
       for (const cmd of commands) {
         this.sendRelayCommand(cmd);
       }
+
+      // Check for [[SUMMARY]] blocks and save to storage
+      this.parseSummaryAndSave(cleanContent);
+
+      // Check for [[SESSION_END]] blocks to explicitly close session
+      this.parseSessionEndAndClose(cleanContent);
+
+      // Check for @relay:spawn and @relay:release commands (lead mode)
+      this.parseSpawnReleaseCommands(cleanContent);
 
       this.updateActivityState();
 
@@ -477,10 +579,10 @@ export class TmuxWrapper {
   }
 
   /**
-   * Join continuation lines after @relay commands.
+   * Join continuation lines after ->relay commands.
    * Claude Code and other TUIs insert real newlines in output, causing
-   * @relay messages to span multiple lines. This joins indented
-   * continuation lines back to the @relay line.
+   * ->relay messages to span multiple lines. This joins indented
+   * continuation lines back to the ->relay line.
    */
   private joinContinuationLines(content: string): string {
     const lines = content.split('\n');
@@ -500,7 +602,7 @@ export class TmuxWrapper {
     while (i < lines.length) {
       const line = lines[i];
 
-      // Check if this is a @relay line
+      // Check if this is a ->relay line
       if (relayPattern.test(line)) {
         let joined = line;
         let j = i + 1;
@@ -568,19 +670,6 @@ export class TmuxWrapper {
   }
 
   /**
-   * Escape string for ANSI-C quoting ($'...')
-   * This handles special characters more reliably than mixing quote styles
-   */
-  private escapeForAnsiC(str: string): string {
-    return str
-      .replace(/\\/g, '\\\\')     // Backslash
-      .replace(/'/g, "\\'")       // Single quote
-      .replace(/\n/g, '\\n')      // Newline
-      .replace(/\r/g, '\\r')      // Carriage return
-      .replace(/\t/g, '\\t');     // Tab
-  }
-
-  /**
    * Send relay command to daemon
    */
   private sendRelayCommand(cmd: ParsedCommand): void {
@@ -591,10 +680,40 @@ export class TmuxWrapper {
       return;
     }
 
-    const success = this.client.sendMessage(cmd.to, cmd.body, cmd.kind, cmd.data);
+    // If client not ready, queue for later and return
+    if (this.client.state !== 'READY') {
+      if (this.queuedMessageHashes.has(msgHash)) {
+        return; // Already queued
+      }
+      if (this.pendingRelayCommands.length >= this.MAX_PENDING_RELAY_COMMANDS) {
+        this.logStderr('Relay offline queue full, dropping oldest');
+        const dropped = this.pendingRelayCommands.shift();
+        if (dropped) {
+          this.queuedMessageHashes.delete(`${dropped.to}:${dropped.body}`);
+        }
+      }
+      this.pendingRelayCommands.push(cmd);
+      this.queuedMessageHashes.add(msgHash);
+      this.logStderr(`Relay offline; queued message to ${cmd.to}`);
+      return;
+    }
+
+    // Convert ParsedMessageMetadata to SendMeta if present
+    let sendMeta: SendMeta | undefined;
+    if (cmd.meta) {
+      sendMeta = {
+        importance: cmd.meta.importance,
+        replyTo: cmd.meta.replyTo,
+        requires_ack: cmd.meta.ackRequired,
+      };
+    }
+
+    const success = this.client.sendMessage(cmd.to, cmd.body, cmd.kind, cmd.data, cmd.thread, sendMeta);
     if (success) {
       this.sentMessageHashes.add(msgHash);
-      this.logStderr(`→ ${cmd.to}: ${cmd.body.substring(0, 50)}...`);
+      this.queuedMessageHashes.delete(msgHash);
+      const truncatedBody = cmd.body.substring(0, Math.min(RELAY_LOG_TRUNCATE_LENGTH, cmd.body.length));
+      this.logStderr(`→ ${cmd.to}: ${truncatedBody}...`);
     } else if (this.client.state !== 'READY') {
       // Only log failure once per state change
       this.logStderr(`Send failed (client ${this.client.state})`);
@@ -602,13 +721,176 @@ export class TmuxWrapper {
   }
 
   /**
+   * Flush any queued relay commands when the client reconnects.
+   */
+  private flushQueuedRelayCommands(): void {
+    if (this.pendingRelayCommands.length === 0) return;
+
+    const queued = [...this.pendingRelayCommands];
+    this.pendingRelayCommands = [];
+    this.queuedMessageHashes.clear();
+
+    for (const cmd of queued) {
+      this.sendRelayCommand(cmd);
+    }
+  }
+
+  /**
+   * Parse [[SUMMARY]] blocks from output and save to storage.
+   * Agents can output summaries to maintain running context:
+   *
+   * [[SUMMARY]]
+   * {"currentTask": "Implementing auth", "context": "Completed login flow"}
+   * [[/SUMMARY]]
+   */
+  private parseSummaryAndSave(content: string): void {
+    const result = parseSummaryWithDetails(content);
+
+    // No SUMMARY block found
+    if (!result.found) return;
+
+    // Dedup based on raw content - prevents repeated error logging for same invalid JSON
+    if (result.rawContent === this.lastSummaryRawContent) return;
+    this.lastSummaryRawContent = result.rawContent || '';
+
+    // Invalid JSON - log error once (deduped above)
+    if (!result.valid) {
+      this.logStderr('[parser] Invalid JSON in SUMMARY block');
+      return;
+    }
+
+    const summary = result.summary!;
+
+    // Dedup valid summaries - don't save same summary twice
+    const summaryHash = JSON.stringify(summary);
+    if (summaryHash === this.lastSummaryHash) return;
+    this.lastSummaryHash = summaryHash;
+
+    // Wait for storage to be ready before saving
+    this.storageReady.then(ready => {
+      if (!ready || !this.storage) {
+        this.logStderr('Cannot save summary: storage not initialized');
+        return;
+      }
+
+      const projectPaths = getProjectPaths();
+      this.storage.saveAgentSummary({
+        agentName: this.config.name,
+        projectId: projectPaths.projectId,
+        currentTask: summary.currentTask,
+        completedTasks: summary.completedTasks,
+        decisions: summary.decisions,
+        context: summary.context,
+        files: summary.files,
+      }).then(() => {
+        this.logStderr(`Saved agent summary: ${summary.currentTask || 'updated context'}`);
+      }).catch(err => {
+        this.logStderr(`Failed to save summary: ${err.message}`, true);
+      });
+    });
+  }
+
+  /**
+   * Parse [[SESSION_END]] blocks from output and close session explicitly.
+   * Agents output this to mark their work session as complete:
+   *
+   * [[SESSION_END]]
+   * {"summary": "Completed auth module", "completedTasks": ["login", "logout"]}
+   * [[/SESSION_END]]
+   */
+  private parseSessionEndAndClose(content: string): void {
+    if (this.sessionEndProcessed) return; // Only process once per session
+
+    const sessionEnd = parseSessionEndFromOutput(content);
+    if (!sessionEnd) return;
+
+    // Get session ID from client connection - if not available yet, don't set flag
+    // so we can retry when sessionId becomes available
+    const sessionId = this.client.currentSessionId;
+    if (!sessionId) {
+      this.logStderr('Cannot close session: no session ID yet, will retry');
+      return;
+    }
+
+    this.sessionEndProcessed = true;
+
+    // Wait for storage to be ready before attempting to close session
+    this.storageReady.then(ready => {
+      if (!ready || !this.storage) {
+        this.logStderr('Cannot close session: storage not initialized');
+        return;
+      }
+
+      this.storage.endSession(sessionId, {
+        summary: sessionEnd.summary,
+        closedBy: 'agent',
+      }).then(() => {
+        this.logStderr(`Session closed by agent: ${sessionEnd.summary || 'complete'}`);
+      }).catch(err => {
+        this.logStderr(`Failed to close session: ${err.message}`, true);
+      });
+    });
+  }
+
+  /**
+   * Parse ->relay:spawn and ->relay:release commands from output.
+   * Format:
+   *   ->relay:spawn WorkerName cli "task description"
+   *   ->relay:release WorkerName
+   */
+  private parseSpawnReleaseCommands(content: string): void {
+    // Only process if callbacks are configured (lead mode)
+    if (!this.config.onSpawn && !this.config.onRelease) return;
+
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Match ->relay:spawn WorkerName cli "task"
+      // Pattern: ->relay:spawn <name> <cli> "<task>" or ->relay:spawn <name> <cli> '<task>'
+      const spawnMatch = trimmed.match(/^->relay:spawn\s+(\S+)\s+(\S+)\s+["'](.+)["']$/);
+      if (spawnMatch && this.config.onSpawn) {
+        const [, name, cli, task] = spawnMatch;
+        const spawnKey = `${name}:${cli}:${task}`;
+
+        // Dedup - only process each spawn once
+        if (!this.processedSpawnCommands.has(spawnKey)) {
+          this.processedSpawnCommands.add(spawnKey);
+          this.logStderr(`Spawn command: ${name} (${cli}) - "${task.substring(0, 50)}..."`);
+          this.config.onSpawn(name, cli, task).catch(err => {
+            this.logStderr(`Spawn failed: ${err.message}`, true);
+          });
+        }
+        continue;
+      }
+
+      // Match ->relay:release WorkerName
+      const releaseMatch = trimmed.match(/^->relay:release\s+(\S+)$/);
+      if (releaseMatch && this.config.onRelease) {
+        const [, name] = releaseMatch;
+
+        // Dedup - only process each release once
+        if (!this.processedReleaseCommands.has(name)) {
+          this.processedReleaseCommands.add(name);
+          this.logStderr(`Release command: ${name}`);
+          this.config.onRelease(name).catch(err => {
+            this.logStderr(`Release failed: ${err.message}`, true);
+          });
+        }
+      }
+    }
+  }
+
+  /**
    * Handle incoming message from relay
    */
-  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string): void {
-    this.logStderr(`← ${from}: ${payload.body.substring(0, 40)}...`);
+  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta): void {
+    const truncatedBody = payload.body.substring(0, Math.min(DEBUG_LOG_TRUNCATE_LENGTH, payload.body.length));
+    this.logStderr(`← ${from}: ${truncatedBody}...`);
 
     // Queue for injection
-    this.messageQueue.push({ from, body: payload.body, messageId });
+    this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance });
 
     // Write to inbox if enabled
     if (this.inbox) {
@@ -650,16 +932,18 @@ export class TmuxWrapper {
 
     try {
       let sanitizedBody = msg.body.replace(/[\r\n]+/g, ' ').trim();
+
+      // Gemini interprets certain keywords (While, For, If, etc.) as shell commands
+      // Wrap in backticks to prevent shell keyword interpretation
+      if (this.cliType === 'gemini') {
+        sanitizedBody = `\`${sanitizedBody.replace(/`/g, "'")}\``;
+      }
+
       // Short message ID for display (first 8 chars)
       const shortId = msg.messageId.substring(0, 8);
 
-      // Truncate very long messages to avoid display issues
-      const maxLen = 2000;
-      let wasTruncated = false;
-      if (sanitizedBody.length > maxLen) {
-        sanitizedBody = sanitizedBody.substring(0, maxLen) + '...';
-        wasTruncated = true;
-      }
+      // Remove message truncation to allow full messages to pass through
+      const wasTruncated = false;
 
       // Always include message ID; add lookup hint if truncated
       const idTag = `[${shortId}]`;
@@ -667,47 +951,63 @@ export class TmuxWrapper {
         ? ` [TRUNCATED - run "agent-relay read ${msg.messageId}"]`
         : '';
 
-      // Gemini CLI interprets input as shell commands, so we need special handling
-      if (this.cliType === 'gemini') {
-        // For Gemini: Use printf with %s to safely handle any characters
-        // printf '%s\n' 'message' - the %s treats the argument as literal string
-        // We use $'...' ANSI-C quoting which handles escapes more predictably
-        const safeBody = this.escapeForAnsiC(sanitizedBody);
-        const safeFrom = this.escapeForAnsiC(msg.from);
-        const safeHint = this.escapeForAnsiC(truncationHint);
-        const printfMsg = `printf '%s\\n' $'Relay message from ${safeFrom} ${idTag}: ${safeBody}${safeHint}'`;
-
-        // Clear any partial input
+      // Wait for input to be clear before injecting
+      const waitTimeoutMs = this.config.inputWaitTimeoutMs ?? 5000;
+      const waitPollMs = this.config.inputWaitPollMs ?? 200;
+      const inputClear = await this.waitForClearInput(waitTimeoutMs, waitPollMs);
+      if (!inputClear) {
+        // Input still has text after timeout - clear it forcefully
+        this.logStderr('Input not clear after waiting, clearing forcefully');
         await this.sendKeys('Escape');
         await this.sleep(30);
         await this.sendKeys('C-u');
         await this.sleep(30);
-
-        // Send printf command to display the message
-        await this.sendKeysLiteral(printfMsg);
-        await this.sleep(50);
-        await this.sendKeys('Enter');
-
-        this.logStderr(`Injection complete (gemini printf mode)`);
-      } else {
-        // Standard injection for Claude, Codex, etc.
-        // Format: Relay message from Sender [abc12345]: content
-        const injection = `Relay message from ${msg.from} ${idTag}: ${sanitizedBody}${truncationHint}`;
-
-        // Clear any partial input
-        await this.sendKeys('Escape');
-        await this.sleep(30);
-        await this.sendKeys('C-u');
-        await this.sleep(30);
-
-        // Type the message
-        await this.sendKeysLiteral(injection);
-        await this.sleep(50);
-
-        // Submit
-        await this.sendKeys('Enter');
-        this.logStderr(`Injection complete`);
       }
+
+      // Ensure pane output is stable to avoid interleaving with active generation
+      const stablePane = await this.waitForStablePane(
+        this.config.outputStabilityTimeoutMs ?? 2000,
+        this.config.outputStabilityPollMs ?? 200
+      );
+      if (!stablePane) {
+        this.logStderr('Output still active, re-queuing injection');
+        this.messageQueue.unshift(msg);
+        this.isInjecting = false;
+        setTimeout(() => this.checkForInjectionOpportunity(), this.config.injectRetryMs ?? 500);
+        return;
+      }
+
+      // For Gemini: check if we're at a shell prompt ($) vs chat prompt (>)
+      // If at shell prompt, skip injection to avoid shell command execution
+      if (this.cliType === 'gemini') {
+        const lastLine = await this.getLastLine();
+        const cleanLine = this.stripAnsi(lastLine).trim();
+        if (/^\$\s*$/.test(cleanLine) || /^\s*\$\s*$/.test(cleanLine)) {
+          this.logStderr('Gemini at shell prompt, skipping injection to avoid shell execution');
+          // Re-queue the message for later
+          this.messageQueue.unshift(msg);
+          this.isInjecting = false;
+          setTimeout(() => this.checkForInjectionOpportunity(), 2000);
+          return;
+        }
+      }
+
+      // Standard injection for all CLIs including Gemini
+      // Format: Relay message from Sender [abc12345] [thread:xxx] [!]: content
+      // Thread/importance hints are compact and optional to not break TUIs
+      const threadHint = msg.thread ? ` [thread:${msg.thread}]` : '';
+      // Importance indicator: [!!] for high (>75), [!] for medium (>50), none for low/default
+      const importanceHint = msg.importance !== undefined && msg.importance > 75 ? ' [!!]' :
+                             msg.importance !== undefined && msg.importance > 50 ? ' [!]' : '';
+      const injection = `Relay message from ${msg.from} ${idTag}${threadHint}${importanceHint}: ${sanitizedBody}${truncationHint}`;
+
+      // Paste message as a bracketed paste to avoid interleaving with active output
+      await this.pasteLiteral(injection);
+      await this.sleep(30);
+
+      // Submit
+      await this.sendKeys('Enter');
+      this.logStderr(`Injection complete`);
 
     } catch (err: any) {
       this.logStderr(`Injection failed: ${err.message}`, true);
@@ -743,8 +1043,203 @@ export class TmuxWrapper {
     await execAsync(`tmux send-keys -t ${this.sessionName} -l "${escaped}"`);
   }
 
+  /**
+   * Paste text using tmux buffer with bracketed paste (-p) to avoid interleaving with ongoing output.
+   */
+  private async pasteLiteral(text: string): Promise<void> {
+    // Sanitize newlines to keep injection single-line inside paste buffer
+    const sanitized = text.replace(/[\r\n]+/g, ' ');
+    const escaped = sanitized
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\$/g, '\\$')
+      .replace(/`/g, '\\`')
+      .replace(/!/g, '\\!');
+
+    // Set tmux buffer then paste with -p (bracketed paste)
+    await execAsync(`tmux set-buffer -- "${escaped}"`);
+    await execAsync(`tmux paste-buffer -t ${this.sessionName} -p`);
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise(r => setTimeout(r, ms));
+  }
+
+  /**
+   * Reset session-specific state for wrapper reuse.
+   * Call this when starting a new session with the same wrapper instance.
+   */
+  resetSessionState(): void {
+    this.sessionEndProcessed = false;
+    this.lastSummaryHash = '';
+    this.lastSummaryRawContent = '';
+  }
+
+  /**
+   * Get the prompt pattern for the current CLI type.
+   */
+  private getPromptPattern(): RegExp {
+    const promptPatterns: Record<string, RegExp> = {
+      claude: /^[>›»]\s*$/,           // Claude: "> " or similar
+      gemini: /^[>›»]\s*$/,           // Gemini: "> "
+      codex: /^[>›»]\s*$/,            // Codex: "> "
+      other: /^[>$%#➜›»]\s*$/,        // Shell or other: "$ ", "> ", etc.
+    };
+
+    return promptPatterns[this.cliType] || promptPatterns.other;
+  }
+
+  /**
+   * Capture the last non-empty line from the tmux pane.
+   */
+  private async getLastLine(): Promise<string> {
+    try {
+      const { stdout } = await execAsync(
+        `tmux capture-pane -t ${this.sessionName} -p -J 2>/dev/null`
+      );
+      const lines = stdout.split('\n').filter(l => l.length > 0);
+      return lines[lines.length - 1] || '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Detect if the provided line contains visible user input (beyond the prompt).
+   */
+  private hasVisibleInput(line: string): boolean {
+    const cleanLine = this.stripAnsi(line).trimEnd();
+    if (cleanLine === '') return false;
+
+    return !this.getPromptPattern().test(cleanLine);
+  }
+
+  /**
+   * Check if the input line is clear (no user-typed text after the prompt).
+   * Returns true if the last visible line appears to be just a prompt.
+   */
+  private async isInputClear(lastLine?: string): Promise<boolean> {
+    try {
+      const lineToCheck = lastLine ?? await this.getLastLine();
+      const cleanLine = this.stripAnsi(lineToCheck).trimEnd();
+      const isClear = this.getPromptPattern().test(cleanLine);
+
+      if (this.config.debug) {
+        const truncatedLine = cleanLine.substring(0, Math.min(DEBUG_LOG_TRUNCATE_LENGTH, cleanLine.length));
+        this.logStderr(`isInputClear: lastLine="${truncatedLine}", clear=${isClear}`);
+      }
+
+      return isClear;
+    } catch {
+      // If we can't capture, assume not clear (safer)
+      return false;
+    }
+  }
+
+  /**
+   * Get cursor X position to detect input length.
+   * Returns the cursor column (0-indexed).
+   */
+  private async getCursorX(): Promise<number> {
+    try {
+      const { stdout } = await execAsync(
+        `tmux display-message -t ${this.sessionName} -p "#{cursor_x}" 2>/dev/null`
+      );
+      return parseInt(stdout.trim(), 10) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Wait for the input line to be clear before injecting.
+   * Polls until the input appears empty or timeout is reached.
+   *
+   * @param maxWaitMs Maximum time to wait (default 5000ms)
+   * @param pollIntervalMs How often to check (default 200ms)
+   * @returns true if input became clear, false if timed out
+   */
+  private async waitForClearInput(maxWaitMs = 5000, pollIntervalMs = 200): Promise<boolean> {
+    const startTime = Date.now();
+    let lastCursorX = -1;
+    let stableCursorCount = 0;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const lastLine = await this.getLastLine();
+
+      // Check if input line is just a prompt
+      if (await this.isInputClear(lastLine)) {
+        return true;
+      }
+
+      const hasInput = this.hasVisibleInput(lastLine);
+
+      // Also check cursor stability - if cursor is moving, agent is typing
+      const cursorX = await this.getCursorX();
+      if (!hasInput && cursorX === lastCursorX) {
+        stableCursorCount++;
+        // If cursor has been stable for enough polls and at typical prompt position,
+        // the agent might be done but we just can't match the prompt pattern
+        if (stableCursorCount >= STABLE_CURSOR_THRESHOLD && cursorX <= MAX_PROMPT_CURSOR_POSITION) {
+          this.logStderr(`waitForClearInput: cursor stable at x=${cursorX}, assuming clear`);
+          return true;
+        }
+      } else {
+        stableCursorCount = 0;
+        lastCursorX = cursorX;
+      }
+
+      await this.sleep(pollIntervalMs);
+    }
+
+    this.logStderr(`waitForClearInput: timed out after ${maxWaitMs}ms`);
+    return false;
+  }
+
+  /**
+   * Capture a signature of the current pane content for stability checks.
+   * Uses hash+length to cheaply detect changes without storing full content.
+   */
+  private async capturePaneSignature(): Promise<string | null> {
+    try {
+      const { stdout } = await execAsync(
+        `tmux capture-pane -t ${this.sessionName} -p -J -S - 2>/dev/null`
+      );
+      const hash = crypto.createHash('sha1').update(stdout).digest('hex');
+      return `${stdout.length}:${hash}`;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Wait for pane output to stabilize before injecting to avoid interleaving with ongoing output.
+   */
+  private async waitForStablePane(maxWaitMs = 2000, pollIntervalMs = 200, requiredStablePolls = 2): Promise<boolean> {
+    const start = Date.now();
+    let lastSig = await this.capturePaneSignature();
+    if (!lastSig) return false;
+
+    let stableCount = 0;
+
+    while (Date.now() - start < maxWaitMs) {
+      await this.sleep(pollIntervalMs);
+      const sig = await this.capturePaneSignature();
+      if (!sig) continue;
+
+      if (sig === lastSig) {
+        stableCount++;
+        if (stableCount >= requiredStablePolls) {
+          return true;
+        }
+      } else {
+        stableCount = 0;
+        lastSig = sig;
+      }
+    }
+
+    this.logStderr(`waitForStablePane: timed out after ${maxWaitMs}ms`);
+    return false;
   }
 
   /**
@@ -754,6 +1249,9 @@ export class TmuxWrapper {
     if (!this.running) return;
     this.running = false;
     this.activityState = 'disconnected';
+
+    // Reset session state for potential reuse
+    this.resetSessionState();
 
     // Stop polling
     if (this.pollTimer) {

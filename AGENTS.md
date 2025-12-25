@@ -30,20 +30,20 @@ agent-relay -n Bob claude
 
 ## For Agents: How to Communicate
 
-When wrapped with `agent-relay`, agents communicate by outputting `@relay:` patterns.
+When wrapped with `agent-relay`, agents communicate by outputting `->relay:` patterns.
 
 ### Send a Message
 
 Output this in your response (not in a bash command):
 
 ```
-@relay:AgentName Your message here
+->relay:AgentName Your message here
 ```
 
 ### Broadcast to All
 
 ```
-@relay:* This message goes to everyone
+->relay:* This message goes to everyone
 ```
 
 ### Receiving Messages
@@ -87,48 +87,48 @@ agent-relay read abc12345
 ### Status Updates
 
 ```
-@relay:* STATUS: Starting work on auth module
-@relay:* DONE: Auth module complete
+->relay:* STATUS: Starting work on auth module
+->relay:* DONE: Auth module complete
 ```
 
 ### Task Assignment
 
 ```
-@relay:Developer TASK: Implement /api/register endpoint
+->relay:Developer TASK: Implement /api/register endpoint
 ```
 
 ### Questions
 
 ```
-@relay:Architect QUESTION: Should we use JWT or sessions?
+->relay:Architect QUESTION: Should we use JWT or sessions?
 ```
 
 ### Review Requests
 
 ```
-@relay:Reviewer REVIEW: Please check src/auth/*.ts
+->relay:Reviewer REVIEW: Please check src/auth/*.ts
 ```
 
 ---
 
 ## Pattern Rules
 
-The `@relay:` pattern must be at the start of a line:
+The `->relay:` pattern must be at the start of a line:
 
 ```
-@relay:Name message           # Works
-  @relay:Name message         # Works (whitespace OK)
-> @relay:Name message         # Works (prompt OK)
-- @relay:Name message         # Works (list OK)
-Some text @relay:Name msg     # Won't work
+->relay:Name message           # Works
+  ->relay:Name message         # Works (whitespace OK)
+> ->relay:Name message         # Works (prompt OK)
+- ->relay:Name message         # Works (list OK)
+Some text ->relay:Name msg     # Won't work
 ```
 
 ### Escape
 
-To output literal `@relay:` without sending:
+To output literal `->relay:` without sending:
 
 ```
-\@relay: This won't be sent
+\->relay: This won't be sent
 ```
 
 ---
@@ -140,3 +140,59 @@ To output literal `@relay:` without sending:
 | Messages not sending | `agent-relay status` to check daemon |
 | Socket not found | `agent-relay up` to start daemon |
 | Truncated message | `agent-relay read <id>` for full content |
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
+
+<!-- PRPM_MANIFEST_START -->
+
+<skills_system priority="1">
+<usage>
+When users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.
+
+How to use skills (loaded into main context):
+- Use the <path> from the skill entry below
+- Invoke: Bash("cat <path>")
+- The skill content will load into your current context
+- Example: Bash("cat .openskills/backend-architect/SKILL.md")
+
+Usage notes:
+- Skills share your context window
+- Do not invoke a skill that is already loaded in your context
+</usage>
+
+<available_skills>
+
+<skill activation="lazy">
+<name>frontend-design</name>
+<description>Design and build modern frontend interfaces with best practices and user experience principles. Create beautiful, accessible, and performant web interfaces.</description>
+<path>.openskills/frontend-design/SKILL.md</path>
+</skill>
+
+</available_skills>
+</skills_system>
+
+<!-- PRPM_MANIFEST_END -->

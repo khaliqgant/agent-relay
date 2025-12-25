@@ -7,16 +7,23 @@ import { v4 as uuid } from 'uuid';
 import {
   type Envelope,
   type SendPayload,
+  type SendMeta,
+  type SendEnvelope,
   type DeliverEnvelope,
   type AckPayload,
   PROTOCOL_VERSION,
 } from '../protocol/types.js';
 import type { StorageAdapter } from '../storage/adapter.js';
+import type { AgentRegistry } from './agent-registry.js';
 
 export interface RoutableConnection {
   id: string;
   agentName?: string;
   cli?: string;
+  program?: string;
+  model?: string;
+  task?: string;
+  workingDirectory?: string;
   sessionId: string;
   close(): void;
   send(envelope: Envelope): boolean;
@@ -53,10 +60,12 @@ export class Router {
   private subscriptions: Map<string, Set<string>> = new Map(); // topic -> Set<agentName>
   private pendingDeliveries: Map<string, PendingDelivery> = new Map(); // deliverId -> pending
   private deliveryOptions: DeliveryReliabilityOptions;
+  private registry?: AgentRegistry;
 
-  constructor(options: { storage?: StorageAdapter; delivery?: Partial<DeliveryReliabilityOptions> } = {}) {
+  constructor(options: { storage?: StorageAdapter; delivery?: Partial<DeliveryReliabilityOptions>; registry?: AgentRegistry } = {}) {
     this.storage = options.storage;
     this.deliveryOptions = { ...DEFAULT_DELIVERY_OPTIONS, ...options.delivery };
+    this.registry = options.registry;
   }
 
   /**
@@ -73,6 +82,14 @@ export class Router {
         this.connections.delete(existing.id);
       }
       this.agents.set(connection.agentName, connection);
+      this.registry?.registerOrUpdate({
+        name: connection.agentName,
+        cli: connection.cli,
+        program: connection.program,
+        model: connection.model,
+        task: connection.task,
+        workingDirectory: connection.workingDirectory,
+      });
     }
   }
 
@@ -124,17 +141,19 @@ export class Router {
   /**
    * Route a SEND message to its destination(s).
    */
-  route(from: RoutableConnection, envelope: Envelope<SendPayload>): void {
+  route(from: RoutableConnection, envelope: SendEnvelope): void {
     const senderName = from.agentName;
     if (!senderName) {
       console.log(`[router] Dropping message - sender has no name`);
       return;
     }
 
+    this.registry?.recordSend(senderName);
+
     const to = envelope.to;
     const topic = envelope.topic;
 
-    console.log(`[router] ${senderName} -> ${to}: ${envelope.payload.body?.substring(0, 50)}...`);
+    console.log(`[router] ${senderName} -> ${to}:${envelope.payload.body?.substring(0, 50)}...`);
 
     if (to === '*') {
       // Broadcast to all (except sender)
@@ -151,7 +170,7 @@ export class Router {
   private sendDirect(
     from: string,
     to: string,
-    envelope: Envelope<SendPayload>
+    envelope: SendEnvelope
   ): boolean {
     const target = this.agents.get(to);
     if (!target) {
@@ -165,6 +184,7 @@ export class Router {
     this.persistDeliverEnvelope(deliver);
     if (sent) {
       this.trackDelivery(target, deliver);
+      this.registry?.recordReceive(to);
     }
     return sent;
   }
@@ -174,7 +194,7 @@ export class Router {
    */
   private broadcast(
     from: string,
-    envelope: Envelope<SendPayload>,
+    envelope: SendEnvelope,
     topic?: string
   ): void {
     const recipients = topic
@@ -191,6 +211,7 @@ export class Router {
         this.persistDeliverEnvelope(deliver);
         if (sent) {
           this.trackDelivery(target, deliver);
+          this.registry?.recordReceive(agentName);
         }
       }
     }
@@ -202,7 +223,7 @@ export class Router {
   private createDeliverEnvelope(
     from: string,
     to: string,
-    original: Envelope<SendPayload>,
+    original: SendEnvelope,
     target: RoutableConnection
   ): DeliverEnvelope {
     return {
@@ -214,6 +235,7 @@ export class Router {
       to,
       topic: original.topic,
       payload: original.payload,
+      payload_meta: original.payload_meta,
       delivery: {
         seq: target.getNextSeq(original.topic ?? 'default', from),
         session_id: target.sessionId,
@@ -239,6 +261,8 @@ export class Router {
       deliverySeq: envelope.delivery.seq,
       deliverySessionId: envelope.delivery.session_id,
       sessionId: envelope.delivery.session_id,
+      status: 'unread',
+      is_urgent: false,
     }).catch((err) => {
       console.error('[router] Failed to persist message', err);
     });
