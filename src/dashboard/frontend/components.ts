@@ -2,7 +2,7 @@
  * Dashboard UI Components
  */
 
-import type { Agent, Message, DOMElements, ChannelType, SpawnedAgent } from './types.js';
+import type { Agent, Message, DOMElements, ChannelType } from './types.js';
 import { state, getFilteredMessages, setCurrentChannel, setCurrentThread, getThreadMessages, getThreadReplyCount } from './state.js';
 import {
   escapeHtml,
@@ -13,9 +13,6 @@ import {
   formatMessageBody,
   isAgentOnline,
 } from './utils.js';
-
-// Track spawned agents
-let spawnedAgents: SpawnedAgent[] = [];
 
 let elements: DOMElements;
 let paletteSelectedIndex = -1;
@@ -53,14 +50,15 @@ export function initElements(): DOMElements {
     mentionAutocomplete: document.getElementById('mention-autocomplete')!,
     mentionAutocompleteList: document.getElementById('mention-autocomplete-list')!,
     // Spawn modal elements
-    spawnBtn: document.getElementById('spawn-btn') as HTMLButtonElement,
+    spawnAgentBtn: document.getElementById('spawn-agent-btn') as HTMLButtonElement,
     spawnModalOverlay: document.getElementById('spawn-modal-overlay')!,
     spawnModalClose: document.getElementById('spawn-modal-close') as HTMLButtonElement,
-    spawnNameInput: document.getElementById('spawn-name-input') as HTMLInputElement,
-    spawnCliInput: document.getElementById('spawn-cli-input') as HTMLInputElement,
-    spawnTaskInput: document.getElementById('spawn-task-input') as HTMLTextAreaElement,
-    spawnSubmitBtn: document.getElementById('spawn-submit-btn') as HTMLButtonElement,
-    spawnStatus: document.getElementById('spawn-status')!,
+    spawnAgentName: document.getElementById('spawn-agent-name') as HTMLInputElement,
+    spawnAgentCli: document.getElementById('spawn-agent-cli') as HTMLSelectElement,
+    spawnAgentModel: document.getElementById('spawn-agent-model') as HTMLInputElement,
+    spawnAgentTask: document.getElementById('spawn-agent-task') as HTMLTextAreaElement,
+    spawnModalCancel: document.getElementById('spawn-modal-cancel') as HTMLButtonElement,
+    spawnModalSubmit: document.getElementById('spawn-modal-submit') as HTMLButtonElement,
   };
   return elements;
 }
@@ -88,45 +86,29 @@ export function updateConnectionStatus(): void {
  */
 export function renderAgents(): void {
   console.log('[UI] renderAgents called, agents:', state.agents.length, state.agents.map(a => a.name));
-
-  // Create a set of spawned agent names for quick lookup
-  const spawnedNames = new Set(spawnedAgents.map(a => a.name));
-
   const html = state.agents
     .map((agent) => {
       const online = isAgentOnline(agent.lastSeen || agent.lastActive);
       const presenceClass = online ? 'online' : '';
       const isActive = state.currentChannel === agent.name;
       const needsAttentionClass = agent.needsAttention ? 'needs-attention' : '';
-      const isSpawned = spawnedNames.has(agent.name);
-
-      // Spawned icon SVG (play/launch icon)
-      const spawnedIcon = isSpawned ? `
-        <svg class="spawned-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Spawned from dashboard">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
-      ` : '';
-
-      // Release button for spawned agents
-      const releaseBtn = isSpawned ? `
-        <button class="release-btn" title="Release agent" data-release="${escapeHtml(agent.name)}">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      ` : '';
 
       return `
-      <li class="channel-item ${isActive ? 'active' : ''} ${needsAttentionClass}" data-agent="${escapeHtml(agent.name)}" ${isSpawned ? 'title="Spawned from dashboard"' : ''}>
-        <div class="agent-avatar" style="background: ${isSpawned ? 'var(--accent-green)' : getAvatarColor(agent.name)}">
+      <li class="channel-item ${isActive ? 'active' : ''} ${needsAttentionClass}" data-agent="${escapeHtml(agent.name)}">
+        <div class="agent-avatar" style="background: ${getAvatarColor(agent.name)}">
           ${getInitials(agent.name)}
           <span class="presence-indicator ${presenceClass}"></span>
         </div>
         <span class="channel-name">${escapeHtml(agent.name)}</span>
-        ${spawnedIcon}
         ${agent.needsAttention ? '<span class="attention-badge">Needs Input</span>' : ''}
-        ${releaseBtn}
+        <div class="agent-actions">
+          <button class="agent-action-btn kill-btn agent-kill-btn" data-agent="${escapeHtml(agent.name)}" title="Kill agent">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
       </li>
     `;
     })
@@ -136,11 +118,11 @@ export function renderAgents(): void {
     html ||
     '<li class="channel-item" style="color: var(--text-muted); cursor: default;">No agents connected</li>';
 
-  // Add click handlers for agent selection
+  // Add click handlers
   elements.agentsList.querySelectorAll<HTMLElement>('.channel-item[data-agent]').forEach((item) => {
     item.addEventListener('click', (e) => {
-      // Don't select channel if clicking release button
-      if ((e.target as HTMLElement).closest('.release-btn')) {
+      // Don't navigate if clicking on action buttons
+      if ((e.target as HTMLElement).closest('.agent-actions')) {
         return;
       }
       const agentName = item.dataset.agent;
@@ -150,19 +132,15 @@ export function renderAgents(): void {
     });
   });
 
-  // Add release button click handlers
-  elements.agentsList.querySelectorAll<HTMLButtonElement>('.release-btn[data-release]').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const agentName = btn.dataset.release;
-      if (agentName && confirm(`Release agent "${agentName}"? This will terminate the agent.`)) {
-        await releaseAgent(agentName);
-      }
-    });
-  });
-
   // Update command palette agents
   updatePaletteAgents();
+
+  // Attach kill handlers (dynamically imported to avoid circular dependency)
+  import('./app.js').then(({ attachKillHandlers }) => {
+    attachKillHandlers();
+  }).catch(() => {
+    // Ignore if app.js not yet ready
+  });
 }
 
 /**
@@ -311,11 +289,11 @@ export function selectChannel(channel: ChannelType): void {
     if (prefixEl) prefixEl.textContent = '@';
   }
 
-  // Update composer placeholder - DM mode doesn't require @mention
+  // Update composer placeholder with @mention format
   elements.messageInput.placeholder =
     channel === 'general'
       ? '@AgentName message... (or @* to broadcast)'
-      : `Message ${channel}... (@ not required)`;
+      : `@${channel} your message here...`;
 
   // Re-render messages
   renderMessages();
@@ -833,21 +811,19 @@ export function getCurrentMentionQuery(): string | null {
   return null;
 }
 
-// ========================================
-// Spawn Modal Functions
-// ========================================
+// Track spawned agents
+let spawnedAgents: string[] = [];
 
 /**
  * Open the spawn agent modal
  */
 export function openSpawnModal(): void {
   elements.spawnModalOverlay.classList.add('visible');
-  elements.spawnNameInput.value = '';
-  elements.spawnCliInput.value = 'claude';
-  elements.spawnTaskInput.value = '';
-  elements.spawnStatus.textContent = '';
-  elements.spawnStatus.className = 'spawn-status';
-  elements.spawnNameInput.focus();
+  elements.spawnAgentName.value = '';
+  elements.spawnAgentCli.value = 'claude';
+  elements.spawnAgentModel.value = '';
+  elements.spawnAgentTask.value = '';
+  elements.spawnAgentName.focus();
 }
 
 /**
@@ -861,51 +837,43 @@ export function closeSpawnModal(): void {
  * Spawn a new agent via the API
  */
 export async function spawnAgent(): Promise<{ success: boolean; error?: string }> {
-  const name = elements.spawnNameInput.value.trim();
-  const cli = elements.spawnCliInput.value.trim() || 'claude';
-  const task = elements.spawnTaskInput.value.trim();
+  const name = elements.spawnAgentName.value.trim();
+  const cli = elements.spawnAgentCli.value || 'claude';
+  const model = elements.spawnAgentModel.value.trim();
+  const task = elements.spawnAgentTask.value.trim();
 
   if (!name) {
-    elements.spawnStatus.textContent = 'Agent name is required';
-    elements.spawnStatus.className = 'spawn-status error';
     return { success: false, error: 'Agent name is required' };
   }
 
-  elements.spawnSubmitBtn.disabled = true;
-  elements.spawnStatus.textContent = 'Spawning agent...';
-  elements.spawnStatus.className = 'spawn-status loading';
+  elements.spawnModalSubmit.disabled = true;
 
   try {
     const response = await fetch('/api/spawn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, cli, task }),
+      body: JSON.stringify({ name, cli, model, task }),
     });
 
     const result = await response.json();
 
     if (response.ok && result.success) {
-      elements.spawnStatus.textContent = `Agent "${name}" spawned successfully!`;
-      elements.spawnStatus.className = 'spawn-status success';
-
       // Refresh spawned agents list
       await fetchSpawnedAgents();
 
       // Close modal after brief delay
       setTimeout(() => {
         closeSpawnModal();
-      }, 1000);
+      }, 500);
 
       return { success: true };
     } else {
       throw new Error(result.error || 'Failed to spawn agent');
     }
   } catch (err: any) {
-    elements.spawnStatus.textContent = err.message || 'Failed to spawn agent';
-    elements.spawnStatus.className = 'spawn-status error';
     return { success: false, error: err.message };
   } finally {
-    elements.spawnSubmitBtn.disabled = false;
+    elements.spawnModalSubmit.disabled = false;
   }
 }
 
@@ -918,7 +886,7 @@ export async function fetchSpawnedAgents(): Promise<void> {
     const result = await response.json();
 
     if (result.success && Array.isArray(result.agents)) {
-      spawnedAgents = result.agents;
+      spawnedAgents = result.agents.map((a: any) => a.name);
       // Re-render agents to show spawned status
       renderAgents();
     }
@@ -928,30 +896,8 @@ export async function fetchSpawnedAgents(): Promise<void> {
 }
 
 /**
- * Release a spawned agent
+ * Check if an agent is spawned
  */
-export async function releaseAgent(name: string): Promise<void> {
-  try {
-    const response = await fetch(`/api/spawned/${encodeURIComponent(name)}`, {
-      method: 'DELETE',
-    });
-
-    const result = await response.json();
-
-    if (result.success) {
-      // Refresh the list
-      await fetchSpawnedAgents();
-    } else {
-      console.error('[UI] Failed to release agent:', result.error);
-    }
-  } catch (err) {
-    console.error('[UI] Failed to release agent:', err);
-  }
-}
-
-/**
- * Get spawned agents list
- */
-export function getSpawnedAgents(): SpawnedAgent[] {
-  return spawnedAgents;
+export function isSpawnedAgent(name: string): boolean {
+  return spawnedAgents.includes(name);
 }

@@ -9,10 +9,9 @@ import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import type { StorageAdapter, StoredMessage } from '../storage/adapter.js';
 import { RelayClient } from '../wrapper/client.js';
 import { computeNeedsAttention } from './needs-attention.js';
-import { computeSystemMetrics, formatPrometheusMetrics } from './metrics.js';
 import { MultiProjectClient } from '../bridge/multi-project-client.js';
+import type { ProjectConfig } from '../bridge/types.js';
 import { AgentSpawner } from '../bridge/spawner.js';
-import type { ProjectConfig, SpawnRequest, WorkerInfo } from '../bridge/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,40 +68,18 @@ export interface DashboardOptions {
   dataDir: string;
   teamDir: string;
   dbPath?: string;
-  /** Enable agent spawning API */
   enableSpawner?: boolean;
-  /** Project root for spawner (defaults to dataDir) */
   projectRoot?: string;
-  /** Tmux session name for workers */
-  tmuxSession?: string;
 }
 
-export async function startDashboard(port: number, dataDir: string, teamDir: string, dbPath?: string): Promise<number>;
-export async function startDashboard(options: DashboardOptions): Promise<number>;
-export async function startDashboard(
-  portOrOptions: number | DashboardOptions,
-  dataDirArg?: string,
-  teamDirArg?: string,
-  dbPathArg?: string
-): Promise<number> {
-  // Handle overloaded signatures
-  const options: DashboardOptions = typeof portOrOptions === 'number'
-    ? { port: portOrOptions, dataDir: dataDirArg!, teamDir: teamDirArg!, dbPath: dbPathArg }
-    : portOrOptions;
-
-  const { port, dataDir, teamDir, dbPath, enableSpawner, projectRoot, tmuxSession } = options;
-
+export async function startDashboard(options: DashboardOptions): Promise<number> {
+  const { port, dataDir, teamDir, dbPath, enableSpawner, projectRoot } = options;
   console.log('Starting dashboard...');
   console.log('__dirname:', __dirname);
   const publicDir = path.join(__dirname, 'public');
   console.log('Public dir:', publicDir);
   const storage: StorageAdapter | undefined = dbPath
     ? new SqliteStorageAdapter({ dbPath })
-    : undefined;
-
-  // Initialize spawner if enabled
-  const spawner: AgentSpawner | undefined = enableSpawner
-    ? new AgentSpawner(projectRoot || dataDir, tmuxSession)
     : undefined;
 
   process.on('uncaughtException', (err) => {
@@ -254,10 +231,7 @@ export async function startDashboard(
         return;
       }
 
-      bridgeClient = new MultiProjectClient(validConfigs, {
-        agentName: '__DashboardBridge__',  // Unique name to avoid conflict with CLI bridge
-        reconnect: true,
-      });
+      bridgeClient = new MultiProjectClient(validConfigs, { reconnect: true });
 
       bridgeClient.onProjectStateChange = (projectId, connected) => {
         console.log(`[dashboard-bridge] Project ${projectId} ${connected ? 'connected' : 'disconnected'}`);
@@ -275,6 +249,160 @@ export async function startDashboard(
 
   // Start bridge client connection (non-blocking)
   connectBridgeClient().catch(() => {});
+
+  // Agent spawners by project path
+  const spawners = new Map<string, AgentSpawner>();
+
+  /**
+   * Get or create a spawner for a project
+   */
+  const getSpawner = (projectPath: string): AgentSpawner => {
+    let spawner = spawners.get(projectPath);
+    if (!spawner) {
+      spawner = new AgentSpawner(projectPath);
+      spawners.set(projectPath, spawner);
+    }
+    return spawner;
+  };
+
+  /**
+   * Get the current project root from the data directory
+   * (For single-project dashboard, the project is the parent of the data dir)
+   */
+  const getCurrentProjectRoot = (): string => {
+    // The dataDir is typically ~/.agent-relay/<project-hash>/
+    // For bridge mode, projects have their own paths
+    // For now, try to detect from cwd or use parent of dataDir
+    return process.cwd();
+  };
+
+  // Supported CLI options
+  const SUPPORTED_CLIS = ['claude', 'codex', 'gemini'] as const;
+
+  // API endpoint to spawn a new agent
+  app.post('/api/agent/spawn', async (req, res) => {
+    const { name, cli, model, task, projectId, projectPath } = req.body;
+
+    if (!name || !cli) {
+      return res.status(400).json({ error: 'Missing "name" or "cli" field' });
+    }
+
+    // Validate CLI
+    if (!SUPPORTED_CLIS.includes(cli)) {
+      return res.status(400).json({
+        error: `Invalid CLI "${cli}". Supported: ${SUPPORTED_CLIS.join(', ')}`
+      });
+    }
+
+    // Determine the project root
+    let targetProjectPath = projectPath;
+    if (!targetProjectPath && projectId) {
+      // Look up project path from bridge state
+      const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+      if (fs.existsSync(bridgeStatePath)) {
+        try {
+          const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+          const project = (bridgeState.projects || []).find((p: { id: string }) => p.id === projectId);
+          if (project) {
+            targetProjectPath = project.path;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    }
+    if (!targetProjectPath) {
+      targetProjectPath = getCurrentProjectRoot();
+    }
+
+    // Build CLI string with optional model
+    let cliString = cli;
+    if (model) {
+      cliString = `${cli}:${model}`;
+    }
+
+    const spawner = getSpawner(targetProjectPath);
+
+    try {
+      const result = await spawner.spawn({
+        name,
+        cli: cliString,
+        task: task || `You are ${name}, an AI agent working on this project.`,
+        requestedBy: 'Dashboard',
+      });
+
+      if (result.success) {
+        res.json({
+          success: true,
+          name: result.name,
+          window: result.window,
+          projectPath: targetProjectPath,
+        });
+      } else {
+        res.status(400).json({ error: result.error || 'Failed to spawn agent' });
+      }
+    } catch (err: any) {
+      console.error('[dashboard] Failed to spawn agent:', err);
+      res.status(500).json({ error: err.message || 'Failed to spawn agent' });
+    }
+  });
+
+  // API endpoint to kill an agent
+  app.post('/api/agent/kill', async (req, res) => {
+    const { name, projectId, projectPath } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Missing "name" field' });
+    }
+
+    // Determine the project root
+    let targetProjectPath = projectPath;
+    if (!targetProjectPath && projectId) {
+      // Look up project path from bridge state
+      const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+      if (fs.existsSync(bridgeStatePath)) {
+        try {
+          const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+          const project = (bridgeState.projects || []).find((p: { id: string }) => p.id === projectId);
+          if (project) {
+            targetProjectPath = project.path;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    }
+    if (!targetProjectPath) {
+      targetProjectPath = getCurrentProjectRoot();
+    }
+
+    const spawner = getSpawner(targetProjectPath);
+
+    try {
+      const released = await spawner.release(name);
+      if (released) {
+        res.json({ success: true, name });
+      } else {
+        res.status(404).json({ error: `Agent "${name}" not found or already released` });
+      }
+    } catch (err: any) {
+      console.error('[dashboard] Failed to kill agent:', err);
+      res.status(500).json({ error: err.message || 'Failed to kill agent' });
+    }
+  });
+
+  // API endpoint to get spawned agents
+  app.get('/api/agents/spawned', (req, res) => {
+    const projectPath = req.query.projectPath as string || getCurrentProjectRoot();
+    const spawner = spawners.get(projectPath);
+
+    if (!spawner) {
+      res.json({ agents: [] });
+      return;
+    }
+
+    res.json({ agents: spawner.getActiveWorkers() });
+  });
 
   // API endpoint to send messages
   app.post('/api/send', async (req, res) => {
@@ -773,105 +901,60 @@ export async function startDashboard(
     });
   });
 
-  // ===== Metrics API =====
-
-  /**
-   * GET /api/metrics - JSON format metrics for dashboard
-   */
-  app.get('/api/metrics', async (req, res) => {
-    try {
-      // Read agent registry for message counts
-      const agentsPath = path.join(teamDir, 'agents.json');
-      let agentRecords: Array<{
-        name: string;
-        messagesSent: number;
-        messagesReceived: number;
-        firstSeen: string;
-        lastSeen: string;
-      }> = [];
-
-      if (fs.existsSync(agentsPath)) {
-        const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
-        agentRecords = (data.agents || []).map((a: any) => ({
-          name: a.name,
-          messagesSent: a.messagesSent ?? 0,
-          messagesReceived: a.messagesReceived ?? 0,
-          firstSeen: a.firstSeen ?? new Date().toISOString(),
-          lastSeen: a.lastSeen ?? new Date().toISOString(),
-        }));
-      }
-
-      // Get messages for throughput calculation
-      const team = getTeamData();
-      const messages = team ? await getMessages(team.agents) : [];
-
-      // Get session data for lifecycle metrics
-      const sessions = storage?.getSessions
-        ? await storage.getSessions({ limit: 100 })
-        : [];
-
-      const metrics = computeSystemMetrics(agentRecords, messages, sessions);
-      res.json(metrics);
-    } catch (err) {
-      console.error('Failed to compute metrics', err);
-      res.status(500).json({ error: 'Failed to compute metrics' });
-    }
-  });
-
-  /**
-   * GET /api/metrics/prometheus - Prometheus exposition format
-   */
-  app.get('/api/metrics/prometheus', async (req, res) => {
-    try {
-      // Read agent registry for message counts
-      const agentsPath = path.join(teamDir, 'agents.json');
-      let agentRecords: Array<{
-        name: string;
-        messagesSent: number;
-        messagesReceived: number;
-        firstSeen: string;
-        lastSeen: string;
-      }> = [];
-
-      if (fs.existsSync(agentsPath)) {
-        const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
-        agentRecords = (data.agents || []).map((a: any) => ({
-          name: a.name,
-          messagesSent: a.messagesSent ?? 0,
-          messagesReceived: a.messagesReceived ?? 0,
-          firstSeen: a.firstSeen ?? new Date().toISOString(),
-          lastSeen: a.lastSeen ?? new Date().toISOString(),
-        }));
-      }
-
-      // Get messages for throughput calculation
-      const team = getTeamData();
-      const messages = team ? await getMessages(team.agents) : [];
-
-      // Get session data for lifecycle metrics
-      const sessions = storage?.getSessions
-        ? await storage.getSessions({ limit: 100 })
-        : [];
-
-      const metrics = computeSystemMetrics(agentRecords, messages, sessions);
-      const prometheusOutput = formatPrometheusMetrics(metrics);
-
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.send(prometheusOutput);
-    } catch (err) {
-      console.error('Failed to compute Prometheus metrics', err);
-      res.status(500).send('# Error computing metrics\n');
-    }
-  });
-
-  // Metrics view route - serves metrics.html
-  app.get('/metrics', (req, res) => {
-    res.sendFile(path.join(publicDir, 'metrics.html'));
-  });
-
   // Bridge view route - serves bridge.html
   app.get('/bridge', (req, res) => {
     res.sendFile(path.join(publicDir, 'bridge.html'));
+  });
+
+  // Project dashboard route - serves main dashboard with project context
+  app.get('/project/:projectId', (req, res) => {
+    // Serve the main index.html - it will detect the project context from URL
+    res.sendFile(path.join(publicDir, 'index.html'));
+  });
+
+  // API endpoint to get project info by ID (for project dashboard context)
+  app.get('/api/project/:projectId', async (req, res) => {
+    const { projectId } = req.params;
+
+    try {
+      const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+      if (fs.existsSync(bridgeStatePath)) {
+        const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+        const project = (bridgeState.projects || []).find((p: { id: string }) => p.id === projectId);
+
+        if (project) {
+          // Get project's data directory and enrich with agent info
+          const projectHash = crypto.createHash('sha256').update(project.path).digest('hex').slice(0, 12);
+          const projectDataDir = path.join(path.dirname(dataDir), projectHash);
+          const projectTeamDir = path.join(projectDataDir, 'team');
+          const agentsPath = path.join(projectTeamDir, 'agents.json');
+
+          let agents: { name: string; cli?: string; lastSeen?: string }[] = [];
+          if (fs.existsSync(agentsPath)) {
+            try {
+              const agentsData = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+              agents = agentsData.agents || [];
+            } catch {
+              // Ignore
+            }
+          }
+
+          res.json({
+            ...project,
+            agents,
+            socketPath: path.join(projectDataDir, 'relay.sock'),
+            dataDir: projectDataDir,
+          });
+        } else {
+          res.status(404).json({ error: 'Project not found' });
+        }
+      } else {
+        res.status(404).json({ error: 'Bridge not configured' });
+      }
+    } catch (err) {
+      console.error('Failed to get project info:', err);
+      res.status(500).json({ error: 'Failed to get project info' });
+    }
   });
 
   // Bridge API endpoint - returns multi-project data
@@ -895,108 +978,6 @@ export async function startDashboard(
     } catch (err) {
       console.error('Failed to fetch bridge data', err);
       res.status(500).json({ error: 'Failed to load bridge data' });
-    }
-  });
-
-  // ===== Agent Spawn API =====
-
-  /**
-   * POST /api/spawn - Spawn a new agent
-   * Body: { name: string, cli?: string, task?: string }
-   */
-  app.post('/api/spawn', async (req, res) => {
-    if (!spawner) {
-      return res.status(503).json({
-        success: false,
-        error: 'Spawner not enabled. Start dashboard with enableSpawner: true',
-      });
-    }
-
-    const { name, cli = 'claude', task = '' } = req.body;
-
-    if (!name || typeof name !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: name',
-      });
-    }
-
-    try {
-      const request: SpawnRequest = {
-        name,
-        cli,
-        task,
-        requestedBy: 'api',
-      };
-      const result = await spawner.spawn(request);
-
-      if (result.success) {
-        // Broadcast update to WebSocket clients
-        broadcastData().catch(() => {});
-      }
-
-      res.json(result);
-    } catch (err: any) {
-      console.error('[api] Spawn error:', err);
-      res.status(500).json({
-        success: false,
-        name,
-        error: err.message,
-      });
-    }
-  });
-
-  /**
-   * GET /api/spawned - List active spawned agents
-   */
-  app.get('/api/spawned', (req, res) => {
-    if (!spawner) {
-      return res.status(503).json({
-        success: false,
-        error: 'Spawner not enabled',
-        agents: [],
-      });
-    }
-
-    const agents = spawner.getActiveWorkers();
-    res.json({
-      success: true,
-      agents,
-    });
-  });
-
-  /**
-   * DELETE /api/spawned/:name - Release a spawned agent
-   */
-  app.delete('/api/spawned/:name', async (req, res) => {
-    if (!spawner) {
-      return res.status(503).json({
-        success: false,
-        error: 'Spawner not enabled',
-      });
-    }
-
-    const { name } = req.params;
-
-    try {
-      const released = await spawner.release(name);
-
-      if (released) {
-        broadcastData().catch(() => {});
-      }
-
-      res.json({
-        success: released,
-        name,
-        error: released ? undefined : `Agent ${name} not found`,
-      });
-    } catch (err: any) {
-      console.error('[api] Release error:', err);
-      res.status(500).json({
-        success: false,
-        name,
-        error: err.message,
-      });
     }
   });
 

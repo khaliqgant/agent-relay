@@ -307,6 +307,23 @@
       height: 16px;
     }
 
+    /* Back to Bridge link styling */
+    .nav-link.back-to-bridge {
+      background: rgba(18, 100, 163, 0.15);
+      color: var(--text-link);
+      border: 1px solid rgba(18, 100, 163, 0.3);
+    }
+
+    .nav-link.back-to-bridge:hover {
+      background: rgba(18, 100, 163, 0.25);
+      color: var(--text-link);
+    }
+
+    /* Project view mode indicator */
+    body.project-view .workspace-name {
+      color: var(--text-link);
+    }
+
     .channel-item {
       display: flex;
       align-items: center;
@@ -785,17 +802,14 @@
     .composer {
       padding: 0 20px 20px;
       flex-shrink: 0;
-      position: relative;
-      z-index: 10;
     }
 
     .composer-container {
       background: var(--bg-input);
       border: 1px solid var(--border-subtle);
       border-radius: 8px;
-      overflow: visible;
+      overflow: hidden;
       transition: border-color var(--transition-fast);
-      position: relative;
     }
 
     .composer-container:focus-within {
@@ -905,7 +919,7 @@
       bottom: 100%;
       left: 0;
       right: 0;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
       background: var(--bg-modal);
       border: 1px solid var(--border-subtle);
       border-radius: 8px;
@@ -913,7 +927,7 @@
       max-height: 240px;
       overflow-y: auto;
       display: none;
-      z-index: 500;
+      z-index: 100;
     }
 
     .mention-autocomplete.visible {
@@ -1407,65 +1421,57 @@
     }
 
     /* ========================================
-       Spawn Modal
+       Spawn Agent Modal
        ======================================== */
-    .spawn-modal-overlay {
+    .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(0, 0, 0, 0.7);
       display: none;
       align-items: center;
       justify-content: center;
-      z-index: 1000;
+      z-index: 1100;
     }
 
-    .spawn-modal-overlay.visible {
+    .modal-overlay.visible {
       display: flex;
     }
 
-    .spawn-modal {
-      width: 480px;
-      max-width: 90vw;
+    .modal {
       background: var(--bg-modal);
       border-radius: 12px;
       box-shadow: var(--shadow-modal);
-      overflow: hidden;
+      width: 440px;
+      max-width: 90vw;
       animation: modalSlideIn 0.2s ease-out;
     }
 
     @keyframes modalSlideIn {
       from {
         opacity: 0;
-        transform: translateY(-20px) scale(0.95);
+        transform: scale(0.95) translateY(-10px);
       }
       to {
         opacity: 1;
-        transform: translateY(0) scale(1);
+        transform: scale(1) translateY(0);
       }
     }
 
-    .spawn-modal-header {
-      padding: 16px 20px;
+    .modal-header {
+      padding: 20px 24px 16px;
       border-bottom: 1px solid var(--border-divider);
       display: flex;
       align-items: center;
       justify-content: space-between;
     }
 
-    .spawn-modal-title {
-      display: flex;
-      align-items: center;
-      gap: 10px;
+    .modal-title {
       font-size: 18px;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--text-primary);
     }
 
-    .spawn-modal-title svg {
-      color: var(--accent-green);
-    }
-
-    .spawn-modal-close {
+    .modal-close {
       width: 32px;
       height: 32px;
       border: none;
@@ -1479,24 +1485,24 @@
       transition: all var(--transition-fast);
     }
 
-    .spawn-modal-close:hover {
+    .modal-close:hover {
       background: rgba(255, 255, 255, 0.1);
       color: var(--text-primary);
     }
 
-    .spawn-modal-body {
-      padding: 20px;
+    .modal-body {
+      padding: 20px 24px;
     }
 
-    .spawn-form-group {
+    .form-group {
       margin-bottom: 16px;
     }
 
-    .spawn-form-group:last-child {
+    .form-group:last-child {
       margin-bottom: 0;
     }
 
-    .spawn-form-group label {
+    .form-label {
       display: block;
       font-size: 13px;
       font-weight: 600;
@@ -1504,8 +1510,7 @@
       margin-bottom: 6px;
     }
 
-    .spawn-input,
-    .spawn-textarea {
+    .form-input {
       width: 100%;
       padding: 10px 12px;
       background: var(--bg-input);
@@ -1514,130 +1519,163 @@
       color: var(--text-primary);
       font-family: var(--font-family);
       font-size: 14px;
+      outline: none;
       transition: border-color var(--transition-fast);
     }
 
-    .spawn-input:focus,
-    .spawn-textarea:focus {
-      outline: none;
+    .form-input:focus {
       border-color: var(--accent-primary);
     }
 
-    .spawn-input::placeholder,
-    .spawn-textarea::placeholder {
+    .form-input::placeholder {
       color: var(--text-muted);
     }
 
-    .spawn-textarea {
-      resize: vertical;
-      min-height: 80px;
-      line-height: 1.4;
+    .form-select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      font-size: 14px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color var(--transition-fast);
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ababad' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
     }
 
-    .spawn-hint {
-      display: block;
+    .form-select:focus {
+      border-color: var(--accent-primary);
+    }
+
+    .form-select option {
+      background: var(--bg-modal);
+      color: var(--text-primary);
+    }
+
+    .form-hint {
       font-size: 12px;
       color: var(--text-muted);
       margin-top: 4px;
     }
 
-    .spawn-status {
-      min-height: 20px;
-      font-size: 13px;
-      margin-top: 12px;
-    }
-
-    .spawn-status.success {
-      color: var(--accent-green);
-    }
-
-    .spawn-status.error {
-      color: var(--accent-red);
-    }
-
-    .spawn-status.loading {
-      color: var(--text-muted);
-    }
-
-    .spawn-modal-footer {
-      padding: 16px 20px;
-      border-top: 1px solid var(--border-divider);
+    .modal-footer {
+      padding: 16px 24px 20px;
       display: flex;
       justify-content: flex-end;
-      gap: 10px;
+      gap: 12px;
     }
 
-    .spawn-cancel-btn {
-      padding: 8px 16px;
-      background: transparent;
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-      color: var(--text-secondary);
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-    }
-
-    .spawn-cancel-btn:hover {
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text-primary);
-    }
-
-    .spawn-submit-btn {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 16px;
-      background: var(--accent-green);
+    .btn {
+      padding: 10px 20px;
       border: none;
       border-radius: 6px;
-      color: white;
+      font-family: var(--font-family);
       font-size: 14px;
       font-weight: 600;
       cursor: pointer;
       transition: all var(--transition-fast);
     }
 
-    .spawn-submit-btn:hover:not(:disabled) {
-      background: #249966;
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-subtle);
     }
 
-    .spawn-submit-btn:disabled {
-      opacity: 0.5;
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+    }
+
+    .btn-primary {
+      background: var(--accent-primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #0b5d99;
+    }
+
+    .btn-primary:disabled {
+      background: var(--border-subtle);
       cursor: not-allowed;
     }
 
-    /* Spawned Agent Indicator */
-    .channel-item .spawned-icon {
-      width: 14px;
-      height: 14px;
-      color: var(--accent-green);
-      flex-shrink: 0;
-    }
-
-    .channel-item .release-btn {
-      opacity: 0;
-      width: 18px;
-      height: 18px;
-      border: none;
+    .btn-danger {
       background: var(--accent-red);
       color: white;
+    }
+
+    .btn-danger:hover {
+      background: #c41a4f;
+    }
+
+    /* Agent Kill Button */
+    .agent-actions {
+      display: flex;
+      gap: 4px;
+      margin-left: auto;
+      opacity: 0;
+      transition: opacity var(--transition-fast);
+    }
+
+    .channel-item:hover .agent-actions {
+      opacity: 1;
+    }
+
+    .agent-action-btn {
+      width: 22px;
+      height: 22px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
       border-radius: 4px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: opacity var(--transition-fast);
-      flex-shrink: 0;
+      transition: all var(--transition-fast);
     }
 
-    .channel-item:hover .release-btn {
+    .agent-action-btn:hover {
+      background: rgba(224, 30, 90, 0.2);
+      color: var(--accent-red);
+    }
+
+    .agent-action-btn.kill-btn:hover {
+      background: rgba(224, 30, 90, 0.2);
+      color: var(--accent-red);
+    }
+
+    /* Spawn Agent Button in Section Header */
+    .spawn-agent-btn {
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: all var(--transition-fast);
+    }
+
+    .section-header:hover .spawn-agent-btn {
       opacity: 1;
     }
 
-    .channel-item .release-btn:hover {
-      background: #c41a4f;
+    .spawn-agent-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--accent-green);
     }
   </style>
 </head>
@@ -1695,8 +1733,8 @@
               </svg>
               Agents
             </div>
-            <button class="section-add-btn" id="spawn-btn" title="Spawn new agent" style="opacity: 1;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="spawn-agent-btn" id="spawn-agent-btn" title="Spawn new agent">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
               </svg>
@@ -1706,27 +1744,17 @@
             <!-- Agents injected here -->
           </ul>
         </div>
-
       </div>
 
-      <div class="sidebar-footer">
-        <a href="/metrics" class="nav-link">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 3v18h18"/>
-            <path d="M18 17V9"/>
-            <path d="M13 17V5"/>
-            <path d="M8 17v-3"/>
-          </svg>
-          Metrics
-        </a>
-        <a href="/bridge" class="nav-link">
+      <div class="sidebar-footer" id="sidebar-footer">
+        <a href="/bridge" class="nav-link" id="bridge-nav-link">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="3" width="7" height="7"/>
             <rect x="14" y="3" width="7" height="7"/>
             <rect x="14" y="14" width="7" height="7"/>
             <rect x="3" y="14" width="7" height="7"/>
           </svg>
-          Bridge View
+          <span id="bridge-link-text">Bridge View</span>
         </a>
       </div>
     </aside>
@@ -1829,6 +1857,26 @@
         >
       </div>
       <div class="palette-results" id="palette-results">
+        <div class="palette-section">
+          <div class="palette-section-title">Navigation</div>
+          <div class="palette-item" data-command="bridge">
+            <div class="palette-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"/>
+                <rect x="14" y="3" width="7" height="7"/>
+                <rect x="14" y="14" width="7" height="7"/>
+                <rect x="3" y="14" width="7" height="7"/>
+              </svg>
+            </div>
+            <div class="palette-item-content">
+              <div class="palette-item-title">Go to Bridge</div>
+              <div class="palette-item-subtitle">Multi-project orchestration view</div>
+            </div>
+            <div class="palette-item-shortcut">
+              <kbd>⌘</kbd><kbd>B</kbd>
+            </div>
+          </div>
+        </div>
         <div class="palette-section">
           <div class="palette-section-title">Commands</div>
           <div class="palette-item" data-command="broadcast">
@@ -1937,67 +1985,43 @@
   </div>
 
   <!-- Spawn Agent Modal -->
-  <div class="spawn-modal-overlay" id="spawn-modal-overlay">
-    <div class="spawn-modal">
-      <div class="spawn-modal-header">
-        <div class="spawn-modal-title">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-            <line x1="12" y1="11" x2="12" y2="17"/>
-            <line x1="9" y1="14" x2="15" y2="14"/>
-          </svg>
-          Spawn New Agent
-        </div>
-        <button class="spawn-modal-close" id="spawn-modal-close" title="Close">
+  <div class="modal-overlay" id="spawn-modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Spawn New Agent</div>
+        <button class="modal-close" id="spawn-modal-close" title="Close">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"/>
             <line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
         </button>
       </div>
-      <div class="spawn-modal-body">
-        <div class="spawn-form-group">
-          <label for="spawn-name-input">Agent Name</label>
-          <input
-            type="text"
-            id="spawn-name-input"
-            class="spawn-input"
-            placeholder="e.g., Developer, Reviewer, Tester"
-            autocomplete="off"
-          />
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="spawn-agent-name">Agent Name</label>
+          <input type="text" id="spawn-agent-name" class="form-input" placeholder="e.g., Worker, Reviewer, Tester" autocomplete="off">
         </div>
-        <div class="spawn-form-group">
-          <label for="spawn-cli-input">CLI Command</label>
-          <input
-            type="text"
-            id="spawn-cli-input"
-            class="spawn-input"
-            value="claude"
-            placeholder="e.g., claude, aider, cursor"
-          />
-          <span class="spawn-hint">The AI CLI tool to wrap</span>
+        <div class="form-group">
+          <label class="form-label" for="spawn-agent-cli">CLI Tool</label>
+          <select id="spawn-agent-cli" class="form-select">
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+            <option value="gemini">Gemini</option>
+          </select>
         </div>
-        <div class="spawn-form-group">
-          <label for="spawn-task-input">Initial Task (optional)</label>
-          <textarea
-            id="spawn-task-input"
-            class="spawn-textarea"
-            placeholder="Enter an initial task to send to the agent..."
-            rows="4"
-          ></textarea>
-          <span class="spawn-hint">This will be injected into the agent's terminal</span>
+        <div class="form-group">
+          <label class="form-label" for="spawn-agent-model">Model (optional)</label>
+          <input type="text" id="spawn-agent-model" class="form-input" placeholder="e.g., opus, sonnet, gpt-4">
+          <div class="form-hint">Leave blank to use default model for the CLI</div>
         </div>
-        <div class="spawn-status" id="spawn-status"></div>
+        <div class="form-group">
+          <label class="form-label" for="spawn-agent-task">Initial Task (optional)</label>
+          <textarea id="spawn-agent-task" class="form-input" rows="3" placeholder="Describe what this agent should work on..."></textarea>
+        </div>
       </div>
-      <div class="spawn-modal-footer">
-        <button class="spawn-cancel-btn" id="spawn-cancel-btn">Cancel</button>
-        <button class="spawn-submit-btn" id="spawn-submit-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="5 3 19 12 5 21 5 3"/>
-          </svg>
-          Spawn Agent
-        </button>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="spawn-modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="spawn-modal-submit">Spawn Agent</button>
       </div>
     </div>
   </div>
