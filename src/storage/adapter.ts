@@ -1,4 +1,4 @@
-import type { PayloadKind } from '../protocol/types.js';
+import type { PayloadKind, SendMeta } from '../protocol/types.js';
 
 export type MessageStatus = 'unread' | 'read' | 'acked';
 
@@ -11,6 +11,8 @@ export interface StoredMessage {
   kind: PayloadKind;
   body: string;
   data?: Record<string, unknown>;
+  /** Optional metadata (importance, replyTo, etc.) */
+  payloadMeta?: SendMeta;
   /** Optional thread ID for grouping related messages */
   thread?: string;
   deliverySeq?: number;
@@ -20,6 +22,8 @@ export interface StoredMessage {
   status: MessageStatus;
   /** Whether the message is marked as urgent */
   is_urgent: boolean;
+  /** Whether the message was sent as a broadcast (to: '*') */
+  is_broadcast?: boolean;
 }
 
 export interface MessageQuery {
@@ -47,6 +51,7 @@ export interface StoredSession {
   endedAt?: number;
   messageCount: number;
   summary?: string;
+  resumeToken?: string;
   /** How the session was closed: 'agent' (explicit), 'disconnect', 'error', or undefined (still active) */
   closedBy?: 'agent' | 'disconnect' | 'error';
 }
@@ -74,6 +79,7 @@ export interface StorageAdapter {
   saveMessage(message: StoredMessage): Promise<void>;
   getMessages(query?: MessageQuery): Promise<StoredMessage[]>;
   getMessageById?(id: string): Promise<StoredMessage | null>;
+  updateMessageStatus?(id: string, status: MessageStatus): Promise<void>;
   close?(): Promise<void>;
 
   // Session management (optional - for adapters that support it)
@@ -82,11 +88,16 @@ export interface StorageAdapter {
   getSessions?(query?: SessionQuery): Promise<StoredSession[]>;
   getRecentSessions?(limit?: number): Promise<StoredSession[]>;
   incrementSessionMessageCount?(sessionId: string): Promise<void>;
+  getSessionByResumeToken?(resumeToken: string): Promise<StoredSession | null>;
 
   // Agent summaries (optional - for adapters that support it)
   saveAgentSummary?(summary: Omit<AgentSummary, 'lastUpdated'>): Promise<void>;
   getAgentSummary?(agentName: string): Promise<AgentSummary | null>;
   getAllAgentSummaries?(): Promise<AgentSummary[]>;
+
+  // Delivery resume helpers (optional)
+  getPendingMessagesForSession?(agentName: string, sessionId: string): Promise<StoredMessage[]>;
+  getMaxSeqByStream?(agentName: string, sessionId: string): Promise<Array<{ peer: string; topic?: string; maxSeq: number }>>;
 }
 
 /**
@@ -156,6 +167,46 @@ export class MemoryStorageAdapter implements StorageAdapter {
   async getMessageById(id: string): Promise<StoredMessage | null> {
     // Support both exact match and prefix match (for short IDs)
     return this.messages.find(m => m.id === id || m.id.startsWith(id)) ?? null;
+  }
+
+  async updateMessageStatus(id: string, status: MessageStatus): Promise<void> {
+    const msg = this.messages.find(m => m.id === id || m.id.startsWith(id));
+    if (msg) {
+      msg.status = status;
+    }
+  }
+
+  async getPendingMessagesForSession(agentName: string, sessionId: string): Promise<StoredMessage[]> {
+    return this.messages
+      .filter(m => m.to === agentName && m.deliverySessionId === sessionId && m.status !== 'acked')
+      .sort((a, b) => {
+        const seqA = mSeq(a);
+        const seqB = mSeq(b);
+        return seqA === seqB ? a.ts - b.ts : seqA - seqB;
+      });
+
+    function mSeq(msg: StoredMessage): number {
+      return msg.deliverySeq ?? 0;
+    }
+  }
+
+  async getMaxSeqByStream(agentName: string, sessionId: string): Promise<Array<{ peer: string; topic?: string; maxSeq: number }>> {
+    const aggregates = new Map<string, { peer: string; topic?: string; maxSeq: number }>();
+
+    for (const msg of this.messages) {
+      if (msg.to !== agentName) continue;
+      if (msg.deliverySessionId !== sessionId) continue;
+      if (msg.deliverySeq === undefined || msg.deliverySeq === null) continue;
+
+      const topic = msg.topic ?? 'default';
+      const key = `${topic}:${msg.from}`;
+      const current = aggregates.get(key);
+      if (!current || msg.deliverySeq > current.maxSeq) {
+        aggregates.set(key, { peer: msg.from, topic: msg.topic, maxSeq: msg.deliverySeq });
+      }
+    }
+
+    return Array.from(aggregates.values());
   }
 
   async close(): Promise<void> {

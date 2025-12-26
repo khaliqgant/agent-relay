@@ -35,6 +35,7 @@ interface Message {
   timestamp: string;
   id: string; // unique-ish id
   thread?: string;
+  isBroadcast?: boolean;
 }
 
 interface SessionInfo {
@@ -421,6 +422,7 @@ export async function startDashboard(
       timestamp: new Date(row.ts).toISOString(),
       id: row.id,
       thread: row.thread,
+      isBroadcast: row.is_broadcast,
     }));
 
   const getMessages = async (agents: any[]): Promise<Message[]> => {
@@ -540,6 +542,7 @@ export async function startDashboard(
       to: m.to,
       timestamp: m.timestamp,
       thread: m.thread,
+      isBroadcast: m.isBroadcast,
     })));
 
     needsAttentionAgents.forEach((agentName) => {

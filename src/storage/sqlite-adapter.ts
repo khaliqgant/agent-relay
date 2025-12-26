@@ -133,12 +133,14 @@ export class SqliteStorageAdapter implements StorageAdapter {
           kind TEXT NOT NULL,
           body TEXT NOT NULL,
           data TEXT,
+          payload_meta TEXT,
           thread TEXT,
           delivery_seq INTEGER,
           delivery_session_id TEXT,
           session_id TEXT,
           status TEXT NOT NULL DEFAULT 'unread',
-          is_urgent INTEGER NOT NULL DEFAULT 0
+          is_urgent INTEGER NOT NULL DEFAULT 0,
+          is_broadcast INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX idx_messages_ts ON messages (ts);
         CREATE INDEX idx_messages_sender ON messages (sender);
@@ -157,6 +159,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
         this.db.exec('ALTER TABLE messages ADD COLUMN thread TEXT');
         this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages (thread)');
       }
+      if (!columnNames.has('payload_meta')) {
+        this.db.exec('ALTER TABLE messages ADD COLUMN payload_meta TEXT');
+      }
       if (!columnNames.has('status')) {
         this.db.exec("ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'unread'");
         this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_status ON messages (status)');
@@ -165,9 +170,13 @@ export class SqliteStorageAdapter implements StorageAdapter {
         this.db.exec("ALTER TABLE messages ADD COLUMN is_urgent INTEGER NOT NULL DEFAULT 0");
         this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_is_urgent ON messages (is_urgent)');
       }
+      if (!columnNames.has('is_broadcast')) {
+        this.db.exec("ALTER TABLE messages ADD COLUMN is_broadcast INTEGER NOT NULL DEFAULT 0");
+      }
     }
 
-    // Create sessions table (IF NOT EXISTS is safe here - no new columns to migrate)
+    // Create sessions table (IF NOT EXISTS is safe here)
+    // Note: Don't create resume_token index here - it's created after migration check
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
@@ -179,12 +188,22 @@ export class SqliteStorageAdapter implements StorageAdapter {
         ended_at INTEGER,
         message_count INTEGER DEFAULT 0,
         summary TEXT,
+        resume_token TEXT,
         closed_by TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions (agent_name);
       CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions (started_at);
       CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions (project_id);
     `);
+
+    // Migrate existing sessions table to add resume_token if missing
+    const sessionColumns = this.db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+    const sessionColumnNames = new Set(sessionColumns.map(c => c.name));
+    if (!sessionColumnNames.has('resume_token')) {
+      this.db.exec('ALTER TABLE sessions ADD COLUMN resume_token TEXT');
+    }
+    // Create index after ensuring column exists (either from CREATE TABLE or migration)
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_resume_token ON sessions (resume_token)');
 
     // Create agent_summaries table (IF NOT EXISTS is safe here - no new columns to migrate)
     this.db.exec(`
@@ -227,8 +246,8 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
     this.insertStmt = this.db.prepare(`
       INSERT OR REPLACE INTO messages
-      (id, ts, sender, recipient, topic, kind, body, data, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, ts, sender, recipient, topic, kind, body, data, payload_meta, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent, is_broadcast)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     // Start automatic cleanup if enabled
@@ -309,12 +328,14 @@ export class SqliteStorageAdapter implements StorageAdapter {
       message.kind,
       message.body,
       message.data ? JSON.stringify(message.data) : null,
+      message.payloadMeta ? JSON.stringify(message.payloadMeta) : null,
       message.thread ?? null,
       message.deliverySeq ?? null,
       message.deliverySessionId ?? null,
       message.sessionId ?? null,
       message.status,
-      message.is_urgent ? 1 : 0
+      message.is_urgent ? 1 : 0,
+      message.is_broadcast ? 1 : 0
     );
   }
 
@@ -360,7 +381,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
     const limit = query.limit ?? 200;
 
     const stmt = this.db.prepare(`
-      SELECT id, ts, sender, recipient, topic, kind, body, data, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent
+      SELECT id, ts, sender, recipient, topic, kind, body, data, payload_meta, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent, is_broadcast
       FROM messages
       ${where}
       ORDER BY ts ${order}
@@ -377,12 +398,14 @@ export class SqliteStorageAdapter implements StorageAdapter {
       kind: row.kind,
       body: row.body,
       data: row.data ? JSON.parse(row.data) : undefined,
+      payloadMeta: row.payload_meta ? JSON.parse(row.payload_meta) : undefined,
       thread: row.thread ?? undefined,
       deliverySeq: row.delivery_seq ?? undefined,
       deliverySessionId: row.delivery_session_id ?? undefined,
       sessionId: row.session_id ?? undefined,
       status: row.status,
       is_urgent: row.is_urgent === 1,
+      is_broadcast: row.is_broadcast === 1,
     }));
   }
 
@@ -401,7 +424,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
     // Support both exact match and prefix match (for short IDs like "06eb33da")
     const stmt = this.db.prepare(`
-      SELECT id, ts, sender, recipient, topic, kind, body, data, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent
+      SELECT id, ts, sender, recipient, topic, kind, body, data, payload_meta, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent, is_broadcast
       FROM messages
       WHERE id = ? OR id LIKE ?
       ORDER BY ts DESC
@@ -420,13 +443,68 @@ export class SqliteStorageAdapter implements StorageAdapter {
       kind: row.kind,
       body: row.body,
       data: row.data ? JSON.parse(row.data) : undefined,
+      payloadMeta: row.payload_meta ? JSON.parse(row.payload_meta) : undefined,
       thread: row.thread ?? undefined,
       deliverySeq: row.delivery_seq ?? undefined,
       deliverySessionId: row.delivery_session_id ?? undefined,
       sessionId: row.session_id ?? undefined,
       status: row.status ?? 'unread',
       is_urgent: row.is_urgent === 1,
+      is_broadcast: row.is_broadcast === 1,
     };
+  }
+
+  async getPendingMessagesForSession(agentName: string, sessionId: string): Promise<StoredMessage[]> {
+    if (!this.db) {
+      throw new Error('SqliteStorageAdapter not initialized');
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT id, ts, sender, recipient, topic, kind, body, data, payload_meta, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent, is_broadcast
+      FROM messages
+      WHERE recipient = ? AND delivery_session_id = ? AND status != 'acked'
+      ORDER BY delivery_seq ASC, ts ASC
+    `);
+
+    const rows = stmt.all(agentName, sessionId);
+    return rows.map((row: any) => ({
+      id: row.id,
+      ts: row.ts,
+      from: row.sender,
+      to: row.recipient,
+      topic: row.topic ?? undefined,
+      kind: row.kind,
+      body: row.body,
+      data: row.data ? JSON.parse(row.data) : undefined,
+      payloadMeta: row.payload_meta ? JSON.parse(row.payload_meta) : undefined,
+      thread: row.thread ?? undefined,
+      deliverySeq: row.delivery_seq ?? undefined,
+      deliverySessionId: row.delivery_session_id ?? undefined,
+      sessionId: row.session_id ?? undefined,
+      status: row.status ?? 'unread',
+      is_urgent: row.is_urgent === 1,
+      is_broadcast: row.is_broadcast === 1,
+    }));
+  }
+
+  async getMaxSeqByStream(agentName: string, sessionId: string): Promise<Array<{ peer: string; topic?: string; maxSeq: number }>> {
+    if (!this.db) {
+      throw new Error('SqliteStorageAdapter not initialized');
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT sender, topic, MAX(delivery_seq) as max_seq
+      FROM messages
+      WHERE recipient = ? AND delivery_session_id = ? AND delivery_seq IS NOT NULL
+      GROUP BY sender, topic
+    `);
+
+    const rows = stmt.all(agentName, sessionId) as Array<{ sender: string; topic: string | null; max_seq: number }>;
+    return rows.map(row => ({
+      peer: row.sender,
+      topic: row.topic ?? undefined,
+      maxSeq: row.max_seq,
+    }));
   }
 
   async close(): Promise<void> {
@@ -450,9 +528,20 @@ export class SqliteStorageAdapter implements StorageAdapter {
     }
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO sessions
-      (id, agent_name, cli, project_id, project_root, started_at, ended_at, message_count, summary)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO sessions
+      (id, agent_name, cli, project_id, project_root, started_at, ended_at, message_count, summary, resume_token, closed_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        agent_name = excluded.agent_name,
+        cli = COALESCE(excluded.cli, sessions.cli),
+        project_id = COALESCE(excluded.project_id, sessions.project_id),
+        project_root = COALESCE(excluded.project_root, sessions.project_root),
+        started_at = COALESCE(sessions.started_at, excluded.started_at),
+        ended_at = excluded.ended_at,
+        message_count = COALESCE(sessions.message_count, excluded.message_count),
+        summary = COALESCE(excluded.summary, sessions.summary),
+        resume_token = COALESCE(excluded.resume_token, sessions.resume_token),
+        closed_by = excluded.closed_by
     `);
 
     stmt.run(
@@ -464,7 +553,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
       session.startedAt,
       session.endedAt ?? null,
       0,
-      session.summary ?? null
+      session.summary ?? null,
+      session.resumeToken ?? null,
+      null
     );
   }
 
@@ -535,7 +626,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
     const limit = query.limit ?? 50;
 
     const stmt = this.db.prepare(`
-      SELECT id, agent_name, cli, project_id, project_root, started_at, ended_at, message_count, summary, closed_by
+      SELECT id, agent_name, cli, project_id, project_root, started_at, ended_at, message_count, summary, resume_token, closed_by
       FROM sessions
       ${where}
       ORDER BY started_at DESC
@@ -553,12 +644,44 @@ export class SqliteStorageAdapter implements StorageAdapter {
       endedAt: row.ended_at ?? undefined,
       messageCount: row.message_count,
       summary: row.summary ?? undefined,
+      resumeToken: row.resume_token ?? undefined,
       closedBy: row.closed_by ?? undefined,
     }));
   }
 
   async getRecentSessions(limit: number = 10): Promise<StoredSession[]> {
     return this.getSessions({ limit });
+  }
+
+  async getSessionByResumeToken(resumeToken: string): Promise<StoredSession | null> {
+    if (!this.db) {
+      throw new Error('SqliteStorageAdapter not initialized');
+    }
+
+    const row = this.db.prepare(`
+      SELECT id, agent_name, cli, project_id, project_root, started_at, ended_at, message_count, summary, resume_token, closed_by
+      FROM sessions
+      WHERE resume_token = ?
+      LIMIT 1
+    `).get(resumeToken) as any;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      agentName: row.agent_name,
+      cli: row.cli ?? undefined,
+      projectId: row.project_id ?? undefined,
+      projectRoot: row.project_root ?? undefined,
+      startedAt: row.started_at,
+      endedAt: row.ended_at ?? undefined,
+      messageCount: row.message_count,
+      summary: row.summary ?? undefined,
+      resumeToken: row.resume_token ?? undefined,
+      closedBy: row.closed_by ?? undefined,
+    };
   }
 
   // ============ Agent Summaries ============

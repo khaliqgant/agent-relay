@@ -178,7 +178,30 @@ export class Daemon {
   private handleConnection(socket: net.Socket): void {
     console.log('[daemon] New connection');
 
-    const connection = new Connection(socket, this.config);
+    const resumeHandler = this.storage?.getSessionByResumeToken
+      ? async ({ agent, resumeToken }: { agent: string; resumeToken: string }) => {
+          const session = await this.storage!.getSessionByResumeToken!(resumeToken);
+          if (!session || session.agentName !== agent) return null;
+
+          let seedSequences: Array<{ topic?: string; peer: string; seq: number }> | undefined;
+          if (this.storage?.getMaxSeqByStream) {
+            const streams = await this.storage.getMaxSeqByStream(agent, session.id);
+            seedSequences = streams.map(s => ({
+              topic: s.topic ?? 'default',
+              peer: s.peer,
+              seq: s.maxSeq,
+            }));
+          }
+
+          return {
+            sessionId: session.id,
+            resumeToken: session.resumeToken ?? resumeToken,
+            seedSequences,
+          };
+        }
+      : undefined;
+
+    const connection = new Connection(socket, { ...this.config, resumeHandler });
     this.connections.add(connection);
 
     connection.onMessage = (envelope: Envelope) => {
@@ -198,31 +221,52 @@ export class Daemon {
 
     // Register agent when connection becomes active (after successful handshake)
     connection.onActive = () => {
-        if (connection.agentName) {
-          this.router.register(connection);
-          console.log(`[daemon] Agent registered: ${connection.agentName}`);
-          // Registry handles persistence internally via save()
-          this.registry?.registerOrUpdate({
-            name: connection.agentName,
-            cli: connection.cli,
-            program: connection.program,
-            model: connection.model,
-            task: connection.task,
-            workingDirectory: connection.workingDirectory,
-          });
+      if (connection.agentName) {
+        this.router.register(connection);
+        console.log(`[daemon] Agent registered: ${connection.agentName}`);
+        // Registry handles persistence internally via save()
+        this.registry?.registerOrUpdate({
+          name: connection.agentName,
+          cli: connection.cli,
+          program: connection.program,
+          model: connection.model,
+          task: connection.task,
+          workingDirectory: connection.workingDirectory,
+        });
 
         // Record session start
         if (this.storage instanceof SqliteStorageAdapter) {
           const projectPaths = getProjectPaths();
-          this.storage.startSession({
-            id: connection.sessionId,
-            agentName: connection.agentName,
-            cli: connection.cli,
-            projectId: projectPaths.projectId,
-            projectRoot: projectPaths.projectRoot,
-            startedAt: Date.now(),
-          }).catch(err => console.error('[daemon] Failed to record session start:', err));
+          const storage = this.storage as SqliteStorageAdapter;
+          const persistSession = async (): Promise<void> => {
+            let startedAt = Date.now();
+            if (connection.isResumed && storage.getSessionByResumeToken) {
+              const existing = await storage.getSessionByResumeToken(connection.resumeToken);
+              if (existing?.startedAt) {
+                startedAt = existing.startedAt;
+              }
+            }
+
+            await storage.startSession({
+              id: connection.sessionId,
+              agentName: connection.agentName!,
+              cli: connection.cli,
+              projectId: projectPaths.projectId,
+              projectRoot: projectPaths.projectRoot,
+              startedAt,
+              resumeToken: connection.resumeToken,
+            });
+          };
+
+          persistSession().catch(err => console.error('[daemon] Failed to record session start:', err));
         }
+      }
+
+      // Replay pending deliveries for resumed sessions
+      if (connection.isResumed) {
+        this.router.replayPending(connection).catch(err => {
+          console.error('[daemon] Failed to replay pending messages', err);
+        });
       }
     };
 

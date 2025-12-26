@@ -87,18 +87,35 @@ export function getInitials(name: string): string {
 
 /**
  * Format message body with basic markdown-like formatting
+ * Note: CSS uses white-space: pre-wrap to handle newlines naturally
  */
 export function formatMessageBody(content: string | undefined): string {
   if (!content) return '';
 
   let escaped = escapeHtml(content);
 
-  // Simple code block detection
-  escaped = escaped.replace(/```([\s\S]*?)```/g, '<pre>$1</pre>');
+  // Simple code block detection (must process before inline code)
+  // Handle code blocks with optional language specifier: ```js\n... ``` or ```...\n```
+  // The language specifier must be followed by a newline to be recognized
+  escaped = escaped.replace(/```(\w+)?\n([\s\S]*?)```/g, (_match, _lang, code) => {
+    return `<pre><code>${code.trim()}</code></pre>`;
+  });
+
+  // Handle inline code blocks without newlines: ```code here```
+  escaped = escaped.replace(/```([^`\n]+)```/g, '<pre><code>$1</code></pre>');
+
+  // Inline code: `code`
   escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
 
-  // Convert newlines to <br> for proper multi-line display
-  escaped = escaped.replace(/\n/g, '<br>');
+  // Bold: **text** or __text__
+  escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  escaped = escaped.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+
+  // Italic: *text* or _text_ (not inside bold)
+  escaped = escaped.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+
+  // Don't convert newlines to <br> - CSS white-space: pre-wrap handles this
+  // This was causing double line breaks before
 
   return escaped;
 }

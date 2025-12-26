@@ -83,9 +83,10 @@ export class AgentSpawner {
       }
 
       // Add --dangerously-skip-permissions for Claude agents to avoid permission dialogs
+      // Use -- to separate agent-relay options from the wrapped command
       const isClaudeCli = cli.startsWith('claude');
       const cliWithFlags = isClaudeCli ? `${cli} --dangerously-skip-permissions` : cli;
-      const cmd = `unset TMUX && ${agentRelayPath} -n ${name} ${cliWithFlags}`;
+      const cmd = `unset TMUX && ${agentRelayPath} -n ${name} -- ${cliWithFlags}`;
       if (debug) console.log(`[spawner:debug] Agent command: ${cmd}`);
 
       // Send the command

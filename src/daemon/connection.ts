@@ -29,6 +29,12 @@ export interface ConnectionConfig {
   heartbeatMs: number;
   /** Multiplier for heartbeat timeout (timeout = heartbeatMs * multiplier). Default: 6 (30s with 5s heartbeat) */
   heartbeatTimeoutMultiplier: number;
+  /** Optional handler to validate resume tokens and provide session state */
+  resumeHandler?: (params: { agent: string; resumeToken: string }) => Promise<{
+    sessionId: string;
+    resumeToken?: string;
+    seedSequences?: Array<{ topic?: string; peer: string; seq: number }>;
+  } | null>;
 }
 
 export const DEFAULT_CONFIG: ConnectionConfig = {
@@ -53,6 +59,7 @@ export class Connection {
   private _workingDirectory?: string;
   private _sessionId: string;
   private _resumeToken: string;
+  private _isResumed = false;
 
   private heartbeatTimer?: NodeJS.Timeout;
   private lastPongReceived?: number;
@@ -112,6 +119,14 @@ export class Connection {
     return this._sessionId;
   }
 
+  get resumeToken(): string {
+    return this._resumeToken;
+  }
+
+  get isResumed(): boolean {
+    return this._isResumed;
+  }
+
   private setupSocketHandlers(): void {
     this.socket.on('data', (data) => this.handleData(data));
     this.socket.on('close', () => this.handleClose());
@@ -122,7 +137,10 @@ export class Connection {
     try {
       const frames = this.parser.push(data);
       for (const frame of frames) {
-        this.processFrame(frame);
+        this.processFrame(frame).catch((err) => {
+          this.sendError('BAD_REQUEST', `Frame error: ${err}`, true);
+          this.close();
+        });
       }
     } catch (err) {
       this.sendError('BAD_REQUEST', `Frame error: ${err}`, true);
@@ -130,10 +148,10 @@ export class Connection {
     }
   }
 
-  private processFrame(envelope: Envelope): void {
+  private async processFrame(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
       case 'HELLO':
-        this.handleHello(envelope as Envelope<HelloPayload>);
+        await this.handleHello(envelope as Envelope<HelloPayload>);
         break;
       case 'SEND':
         this.handleSend(envelope as Envelope<SendPayload>);
@@ -156,7 +174,7 @@ export class Connection {
     }
   }
 
-  private handleHello(envelope: Envelope<HelloPayload>): void {
+  private async handleHello(envelope: Envelope<HelloPayload>): Promise<void> {
     if (this._state !== 'HANDSHAKING') {
       this.sendError('BAD_REQUEST', 'Unexpected HELLO', false);
       return;
@@ -170,15 +188,36 @@ export class Connection {
     this._workingDirectory = envelope.payload.workingDirectory;
 
     // Check for session resume
-    if (envelope.payload.session?.resume_token) {
-      // Resume tokens are not persisted; tell client to start a fresh session.
-      this.sendError('RESUME_TOO_OLD', 'Session resume not yet supported; starting new session', false);
+    const resumeToken = envelope.payload.session?.resume_token;
+    if (resumeToken) {
+      if (this.config.resumeHandler) {
+        try {
+          const resumeState = await this.config.resumeHandler({
+            agent: this._agentName,
+            resumeToken,
+          });
+
+          if (resumeState) {
+            this._sessionId = resumeState.sessionId;
+            this._resumeToken = resumeState.resumeToken ?? resumeToken;
+            this._isResumed = true;
+
+            // Seed sequence counters so new deliveries continue from last known seq per stream
+            for (const seed of resumeState.seedSequences ?? []) {
+              this.seedSequence(seed.topic ?? 'default', seed.peer, seed.seq);
+            }
+          } else {
+            this.sendError('RESUME_TOO_OLD', 'Resume token rejected; starting new session', false);
+          }
+        } catch (err: any) {
+          this.sendError('RESUME_TOO_OLD', `Resume validation failed: ${err?.message ?? err}`, false);
+        }
+      } else {
+        this.sendError('RESUME_TOO_OLD', 'Session resume not configured; starting new session', false);
+      }
     }
 
     // Send WELCOME
-    // Note: resume_token is omitted because session resume is not yet implemented.
-    // Sending a token would cause clients to attempt resume on reconnect,
-    // triggering a RESUME_TOO_OLD -> new token -> reconnect loop.
     const welcome: Envelope<WelcomePayload> = {
       v: PROTOCOL_VERSION,
       type: 'WELCOME',
@@ -186,6 +225,7 @@ export class Connection {
       ts: Date.now(),
       payload: {
         session_id: this._sessionId,
+        resume_token: this._resumeToken,
         server: {
           max_frame_bytes: this.config.maxFrameBytes,
           heartbeat_ms: this.config.heartbeatMs,
@@ -253,6 +293,17 @@ export class Connection {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
+    }
+  }
+
+  /**
+   * Seed a sequence counter for a stream so that the next value continues from the provided seq.
+   */
+  seedSequence(topic: string | undefined, peer: string, seq: number): void {
+    const key = `${topic ?? 'default'}:${peer}`;
+    const current = this.sequences.get(key) ?? 0;
+    if (seq > current) {
+      this.sequences.set(key, seq);
     }
   }
 

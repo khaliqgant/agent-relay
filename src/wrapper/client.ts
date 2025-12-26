@@ -66,6 +66,9 @@ export class RelayClient {
   private reconnectDelay: number;
   private reconnectTimer?: NodeJS.Timeout;
   private _destroyed = false;
+  private deliveredIds: Set<string> = new Set();
+  private deliveredOrder: string[] = [];
+  private readonly deliveredCacheLimit = 2000;
 
   // Event handlers
   onMessage?: (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => void;
@@ -360,6 +363,11 @@ export class RelayClient {
       },
     });
 
+    const duplicate = this.markDelivered(envelope.id);
+    if (duplicate) {
+      return;
+    }
+
     // Notify handler
     if (this.onMessage && envelope.from) {
       this.onMessage(envelope.from, envelope.payload, envelope.id, envelope.payload_meta);
@@ -436,5 +444,28 @@ export class RelayClient {
         // Will trigger another reconnect
       });
     }, delay);
+  }
+
+  /**
+   * Track delivered message IDs to provide deterministic deduplication when messages are replayed.
+   * @returns true if the message has already been seen.
+   */
+  private markDelivered(id: string): boolean {
+    if (this.deliveredIds.has(id)) {
+      return true;
+    }
+
+    this.deliveredIds.add(id);
+    this.deliveredOrder.push(id);
+
+    // Simple FIFO eviction to keep memory bounded
+    if (this.deliveredOrder.length > this.deliveredCacheLimit) {
+      const oldest = this.deliveredOrder.shift();
+      if (oldest) {
+        this.deliveredIds.delete(oldest);
+      }
+    }
+
+    return false;
   }
 }

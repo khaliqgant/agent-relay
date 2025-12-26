@@ -2,7 +2,7 @@
  * Dashboard State Management
  */
 
-import type { Agent, Message, AppState, ChannelType } from './types.js';
+import type { Agent, Message, AppState, ChannelType, ViewMode, FleetData, FleetAgent, PeerServer } from './types.js';
 
 /**
  * Global application state
@@ -15,6 +15,8 @@ export const state: AppState = {
   isConnected: false,
   ws: null,
   reconnectAttempts: 0,
+  viewMode: 'local',
+  fleetData: null,
 };
 
 /**
@@ -127,4 +129,56 @@ export function getThreadMessages(threadId: string): Message[] {
  */
 export function getThreadReplyCount(threadId: string): number {
   return state.messages.filter((m) => m.thread === threadId).length;
+}
+
+// ========================================
+// Fleet View State Management
+// ========================================
+
+/**
+ * Set view mode (local or fleet)
+ */
+export function setViewMode(mode: ViewMode): void {
+  state.viewMode = mode;
+  notifyListeners();
+}
+
+/**
+ * Get current view mode
+ */
+export function getViewMode(): ViewMode {
+  return state.viewMode;
+}
+
+/**
+ * Update fleet data
+ */
+export function setFleetData(data: FleetData | null): void {
+  state.fleetData = data;
+  notifyListeners();
+}
+
+/**
+ * Get fleet data
+ */
+export function getFleetData(): FleetData | null {
+  return state.fleetData;
+}
+
+/**
+ * Get agents for current view mode
+ * Returns local agents or fleet agents depending on view mode
+ */
+export function getAgentsForCurrentView(): (Agent | FleetAgent)[] {
+  if (state.viewMode === 'fleet' && state.fleetData) {
+    return state.fleetData.agents;
+  }
+  return state.agents;
+}
+
+/**
+ * Check if fleet view is available (has peer connections)
+ */
+export function isFleetAvailable(): boolean {
+  return state.fleetData !== null && state.fleetData.servers.length > 0;
 }

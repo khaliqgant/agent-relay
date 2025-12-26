@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Socket } from 'node:net';
 import { Connection } from './connection.js';
-import { encodeFrame } from '../protocol/framing.js';
-import { PROTOCOL_VERSION, type Envelope, type HelloPayload } from '../protocol/types.js';
+import { encodeFrame, FrameParser } from '../protocol/framing.js';
+import { PROTOCOL_VERSION, type Envelope, type HelloPayload, type WelcomePayload } from '../protocol/types.js';
 
 class MockSocket {
   private handlers: Map<string, Array<(...args: any[]) => void>> = new Map();
@@ -80,6 +80,36 @@ describe('Connection', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(onError).toHaveBeenCalledTimes(1);
     expect(socket.destroyed).toBe(true);
+  });
+
+  it('accepts resume token when resumeHandler returns a session', async () => {
+    const socket = new MockSocket();
+    const parser = new FrameParser();
+    const resumeHandler = vi.fn().mockResolvedValue({
+      sessionId: 'session-resume',
+      resumeToken: 'token-abc',
+      seedSequences: [{ topic: 'chat', peer: 'peerA', seq: 5 }],
+    });
+    const connection = new Connection(socket as unknown as Socket, { heartbeatMs: 50, resumeHandler });
+    const onActive = vi.fn();
+    connection.onActive = onActive;
+
+    const hello = makeHello('agent-a');
+    hello.payload.session = { resume_token: 'token-abc' };
+    socket.emit('data', encodeFrame(hello));
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(connection.state).toBe('ACTIVE');
+    expect(connection.sessionId).toBe('session-resume');
+    expect(connection.resumeToken).toBe('token-abc');
+    expect(connection.isResumed).toBe(true);
+    expect(connection.getNextSeq('chat', 'peerA')).toBe(6); // seeded to 5, next is 6
+    expect(onActive).toHaveBeenCalledTimes(1);
+
+    const welcome = parser.push(socket.written[0])?.[0] as Envelope<WelcomePayload>;
+    expect(welcome.payload.resume_token).toBe('token-abc');
+    expect(welcome.payload.session_id).toBe('session-resume');
   });
 
   describe('heartbeat timeout configuration', () => {

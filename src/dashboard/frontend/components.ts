@@ -2,8 +2,8 @@
  * Dashboard UI Components
  */
 
-import type { Agent, Message, DOMElements, ChannelType, SpawnedAgent } from './types.js';
-import { state, getFilteredMessages, setCurrentChannel, setCurrentThread, getThreadMessages, getThreadReplyCount } from './state.js';
+import type { Agent, Message, DOMElements, ChannelType, SpawnedAgent, FleetAgent, PeerServer, ViewMode } from './types.js';
+import { state, getFilteredMessages, setCurrentChannel, setCurrentThread, getThreadMessages, getThreadReplyCount, setViewMode, getViewMode, getFleetData, isFleetAvailable, getAgentsForCurrentView } from './state.js';
 import {
   escapeHtml,
   formatTime,
@@ -61,6 +61,13 @@ export function initElements(): DOMElements {
     spawnTaskInput: document.getElementById('spawn-task-input') as HTMLTextAreaElement,
     spawnSubmitBtn: document.getElementById('spawn-submit-btn') as HTMLButtonElement,
     spawnStatus: document.getElementById('spawn-status')!,
+    // Fleet view elements
+    viewToggle: document.getElementById('view-toggle')!,
+    viewToggleLocal: document.querySelector('[data-view="local"]') as HTMLButtonElement,
+    viewToggleFleet: document.querySelector('[data-view="fleet"]') as HTMLButtonElement,
+    peerCount: document.getElementById('peer-count')!,
+    serversSection: document.getElementById('servers-section')!,
+    serversList: document.getElementById('servers-list')!,
   };
   return elements;
 }
@@ -954,4 +961,220 @@ export async function releaseAgent(name: string): Promise<void> {
  */
 export function getSpawnedAgents(): SpawnedAgent[] {
   return spawnedAgents;
+}
+
+// ========================================
+// Fleet View Functions
+// ========================================
+
+/**
+ * Initialize fleet view toggle handlers
+ */
+export function initFleetViewToggle(): void {
+  elements.viewToggleLocal?.addEventListener('click', () => {
+    switchViewMode('local');
+  });
+
+  elements.viewToggleFleet?.addEventListener('click', () => {
+    switchViewMode('fleet');
+  });
+}
+
+/**
+ * Switch between local and fleet view
+ */
+export function switchViewMode(mode: ViewMode): void {
+  setViewMode(mode);
+
+  // Update toggle button states
+  elements.viewToggleLocal?.classList.toggle('active', mode === 'local');
+  elements.viewToggleFleet?.classList.toggle('active', mode === 'fleet');
+
+  // Show/hide servers section
+  if (elements.serversSection) {
+    elements.serversSection.style.display = mode === 'fleet' ? 'block' : 'none';
+  }
+
+  // Re-render agents list
+  renderAgents();
+
+  // Re-render servers if in fleet mode
+  if (mode === 'fleet') {
+    renderServers();
+  }
+}
+
+/**
+ * Update fleet view visibility based on available peer connections
+ */
+export function updateFleetViewVisibility(): void {
+  const fleetData = getFleetData();
+  const hasFleet = fleetData && fleetData.servers.length > 0;
+
+  // Show toggle only if fleet is available
+  if (elements.viewToggle) {
+    elements.viewToggle.style.display = hasFleet ? 'flex' : 'none';
+  }
+
+  // Update peer count
+  if (elements.peerCount && fleetData) {
+    elements.peerCount.textContent = String(fleetData.servers.length);
+  }
+
+  // If fleet became unavailable while in fleet mode, switch to local
+  if (!hasFleet && getViewMode() === 'fleet') {
+    switchViewMode('local');
+  }
+}
+
+/**
+ * Render peer servers list in sidebar
+ */
+export function renderServers(): void {
+  const fleetData = getFleetData();
+
+  if (!fleetData || fleetData.servers.length === 0) {
+    if (elements.serversList) {
+      elements.serversList.innerHTML = '<li class="server-item" style="color: var(--text-muted); cursor: default;">No peer servers connected</li>';
+    }
+    return;
+  }
+
+  const html = fleetData.servers.map(server => {
+    const isLocal = server.id === fleetData.localServerId;
+    const statusClass = server.connected ? '' : 'offline';
+
+    return `
+      <li class="server-item" data-server="${escapeHtml(server.id)}">
+        <div class="server-icon" style="${isLocal ? 'background: var(--accent-primary);' : ''}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+          <span class="status-dot ${statusClass}"></span>
+        </div>
+        <span class="server-name">${escapeHtml(server.name)}${isLocal ? ' (local)' : ''}</span>
+        <span class="agent-count">${server.agentCount}</span>
+      </li>
+    `;
+  }).join('');
+
+  if (elements.serversList) {
+    elements.serversList.innerHTML = html;
+  }
+}
+
+/**
+ * Render agents list with fleet support
+ * Updates renderAgents to show server badges in fleet mode
+ */
+export function renderFleetAgents(): void {
+  const viewMode = getViewMode();
+  const fleetData = getFleetData();
+
+  if (viewMode !== 'fleet' || !fleetData) {
+    renderAgents();
+    return;
+  }
+
+  // Get fleet agents
+  const agents = fleetData.agents;
+  const spawnedNames = new Set(spawnedAgents.map(a => a.name));
+
+  const html = agents.map((agent: FleetAgent) => {
+    const online = isAgentOnline(agent.lastSeen || agent.lastActive);
+    const presenceClass = online ? 'online' : '';
+    const isActive = state.currentChannel === agent.name;
+    const needsAttentionClass = agent.needsAttention ? 'needs-attention' : '';
+    const isSpawned = spawnedNames.has(agent.name);
+    const isLocal = agent.isLocal;
+
+    // Server badge for fleet agents
+    const serverBadge = `
+      <span class="server-badge ${isLocal ? 'local' : ''}">
+        <span class="server-dot ${online ? '' : 'offline'}"></span>
+        ${escapeHtml(agent.serverName || agent.server)}
+      </span>
+    `;
+
+    // Server indicator on avatar
+    const serverIndicator = !isLocal ? `
+      <span class="server-indicator" title="${escapeHtml(agent.serverName)}"></span>
+    ` : '';
+
+    // Spawned icon SVG
+    const spawnedIcon = isSpawned ? `
+      <svg class="spawned-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Spawned from dashboard">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>
+    ` : '';
+
+    // Release button for spawned agents
+    const releaseBtn = isSpawned ? `
+      <button class="release-btn" title="Release agent" data-release="${escapeHtml(agent.name)}">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    ` : '';
+
+    return `
+      <li class="channel-item ${isActive ? 'active' : ''} ${needsAttentionClass}" data-agent="${escapeHtml(agent.name)}" data-server="${escapeHtml(agent.server)}">
+        <div class="agent-avatar" style="background: ${isSpawned ? 'var(--accent-green)' : getAvatarColor(agent.name)}">
+          ${getInitials(agent.name)}
+          <span class="presence-indicator ${presenceClass}"></span>
+          ${serverIndicator}
+        </div>
+        ${serverBadge}
+        <span class="channel-name">${escapeHtml(agent.name)}</span>
+        ${spawnedIcon}
+        ${agent.needsAttention ? '<span class="attention-badge">Needs Input</span>' : ''}
+        ${releaseBtn}
+      </li>
+    `;
+  }).join('');
+
+  elements.agentsList.innerHTML = html || '<li class="channel-item" style="color: var(--text-muted); cursor: default;">No agents in fleet</li>';
+
+  // Add click handlers
+  attachAgentClickHandlers();
+
+  // Update command palette agents
+  updatePaletteAgents();
+}
+
+/**
+ * Attach click handlers to agent list items
+ */
+function attachAgentClickHandlers(): void {
+  elements.agentsList.querySelectorAll<HTMLElement>('.channel-item[data-agent]').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.release-btn')) {
+        return;
+      }
+      const agentName = item.dataset.agent;
+      if (agentName) {
+        selectChannel(agentName);
+      }
+    });
+  });
+
+  elements.agentsList.querySelectorAll<HTMLButtonElement>('.release-btn[data-release]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const agentName = btn.dataset.release;
+      if (agentName && confirm(`Release agent "${agentName}"? This will terminate the agent.`)) {
+        await releaseAgent(agentName);
+      }
+    });
+  });
+}
+
+/**
+ * Check if an agent is a fleet agent (has server info)
+ */
+function isFleetAgent(agent: Agent | FleetAgent): agent is FleetAgent {
+  return 'server' in agent && 'serverName' in agent;
 }

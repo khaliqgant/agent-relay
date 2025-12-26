@@ -207,32 +207,50 @@ describe('utils', () => {
 
     it('should convert code blocks with triple backticks', () => {
       const result = formatMessageBody('```\nconst x = 1;\n```');
-      expect(result).toContain('<pre>');
+      expect(result).toContain('<pre><code>');
       expect(result).toContain('const x = 1;');
-      expect(result).toContain('</pre>');
+      expect(result).toContain('</code></pre>');
+    });
+
+    it('should handle code blocks with language specifier', () => {
+      const result = formatMessageBody('```js\nconst x = 1;\n```');
+      expect(result).toContain('<pre><code>');
+      expect(result).toContain('const x = 1;');
     });
 
     it('should handle mixed content', () => {
       const result = formatMessageBody('Hello `world` and ```code block```');
       expect(result).toContain('<code>world</code>');
-      expect(result).toContain('<pre>code block</pre>');
+      expect(result).toContain('<pre><code>code block</code></pre>');
     });
 
     it('should preserve plain text', () => {
       expect(formatMessageBody('Hello World')).toBe('Hello World');
     });
 
-    it('should convert newlines to <br> tags', () => {
-      expect(formatMessageBody('Hello\nWorld')).toBe('Hello<br>World');
+    it('should preserve newlines (CSS white-space: pre-wrap handles display)', () => {
+      // Newlines are preserved as-is since CSS handles multi-line display
+      expect(formatMessageBody('Hello\nWorld')).toBe('Hello\nWorld');
     });
 
     it('should handle multiple newlines', () => {
-      expect(formatMessageBody('Line1\nLine2\nLine3')).toBe('Line1<br>Line2<br>Line3');
+      // Newlines preserved, CSS handles display
+      expect(formatMessageBody('Line1\nLine2\nLine3')).toBe('Line1\nLine2\nLine3');
     });
 
     it('should handle newlines with other content', () => {
       const result = formatMessageBody('Check this:\n- Item 1\n- Item 2');
-      expect(result).toBe('Check this:<br>- Item 1<br>- Item 2');
+      // Newlines preserved
+      expect(result).toBe('Check this:\n- Item 1\n- Item 2');
+    });
+
+    it('should convert bold markdown', () => {
+      expect(formatMessageBody('This is **bold** text')).toContain('<strong>bold</strong>');
+      expect(formatMessageBody('This is __also bold__ text')).toContain('<strong>also bold</strong>');
+    });
+
+    it('should convert italic markdown', () => {
+      expect(formatMessageBody('This is *italic* text')).toContain('<em>italic</em>');
     });
   });
 });

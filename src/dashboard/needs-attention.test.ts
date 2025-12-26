@@ -45,7 +45,8 @@ describe('computeNeedsAttention', () => {
     const threadId = 'thread-123';
     const messages: AttentionMessage[] = [
       msg({ from: 'Alice', to: 'Bob', thread: threadId, timestamp: new Date(baseTs).toISOString() }),
-      msg({ from: 'Bob', to: '*', thread: threadId, timestamp: new Date(baseTs + 2000).toISOString() }),
+      // Broadcast reply stored with individual recipient but isBroadcast=true
+      msg({ from: 'Bob', to: 'Alice', thread: threadId, isBroadcast: true, timestamp: new Date(baseTs + 2000).toISOString() }),
     ];
 
     const result = computeNeedsAttention(messages);
@@ -55,7 +56,8 @@ describe('computeNeedsAttention', () => {
   it('broadcasts clear attention (agent is actively participating)', () => {
     const messages: AttentionMessage[] = [
       msg({ from: 'Alice', to: 'Bob', timestamp: new Date(baseTs).toISOString() }),
-      msg({ from: 'Bob', to: '*', timestamp: new Date(baseTs + 1000).toISOString() }),
+      // Broadcast message stored with individual recipient but isBroadcast=true
+      msg({ from: 'Bob', to: 'Alice', isBroadcast: true, timestamp: new Date(baseTs + 1000).toISOString() }),
     ];
 
     const result = computeNeedsAttention(messages);

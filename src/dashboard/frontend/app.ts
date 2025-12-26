@@ -2,7 +2,7 @@
  * Dashboard Application Entry Point
  */
 
-import { subscribe, state } from './state.js';
+import { subscribe, state, getViewMode } from './state.js';
 import { connect, sendMessage } from './websocket.js';
 import {
   initElements,
@@ -29,8 +29,11 @@ import {
   closeSpawnModal,
   spawnAgent,
   fetchSpawnedAgents,
+  initFleetViewToggle,
+  updateFleetViewVisibility,
+  renderFleetAgents,
+  renderServers,
 } from './components.js';
-import { state } from './state.js';
 
 /**
  * Initialize the dashboard application
@@ -41,13 +44,24 @@ export function initApp(): void {
   // Subscribe to state changes
   subscribe(() => {
     updateConnectionStatus();
-    renderAgents();
+    // Render agents based on current view mode
+    if (getViewMode() === 'fleet') {
+      renderFleetAgents();
+      renderServers();
+    } else {
+      renderAgents();
+    }
     renderMessages();
     updateOnlineCount();
+    // Update fleet toggle visibility based on available peer connections
+    updateFleetViewVisibility();
   });
 
   // Set up event listeners
   setupEventListeners(elements);
+
+  // Initialize fleet view toggle handlers
+  initFleetViewToggle();
 
   // Connect to WebSocket
   connect();

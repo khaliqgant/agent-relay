@@ -14,12 +14,14 @@ const makeMessage = (overrides: Partial<StoredMessage> = {}): StoredMessage => (
   kind: overrides.kind ?? 'message',
   body: overrides.body ?? 'hello',
   data: overrides.data,
+  payloadMeta: overrides.payloadMeta,
   thread: overrides.thread,
   deliverySeq: overrides.deliverySeq,
   deliverySessionId: overrides.deliverySessionId,
   sessionId: overrides.sessionId,
   status: overrides.status ?? 'unread',
   is_urgent: overrides.is_urgent ?? false,
+  is_broadcast: overrides.is_broadcast ?? false,
 });
 
 describe('SqliteStorageAdapter', () => {
@@ -189,6 +191,21 @@ describe('SqliteStorageAdapter', () => {
       expect(sessions[0].messageCount).toBe(3);
     });
 
+    it('stores and retrieves a resume token', async () => {
+      const token = 'resume-123';
+      await adapter.startSession({
+        id: 'resume-session',
+        agentName: 'ResumeAgent',
+        startedAt: Date.now(),
+        resumeToken: token,
+      });
+
+      const session = await adapter.getSessionByResumeToken(token);
+      expect(session).not.toBeNull();
+      expect(session?.id).toBe('resume-session');
+      expect(session?.resumeToken).toBe(token);
+    });
+
     it('filters sessions by agentName and projectId', async () => {
       const now = Date.now();
       await adapter.startSession({ id: 's1', agentName: 'Alice', projectId: 'p1', startedAt: now - 2000 });
@@ -214,6 +231,68 @@ describe('SqliteStorageAdapter', () => {
       const recent = await adapter.getRecentSessions(3);
       expect(recent).toHaveLength(3);
       expect(recent[0].id).toBe('recent-4'); // Most recent first
+    });
+  });
+
+  describe('Resume helpers', () => {
+    it('returns pending messages and max seq per stream', async () => {
+      const sessionId = 'sess-1';
+      await adapter.saveMessage({
+        id: 'm1',
+        ts: Date.now(),
+        from: 'Alice',
+        to: 'Bob',
+        kind: 'message',
+        body: 'one',
+        status: 'unread',
+        is_urgent: false,
+        deliverySeq: 1,
+        deliverySessionId: sessionId,
+        sessionId,
+        is_broadcast: false,
+      });
+
+      await adapter.saveMessage({
+        id: 'm2',
+        ts: Date.now() + 10,
+        from: 'Alice',
+        to: 'Bob',
+        kind: 'message',
+        body: 'two',
+        status: 'unread',
+        is_urgent: false,
+        deliverySeq: 2,
+        deliverySessionId: sessionId,
+        sessionId,
+        is_broadcast: false,
+      });
+
+      await adapter.saveMessage({
+        id: 'm3',
+        ts: Date.now() + 20,
+        from: 'Carol',
+        to: 'Bob',
+        kind: 'message',
+        body: 'three',
+        status: 'unread',
+        is_urgent: false,
+        deliverySeq: 1,
+        deliverySessionId: sessionId,
+        sessionId,
+        is_broadcast: false,
+      });
+
+      await adapter.updateMessageStatus?.('m2', 'acked');
+
+      const pending = await adapter.getPendingMessagesForSession?.('Bob', sessionId);
+      expect(pending?.map(p => p.id)).toEqual(['m1', 'm3']);
+
+      const seqs = await adapter.getMaxSeqByStream?.('Bob', sessionId);
+      const sorted = (seqs ?? []).sort((a, b) => a.peer.localeCompare(b.peer));
+      expect(sorted).toEqual([
+        { peer: 'Alice', topic: undefined, maxSeq: 2 },
+        { peer: 'Carol', topic: undefined, maxSeq: 1 },
+      ]);
     });
   });
 

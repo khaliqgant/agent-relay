@@ -62,6 +62,9 @@ export interface AppState {
   isConnected: boolean;
   ws: WebSocket | null;
   reconnectAttempts: number;
+  // Fleet view state
+  viewMode: ViewMode;
+  fleetData: FleetData | null;
 }
 
 export interface DOMElements {
@@ -101,6 +104,13 @@ export interface DOMElements {
   spawnTaskInput: HTMLTextAreaElement;
   spawnSubmitBtn: HTMLButtonElement;
   spawnStatus: HTMLElement;
+  // Fleet view elements
+  viewToggle: HTMLElement;
+  viewToggleLocal: HTMLButtonElement;
+  viewToggleFleet: HTMLButtonElement;
+  peerCount: HTMLElement;
+  serversSection: HTMLElement;
+  serversList: HTMLElement;
 }
 
 export interface SpawnedAgent {
@@ -110,4 +120,29 @@ export interface SpawnedAgent {
   spawnedBy: string;
   spawnedAt: number;
   window: string;
+}
+
+// Fleet view types
+export type ViewMode = 'local' | 'fleet';
+
+export interface PeerServer {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  connected: boolean;
+  lastSeen?: string;
+  agentCount: number;
+}
+
+export interface FleetAgent extends Agent {
+  server: string;       // Server ID where agent is running
+  serverName: string;   // Human-readable server name
+  isLocal: boolean;     // true if on local server
+}
+
+export interface FleetData {
+  servers: PeerServer[];
+  agents: FleetAgent[];
+  localServerId: string;
 }

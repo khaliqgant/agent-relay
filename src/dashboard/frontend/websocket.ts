@@ -2,7 +2,7 @@
  * WebSocket Connection Handler
  */
 
-import type { DashboardData } from './types.js';
+import type { DashboardData, FleetData } from './types.js';
 import {
   state,
   setAgents,
@@ -10,6 +10,7 @@ import {
   setConnectionStatus,
   setWebSocket,
   incrementReconnectAttempts,
+  setFleetData,
 } from './state.js';
 
 type DataHandler = (data: DashboardData) => void;
@@ -59,10 +60,17 @@ export function connect(): void {
 }
 
 /**
+ * Extended dashboard data with fleet support
+ */
+interface ExtendedDashboardData extends DashboardData {
+  fleet?: FleetData;
+}
+
+/**
  * Handle incoming dashboard data
  */
-function handleData(data: DashboardData): void {
-  console.log('[WS] Received data:', { agentCount: data.agents?.length, messageCount: data.messages?.length });
+function handleData(data: ExtendedDashboardData): void {
+  console.log('[WS] Received data:', { agentCount: data.agents?.length, messageCount: data.messages?.length, hasFleet: !!data.fleet });
 
   if (data.agents) {
     console.log('[WS] Setting agents:', data.agents.map(a => a.name));
@@ -71,6 +79,12 @@ function handleData(data: DashboardData): void {
 
   if (data.messages) {
     setMessages(data.messages);
+  }
+
+  // Handle fleet data for multi-server view
+  if (data.fleet) {
+    console.log('[WS] Setting fleet data:', { servers: data.fleet.servers?.length, agents: data.fleet.agents?.length });
+    setFleetData(data.fleet);
   }
 
   if (dataHandler) {

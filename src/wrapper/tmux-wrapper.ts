@@ -129,6 +129,9 @@ export class TmuxWrapper {
   private readonly MAX_PENDING_RELAY_COMMANDS = 50;
   private processedSpawnCommands: Set<string> = new Set(); // Dedup spawn commands
   private processedReleaseCommands: Set<string> = new Set(); // Dedup release commands
+  private receivedMessageIdSet: Set<string> = new Set();
+  private receivedMessageIdOrder: string[] = [];
+  private readonly MAX_RECEIVED_MESSAGES = 2000;
 
   constructor(config: TmuxWrapperConfig) {
     this.config = {
@@ -555,8 +558,9 @@ export class TmuxWrapper {
       // Check for [[SESSION_END]] blocks to explicitly close session
       this.parseSessionEndAndClose(cleanContent);
 
-      // Check for @relay:spawn and @relay:release commands (lead mode)
-      this.parseSpawnReleaseCommands(cleanContent);
+      // Check for ->relay:spawn and ->relay:release commands (lead mode)
+      // Use joinedContent to handle multi-line output from TUIs like Claude Code
+      this.parseSpawnReleaseCommands(joinedContent);
 
       this.updateActivityState();
 
@@ -849,7 +853,8 @@ export class TmuxWrapper {
 
       // Match ->relay:spawn WorkerName cli "task"
       // Pattern: ->relay:spawn <name> <cli> "<task>" or ->relay:spawn <name> <cli> '<task>'
-      const spawnMatch = trimmed.match(/^->relay:spawn\s+(\S+)\s+(\S+)\s+["'](.+)["']$/);
+      // Allow trailing whitespace and optional bullet prefixes that TUIs might add
+      const spawnMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:spawn\s+(\S+)\s+(\S+)\s+["'](.+?)["']\s*$/);
       if (spawnMatch && this.config.onSpawn) {
         const [, name, cli, task] = spawnMatch;
         const spawnKey = `${name}:${cli}:${task}`;
@@ -866,7 +871,8 @@ export class TmuxWrapper {
       }
 
       // Match ->relay:release WorkerName
-      const releaseMatch = trimmed.match(/^->relay:release\s+(\S+)$/);
+      // Allow trailing whitespace and optional bullet prefixes
+      const releaseMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:release\s+(\S+)\s*$/);
       if (releaseMatch && this.config.onRelease) {
         const [, name] = releaseMatch;
 
@@ -886,6 +892,11 @@ export class TmuxWrapper {
    * Handle incoming message from relay
    */
   private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta): void {
+    if (this.hasSeenIncoming(messageId)) {
+      this.logStderr(`← ${from}: duplicate delivery (${messageId.substring(0, 8)})`);
+      return;
+    }
+
     const truncatedBody = payload.body.substring(0, Math.min(DEBUG_LOG_TRUNCATE_LENGTH, payload.body.length));
     this.logStderr(`← ${from}: ${truncatedBody}...`);
 
@@ -1018,6 +1029,24 @@ export class TmuxWrapper {
         setTimeout(() => this.checkForInjectionOpportunity(), 1000);
       }
     }
+  }
+
+  private hasSeenIncoming(messageId: string): boolean {
+    if (this.receivedMessageIdSet.has(messageId)) {
+      return true;
+    }
+
+    this.receivedMessageIdSet.add(messageId);
+    this.receivedMessageIdOrder.push(messageId);
+
+    if (this.receivedMessageIdOrder.length > this.MAX_RECEIVED_MESSAGES) {
+      const oldest = this.receivedMessageIdOrder.shift();
+      if (oldest) {
+        this.receivedMessageIdSet.delete(oldest);
+      }
+    }
+
+    return false;
   }
 
   /**

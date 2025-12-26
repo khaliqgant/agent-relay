@@ -331,6 +331,41 @@ describe('Router', () => {
       router.unregister(receiver);
       expect(router.pendingDeliveryCount).toBe(0);
     });
+
+    it('persists ACK status to storage when handler is available', () => {
+      const updateMessageStatus = vi.fn();
+      router = new Router({
+        storage: {
+          init: async () => {},
+          saveMessage: async () => {},
+          getMessages: async () => [],
+          updateMessageStatus,
+        },
+      });
+
+      const sender = new MockConnection('conn-1', 'agent1');
+      const receiver = new MockConnection('conn-2', 'agent2');
+      router.register(sender);
+      router.register(receiver);
+
+      const envelope = createSendEnvelope('agent1', 'agent2');
+      router.route(sender, envelope);
+      const deliverId = receiver.sentEnvelopes[0].id;
+
+      const ackEnvelope: Envelope<AckPayload> = {
+        v: 1,
+        type: 'ACK',
+        id: 'ack-storage',
+        ts: Date.now(),
+        payload: {
+          ack_id: deliverId,
+          seq: 1,
+        },
+      };
+
+      router.handleAck(receiver, ackEnvelope);
+      expect(updateMessageStatus).toHaveBeenCalledWith(deliverId, 'acked');
+    });
   });
 
   describe('Direct routing', () => {
@@ -760,6 +795,43 @@ describe('Router', () => {
 
       expect(sender.sendMock).not.toHaveBeenCalled();
       expect(recipient.sendMock).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('Replay on resume', () => {
+    it('replays pending messages to a resumed connection', async () => {
+      const pending: StoredMessage[] = [{
+        id: 'deliver-1',
+        ts: Date.now(),
+        from: 'agent1',
+        to: 'agent2',
+        topic: 'chat',
+        kind: 'message',
+        body: 'missed you',
+        status: 'unread',
+        is_urgent: false,
+        deliverySeq: 3,
+        deliverySessionId: 'session-resume',
+        sessionId: 'session-resume',
+      }];
+
+      const storage: StorageAdapter = {
+        init: async () => {},
+        saveMessage: async () => {},
+        getMessages: async () => [],
+        getPendingMessagesForSession: async () => pending,
+      };
+
+      router = new Router({ storage });
+      const receiver = new MockConnection('conn-2', 'agent2', 'session-resume');
+
+      await router.replayPending(receiver);
+
+      expect(receiver.sentEnvelopes).toHaveLength(1);
+      const deliver = receiver.sentEnvelopes[0] as DeliverEnvelope;
+      expect(deliver.id).toBe('deliver-1');
+      expect(deliver.delivery.seq).toBe(3);
+      expect(deliver.from).toBe('agent1');
     });
   });
 
