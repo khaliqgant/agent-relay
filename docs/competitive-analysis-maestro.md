@@ -1,9 +1,10 @@
 # Competitive Analysis: Agent Orchestration Tools vs agent-relay
 
-This document analyzes three agent orchestration projects:
+This document analyzes four projects in the AI agent tooling space:
 1. **pedramamini/Maestro** - Electron desktop app for agent orchestration
 2. **23blocks-OS/ai-maestro** - Web dashboard for distributed agent management
 3. **steipete/Clawdis** - Personal AI assistant with multi-surface delivery
+4. **winfunc/opcode** - Desktop GUI for Claude Code session management (19.5k+ stars)
 
 ---
 
@@ -990,19 +991,21 @@ Real-time collaborative visualization at `/canvas/`.
 
 # Part 4: Consolidated Recommendations
 
-## Four-Way Comparison
+## Five-Way Comparison
 
-| Feature | pedramamini/Maestro | 23blocks/ai-maestro | Clawdis | agent-relay |
-|---------|---------------------|---------------------|---------|-------------|
-| **Type** | Desktop (Electron) | Web (Next.js) | Assistant (Node) | CLI (Node.js) |
-| **Agent A2A** | No (moderator) | Yes (file+tmux) | No (single agent) | Yes (pattern) |
-| **Distributed** | No | Yes | Yes (node pairing) | No |
-| **Automation** | Playbooks | No | Cron jobs | No |
-| **Session Resume** | Yes | No | Yes | No |
-| **Multi-Surface** | No | No | Yes | No |
-| **Idempotency** | No | No | Yes | No |
-| **Setup** | High | Medium | Medium | Low |
-| **Latency** | ~100ms | ~500ms | ~100ms | <5ms |
+| Feature | pedramamini/Maestro | 23blocks/ai-maestro | Clawdis | opcode | agent-relay |
+|---------|---------------------|---------------------|---------|--------|-------------|
+| **Type** | Desktop (Electron) | Web (Next.js) | Assistant (Node) | Desktop (Tauri) | CLI (Node.js) |
+| **Agent A2A** | No (moderator) | Yes (file+tmux) | No (single agent) | No (single user) | Yes (pattern) |
+| **Distributed** | No | Yes | Yes (node pairing) | No | No |
+| **Automation** | Playbooks | No | Cron jobs | CC Agents | No |
+| **Session Resume** | Yes | No | Yes | Yes (full GUI) | No |
+| **Checkpoints** | No | No | No | Yes (timeline) | No |
+| **Multi-Surface** | No | No | Yes | No | No |
+| **Idempotency** | No | No | Yes | No | No |
+| **Usage Analytics** | No | No | No | Yes | No |
+| **Setup** | High | Medium | Medium | Medium | Low |
+| **Latency** | ~100ms | ~500ms | ~100ms | N/A (GUI) | <5ms |
 
 ---
 
@@ -1111,3 +1114,266 @@ const RELAY_PATTERN = /^->relay:(\S+)\s*(\[[\w:]+\]\s*)*(.+)$/;
 ### steipete/Clawdis
 - [Clawdis GitHub Repository](https://github.com/steipete/clawdis)
 - [Clawdis Documentation](https://clawdis.ai/)
+
+---
+
+---
+
+# Part 5: winfunc/opcode
+
+## Executive Summary
+
+| Aspect | opcode | agent-relay |
+|--------|--------|-------------|
+| **Type** | Desktop GUI (Tauri/Rust) | CLI Tool (Node.js) |
+| **Purpose** | Claude Code session manager | Agent-to-agent messaging |
+| **Architecture** | React + Rust + SQLite | PTY wrapper + Unix socket daemon |
+| **Agent Model** | CC Agents (background processes) | Wrapped CLI agents |
+| **Communication** | No A2A - single user interface | Direct peer-to-peer |
+| **Key Feature** | Timeline checkpoints | Real-time messaging |
+| **Complexity** | ~15,000+ lines Rust/TypeScript | ~7,000 lines TypeScript |
+
+**Note:** opcode is NOT an agent orchestration tool like the others. It's a **GUI for Claude Code** that manages sessions, creates custom agents, and tracks usage. However, it has interesting features worth analyzing.
+
+---
+
+## Architecture Deep Dive
+
+### opcode: Tauri Desktop App
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    opcode Desktop Application                        │
+│                         (Tauri 2 / Rust)                            │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │              React 18 Frontend (TypeScript + Vite)              │ │
+│  │  ├─ Project browser (~/.claude/projects/)                      │ │
+│  │  ├─ Session history viewer                                     │ │
+│  │  ├─ CC Agents manager                                          │ │
+│  │  ├─ Usage analytics dashboard                                  │ │
+│  │  ├─ MCP server registry                                        │ │
+│  │  └─ CLAUDE.md editor                                           │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                              │ Tauri IPC                            │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │              Rust Backend                                       │ │
+│  │  ├─ ProcessRegistry (agent/session tracking)                   │ │
+│  │  ├─ CheckpointManager (timeline snapshots)                     │ │
+│  │  ├─ ClaudeBinary (CLI discovery + invocation)                  │ │
+│  │  └─ SQLite storage (rusqlite)                                  │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+┌─────────────────────────┐     ┌─────────────────────────┐
+│   Claude Code CLI       │     │   CC Agent Process      │
+│   (interactive session) │     │   (background task)     │
+│   - Resume/new session  │     │   - Custom system prompt│
+│   - Project context     │     │   - Isolated execution  │
+│   - Full terminal       │     │   - Execution logs      │
+└─────────────────────────┘     └─────────────────────────┘
+```
+
+---
+
+## Key Features
+
+### 1. CC Agents System
+
+**Definition Format (.opcode.json):**
+```json
+{
+  "name": "Security Scanner",
+  "icon": "shield",
+  "model": "opus",
+  "system_prompt": "You are a security expert...",
+  "default_task": "Perform SAST analysis",
+  "version": "1.0.0"
+}
+```
+
+**Pre-built Agents:**
+| Agent | Model | Purpose |
+|-------|-------|---------|
+| Git Commit Bot | Sonnet | Generate conventional commit messages |
+| Security Scanner | Opus | SAST, OWASP Top 10, threat modeling |
+| Unit Tests Bot | Opus | Generate tests with 80%+ coverage |
+
+**Execution Model:**
+- Agents run in **isolated background processes**
+- No blocking of main UI
+- Execution logs with performance metrics
+- Per-agent permission controls (file access, network)
+
+### 2. Timeline & Checkpoints
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Session Timeline                              │
+│                                                                  │
+│  ┌───┐     ┌───┐     ┌───┐     ┌───┐     ┌───┐                 │
+│  │ 1 │────▶│ 2 │────▶│ 3 │────▶│ 4 │────▶│ 5 │  (main branch) │
+│  └───┘     └───┘     └─┬─┘     └───┘     └───┘                 │
+│                        │                                        │
+│                        └──▶┌───┐                               │
+│                            │3a │  (fork from checkpoint 3)     │
+│                            └───┘                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Checkpoint Manager Features:**
+- **File State Tracking** - Hash-based modification detection
+- **Auto-Checkpoint Modes:**
+  - Manual (user-triggered)
+  - PerPrompt (after each user message)
+  - PerToolUse (after each tool call)
+  - Smart (after destructive ops: write, edit, bash)
+- **Restoration** - Delete/restore files to match checkpoint state
+- **Fork Sessions** - Branch from any checkpoint with diff viewing
+
+### 3. Claude Binary Discovery
+
+**Priority-based discovery:**
+```
+1. Database (previously stored path)
+2. which/where command (highest priority)
+3. Homebrew
+4. System paths
+5. NVM directories
+6. Package managers (yarn, bun, npm)
+```
+
+**Version comparison:** Selects highest semantic version. Prepends NVM/Homebrew bin to PATH dynamically.
+
+### 4. Process Registry
+
+**ProcessType:**
+- `Agent(agent_id, agent_name)` - CC Agent runs
+- `ClaudeSession(session_id)` - Interactive sessions
+
+**Lifecycle Management:**
+```rust
+// Graceful shutdown sequence
+1. Direct kill signal
+2. System command fallback (taskkill/kill)
+3. 5-second timeout
+4. Force termination (SIGKILL)
+```
+
+**Thread Safety:** Arc<Mutex<>> for concurrent access across async Tokio operations.
+
+---
+
+## Comparison with agent-relay
+
+| Feature | opcode | agent-relay |
+|---------|--------|-------------|
+| **Primary Purpose** | Claude Code GUI | Agent messaging |
+| **Agent-to-Agent** | No | Yes |
+| **Session Management** | Full (browse, resume, fork) | None |
+| **Checkpoints/Timeline** | Yes (file snapshots) | No |
+| **Usage Analytics** | Yes (cost, tokens, models) | No |
+| **MCP Integration** | Yes (server registry) | No |
+| **Process Isolation** | Yes (per-agent) | Yes (per-agent) |
+| **Background Agents** | Yes (CC Agents) | Yes (tmux sessions) |
+| **Custom System Prompts** | Yes (.opcode.json) | No |
+| **Technology** | Rust + React | Node.js |
+
+---
+
+## Key Insights from opcode
+
+### What It Does That agent-relay Doesn't
+
+1. **Timeline/Checkpoint System**
+   - Snapshot session state at any point
+   - Fork from checkpoints
+   - Diff between versions
+   - File-level state restoration
+
+2. **CC Agents with Custom Prompts**
+   - Define reusable agent templates
+   - System prompt per agent type
+   - Model selection (Opus/Sonnet/Haiku)
+   - Import/export agent definitions
+
+3. **Usage Analytics**
+   - Token consumption tracking
+   - Cost monitoring per model/project
+   - Export for reporting
+
+4. **MCP Server Management**
+   - Central registry for Model Context Protocol servers
+   - Connection verification
+   - Import from Claude Desktop config
+
+5. **Session Discovery**
+   - Auto-detect projects in `~/.claude/projects/`
+   - Browse session history
+   - Resume any past session
+
+### What agent-relay Does That opcode Doesn't
+
+1. **Agent-to-Agent Messaging** - opcode has NO A2A communication
+2. **Multi-Agent Coordination** - opcode is single-user focused
+3. **Real-time Broadcasting** - No `->relay:*` equivalent
+4. **Universal Agent Support** - opcode is Claude-only
+
+---
+
+## Adoptable Ideas for agent-relay
+
+### From opcode
+
+| Priority | Feature | Why | Effort |
+|----------|---------|-----|--------|
+| P2 | Session checkpoints | Snapshot agent state, rollback if needed | High |
+| P2 | Custom agent templates | Reusable agent configs with system prompts | Medium |
+| P3 | Usage analytics | Track token usage across agents | Medium |
+| P3 | Agent definition files | `.agent-relay.json` for agent metadata | Low |
+
+### Proposed Agent Template Format
+
+```json
+{
+  "name": "CodeReviewer",
+  "cli": "claude",
+  "model": "sonnet",
+  "system_prompt": "You are a code reviewer focused on security...",
+  "default_task": "Review PR for security issues",
+  "permissions": {
+    "file_read": true,
+    "file_write": false,
+    "network": false
+  }
+}
+```
+
+**Usage:**
+```bash
+agent-relay -n CodeReviewer --template code-reviewer.json claude
+```
+
+---
+
+## Different Use Cases
+
+| Scenario | Best Tool |
+|----------|-----------|
+| **Managing Claude Code sessions** | opcode |
+| **Agent-to-agent coordination** | agent-relay |
+| **Custom background agents (single user)** | opcode |
+| **Multi-agent collaboration** | agent-relay |
+| **Usage analytics & cost tracking** | opcode |
+| **Real-time agent messaging** | agent-relay |
+
+**Key Insight:** opcode and agent-relay are **complementary**, not competitive. opcode manages Claude Code sessions for a single user; agent-relay enables multiple agents to communicate.
+
+---
+
+## Sources
+
+- [opcode GitHub Repository](https://github.com/winfunc/opcode)
+- [opcode Website](https://opcode.sh/)
+- [opcode CC Agents](https://github.com/winfunc/opcode/tree/main/cc_agents)
