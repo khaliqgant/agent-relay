@@ -87,6 +87,15 @@ describe('OutputParser', () => {
       expect(result.output).toBe('');
     });
 
+    it('captures plain multi-line inline command without punctuation or indentation', () => {
+      const input = '->relay:agent2 First line\nSecond line\nThird line\n';
+      const result = parser.parse(input);
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0].body).toBe('First line\nSecond line\nThird line');
+      expect(result.output).toBe('');
+    });
+
     it('does not swallow subsequent inline command after indented continuation', () => {
       const result = parser.parse('->relay:agent1 First line\n   Second line\n->relay:agent2 Next\n');
 
@@ -112,6 +121,17 @@ describe('OutputParser', () => {
       expect(result.commands).toHaveLength(1);
       expect(result.commands[0].body).toBe('Signing off. Progress report:\nSummary line one.\nSummary line two.');
       expect(result.output).toBe('\nNext output\n');
+    });
+
+    it('captures plain multi-line message without punctuation until blank line', () => {
+      // This is the key fix for agent-relay-6dl8: multi-line messages that don't
+      // end with continuation punctuation or have indentation should still be captured
+      const input = '->relay:Lead Hello world\nThis is the second line\nAnd third line\n\nRegular output\n';
+      const result = parser.parse(input);
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0].body).toBe('Hello world\nThis is the second line\nAnd third line');
+      expect(result.output).toBe('\nRegular output\n');
     });
 
     it('stops continuation at prompt-ish line', () => {
@@ -381,11 +401,14 @@ describe('OutputParser', () => {
     });
 
     it('mixes relay commands with regular output', () => {
-      const input = 'Output 1\n->relay:agent2 Message\nOutput 2\n';
+      // With multi-line continuation enabled, "Output 2" is captured as continuation
+      // until a blank line or other stop condition. Use a blank line to separate.
+      const input = 'Output 1\n->relay:agent2 Message\n\nOutput 2\n';
       const result = parser.parse(input);
 
       expect(result.commands).toHaveLength(1);
-      expect(result.output).toBe('Output 1\nOutput 2\n');
+      expect(result.commands[0].body).toBe('Message');
+      expect(result.output).toBe('Output 1\n\nOutput 2\n');
     });
 
     it('handles incomplete block at flush', () => {
@@ -450,6 +473,8 @@ describe('OutputParser', () => {
 
   describe('Complex scenarios', () => {
     it('handles multiple commands in one parse call', () => {
+      // With multi-line continuation, "Regular output" becomes part of command 1
+      // since it's followed by another relay command (which stops continuation).
       const input = `->relay:agent1 First
 Regular output
 ->relay:agent2 Second
@@ -460,9 +485,10 @@ More output
 
       expect(result.commands).toHaveLength(3);
       expect(result.commands[0].to).toBe('agent1');
+      // "Regular output" is captured as continuation of "First"
+      expect(result.commands[0].body).toBe('First\nRegular output');
       expect(result.commands[1].to).toBe('agent2');
       expect(result.commands[2].to).toBe('agent3');
-      expect(result.output).toContain('Regular output');
       expect(result.output).toContain('More output');
     });
 
@@ -493,10 +519,14 @@ More output
     });
 
     it('preserves order of commands and output', () => {
+      // With multi-line continuation, lines after relay commands are captured
+      // until a stop condition. Use blank lines to separate output from messages.
       const input = `Out1
 ->relay:agent1 Msg1
+
 Out2
 ->relay:agent2 Msg2
+
 Out3
 `;
       const result = parser.parse(input);
@@ -504,7 +534,9 @@ Out3
       const outputLines = result.output.split('\n').filter(l => l.trim());
       expect(outputLines).toEqual(['Out1', 'Out2', 'Out3']);
       expect(result.commands[0].to).toBe('agent1');
+      expect(result.commands[0].body).toBe('Msg1');
       expect(result.commands[1].to).toBe('agent2');
+      expect(result.commands[1].body).toBe('Msg2');
     });
   });
 

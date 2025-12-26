@@ -357,6 +357,9 @@ export class OutputParser {
       if (prevSuggestsContinuation) return true;
       // If we've already continued once, allow subsequent lines until a stop condition
       if (continuationCount > 0) return true;
+      // Allow plain non-empty lines as continuation so multi-line messages
+      // without indentation or trailing punctuation are captured fully.
+      if (stripped.trim() !== '') return true;
       return false;
     };
 
