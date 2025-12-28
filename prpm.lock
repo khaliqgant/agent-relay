@@ -81,7 +81,24 @@
       "sourceFormat": "claude",
       "sourceSubtype": "skill",
       "installedPath": ".claude/skills/implementing-command-palettes/SKILL.md"
+    },
+    "@agent-relay/agent-relay-snippet#agents.md": {
+      "version": "1.0.0",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fagent-relay-snippet/1.0.0.tar.gz",
+      "integrity": "sha256-e002400917acf3e15e5fbe649ccfd9c7a0752ba663b528ff42999a00c1b7b4b1",
+      "format": "agents.md",
+      "subtype": "snippet",
+      "sourceFormat": "generic",
+      "sourceSubtype": "snippet",
+      "installedPath": "AGENTS.md",
+      "snippetMetadata": {
+        "targetPath": "AGENTS.md",
+        "config": {
+          "target": "AGENTS.md",
+          "position": "append"
+        }
+      }
     }
   },
-  "generated": "2025-12-28T16:52:12.488Z"
+  "generated": "2025-12-28T23:37:18.122Z"
 }

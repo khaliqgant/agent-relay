@@ -35,7 +35,7 @@
       "snippet": {
         "target": "AGENTS.md",
         "position": "append",
-        "header": "My Custom Section"
+        "header": "Agent Relay"
       },
       "files": [
         "docs/agent-relay-snippet.md"

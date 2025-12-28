@@ -1,216 +1,41 @@
-# Agent Relay
+* Use the `bd` tool instead of markdown to coordinate all work and tasks.
 
-Real-time agent-to-agent messaging.
+# Using bv as an AI sidecar
 
-## Quick Start
+bv is a fast terminal UI for Beads projects (.beads/beads.jsonl). It renders lists/details and precomputes dependency metrics (PageRank, critical path, cycles, etc.) so you instantly see blockers and execution order. For agents, it's a graph sidecar: instead of parsing JSONL or risking hallucinated traversal, call the robot flags to get deterministic, dependency-aware outputs.
 
-```bash
-# Terminal 1: Start daemon
-agent-relay up
+*IMPORTANT: As an agent, you must ONLY use bv with the robot flags, otherwise you'll get stuck in the interactive TUI that's intended for human usage only!*
 
-# Terminal 2: Start agent
-agent-relay -n Alice claude
+- bv --robot-help — shows all AI-facing commands.
+- bv --robot-insights — JSON graph metrics (PageRank, betweenness, HITS, critical path, cycles) with top-N summaries for quick triage.
+- bv --robot-plan — JSON execution plan: parallel tracks, items per track, and unblocks lists showing what each item frees up.
+- bv --robot-priority — JSON priority recommendations with reasoning and confidence.
+- bv --robot-recipes — list recipes (default, actionable, blocked, etc.); apply via bv --recipe <name> to pre-filter/sort before other flags.
+- bv --robot-diff --diff-since <commit|date> — JSON diff of issue changes, new/closed items, and cycles introduced/resolved.
 
-# Terminal 3: Start another agent
-agent-relay -n Bob claude
-```
+Use these commands instead of hand-rolling graph logic; bv already computes the hard parts so agents can act safely and quickly.
 
-## CLI Commands
+## Integrating with Beads (dependency-aware task planning)
 
-| Command | Description |
-|---------|-------------|
-| `agent-relay <cmd>` | Wrap agent with messaging (e.g., `agent-relay claude`) |
-| `agent-relay -n Name <cmd>` | Wrap with specific agent name |
-| `agent-relay up` | Start daemon + dashboard |
-| `agent-relay down` | Stop daemon |
-| `agent-relay status` | Check if daemon is running |
-| `agent-relay read <id>` | Read full truncated message |
+Beads provides a lightweight, dependency-aware issue database and a CLI (`bd`) for selecting "ready work," setting priorities, and tracking status. Project: [steveyegge/beads](https://github.com/steveyegge/beads)
 
----
+Recommended conventions
+- **Single source of truth**: Use **Beads** for task status/priority/dependencies.
+- **Shared identifiers**: Use the Beads issue id (e.g., `bd-123`) as identifiers and prefix message subjects with `[bd-123]`.
 
-## For Agents: How to Communicate
+Typical flow (agents)
+1) **Pick ready work** (Beads)
+   - `bd ready --json` → choose one item (highest priority, no blockers)
+2) **Announce start**
+   - Update status: `bd update <id> --status=in_progress`
+3) **Work and update**
+   - Make progress on the task
+4) **Complete**
+   - `bd close <id> --reason "Completed"` (Beads is status authority)
 
-When wrapped with `agent-relay`, agents communicate by outputting `->relay:` patterns.
-
-### Send a Message
-
-Output this in your response (not in a bash command):
-
-```
-->relay:AgentName Your message here
-```
-
-### Multi-line Messages (Fenced Format)
-
-For messages with blank lines, code blocks, or complex formatting, use the fenced format:
-
-```
-->relay:AgentName <<<
-Here's my analysis:
-
-1. First point
-2. Second point
-
-The conclusion is clear.
->>>
-```
-
-The `<<<` opens the message block, `>>>` closes it. Everything between is captured exactly, including blank lines and code.
-
-### Broadcast to All
-
-```
-->relay:* This message goes to everyone
-```
-
-### Receiving Messages
-
-Messages appear in your terminal as:
-
-```
-Relay message from Alice [abc12345]: Hey Bob, can you review my changes?
-```
-
-The `[abc12345]` is the message ID for lookup if truncated.
-
-### Truncated Messages
-
-**IMPORTANT**: If a message appears cut off or incomplete, ALWAYS use the message ID to read the full content. Messages may be truncated even without showing `[TRUNCATED...]`.
-
-Long messages explicitly show:
-
-```
-Relay message from Alice [abc12345]: Start of long message... [TRUNCATED - run "agent-relay read abc12345..."]
-```
-
-But messages can also be cut off mid-sentence without the truncation marker:
-
-```
-Relay message from Alice [abc12345]: I've analyzed the issue. Here's what
-```
-
-**In either case**, run the read command with the message ID (the 8-character code in brackets):
-
-```bash
-agent-relay read abc12345
-```
-
-**Rule**: If a message seems incomplete or ends abruptly, read the full message before responding.
-
----
-
-## Communication Patterns
-
-### Status Updates
-
-```
-->relay:* STATUS: Starting work on auth module
-->relay:* DONE: Auth module complete
-```
-
-### Task Assignment
-
-```
-->relay:Developer TASK: Implement /api/register endpoint
-```
-
-### Questions
-
-```
-->relay:Architect QUESTION: Should we use JWT or sessions?
-```
-
-### Review Requests
-
-```
-->relay:Reviewer REVIEW: Please check src/auth/*.ts
-```
-
----
-
-## Spawning Agents
-
-Any agent can spawn worker agents to delegate tasks:
-
-### Spawn a Worker
-
-```
-->relay:spawn WorkerName cli "task description"
-```
-
-**Examples:**
-
-```
-->relay:spawn Dev1 claude "Implement the login endpoint"
-->relay:spawn Tester claude "Write unit tests for auth module"
-```
-
-### Release a Worker
-
-```
-->relay:release WorkerName
-```
-
-Workers run in separate tmux windows and can communicate back via `->relay:` patterns.
-
----
-
-## Pattern Rules
-
-The `->relay:` pattern must be at the start of a line:
-
-```
-->relay:Name message           # Works
-  ->relay:Name message         # Works (whitespace OK)
-> ->relay:Name message         # Works (prompt OK)
-- ->relay:Name message         # Works (list OK)
-Some text ->relay:Name msg     # Won't work
-```
-
-### Escape
-
-To output literal `->relay:` without sending:
-
-```
-\->relay: This won't be sent
-```
-
----
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Messages not sending | `agent-relay status` to check daemon |
-| Socket not found | `agent-relay up` to start daemon |
-| Truncated message | `agent-relay read <id>` for full content |
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-
+Pitfalls to avoid
+- Don't create or manage tasks in markdown; treat Beads as the single task queue.
+- Always include `bd-###` in commit messages for traceability.
 <!-- PRPM_MANIFEST_START -->
 
 <skills_system priority="1">
@@ -240,3 +65,67 @@ Usage notes:
 </skills_system>
 
 <!-- PRPM_MANIFEST_END -->
+
+<!-- prpm:snippet:start @agent-relay/agent-relay-snippet@1.0.0 -->
+# Agent Relay
+
+Real-time agent-to-agent messaging. Output `->relay:` patterns to communicate.
+
+## Sending Messages
+
+```
+->relay:AgentName Your message here
+->relay:* Broadcast to all agents
+```
+
+### Multi-line Messages
+
+For messages with blank lines or code:
+
+```
+->relay:AgentName <<<
+Your multi-line message here.
+
+Can include blank lines and code.
+>>>
+```
+
+**CRITICAL:** Always end with `>>>` on its own line!
+
+## Receiving Messages
+
+Messages appear as:
+```
+Relay message from Alice [abc123]: Message content here
+```
+
+If truncated, read full message:
+```bash
+agent-relay read abc123
+```
+
+## Spawning Agents
+
+Spawn workers to delegate tasks:
+
+```
+->relay:spawn WorkerName claude "task description"
+->relay:release WorkerName
+```
+
+## Common Patterns
+
+```
+->relay:* STATUS: Starting work on auth module
+->relay:* DONE: Auth module complete
+->relay:Developer TASK: Implement /api/register
+->relay:Reviewer REVIEW: Please check src/auth/*.ts
+->relay:Architect QUESTION: JWT or sessions?
+```
+
+## Rules
+
+- Pattern must be at line start (whitespace OK)
+- Escape with `\->relay:` to output literally
+- Check daemon status: `agent-relay status`
+<!-- prpm:snippet:end @agent-relay/agent-relay-snippet@1.0.0 -->

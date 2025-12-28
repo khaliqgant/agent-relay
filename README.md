@@ -151,9 +151,9 @@ See [docs/DESIGN_BRIDGE_STAFFING.md](docs/DESIGN_BRIDGE_STAFFING.md) for full de
 
 ## Enabling AI Agents
 
-To teach your AI agents how to use agent-relay, you have two options:
+To teach your AI agents how to use agent-relay, you should:
 
-### Option 1: Install the Skill (Recommended)
+### Install the Skill
 
 ```bash
 prpm install using-agent-relay
@@ -161,60 +161,23 @@ prpm install using-agent-relay
 
 This installs the `using-agent-relay` skill which provides agents with messaging patterns, coordination workflows, and troubleshooting guidance.
 
-### Option 2: Copy AGENTS.md
+### Update the AGENTS.md/CLAUDE.md file
 
-Copy [docs/AGENTS.md](docs/AGENTS.md) to your project's agent instructions file (e.g., `CLAUDE.md`, `AGENTS.md`, or similar). This gives agents the messaging syntax and patterns they need.
+Use prpm to install the AGENTS.md snippet or CLAUDE.md snippet
+```
+prpm install @agent-relay/agent-relay-snippet
+```
+
+Or if using CLAUDE.md
+```
+prpm install @agent-relay/agent-relay-snippet --location CLAUDE.md
+```
 
 ## Dashboard
 
 `agent-relay up` starts a web dashboard at http://localhost:3888
 
 ![Agent Relay Dashboard](dashboard.png)
-
-## REST API for Spawning Agents
-
-The dashboard includes a REST API for programmatically spawning and managing agents.
-
-### Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/spawn` | Spawn a new agent |
-| `GET` | `/api/spawned` | List spawned agents |
-| `DELETE` | `/api/spawned/:name` | Release an agent |
-
-### Examples
-
-```bash
-# Spawn an agent
-curl -X POST http://localhost:3888/api/spawn \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Dev1", "cli": "claude", "task": "Implement login"}'
-
-# List spawned agents
-curl http://localhost:3888/api/spawned
-
-# Release an agent
-curl -X DELETE http://localhost:3888/api/spawned/Dev1
-```
-
-### Response Format
-
-```json
-{
-  "success": true,
-  "name": "Dev1",
-  "window": "relay-workers:Dev1"
-}
-```
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Messages not sending | `agent-relay status` to check daemon |
-| Socket not found | `agent-relay up` to start daemon |
-| Truncated message | `agent-relay read <id>` |
 
 ## Development
 
