@@ -489,6 +489,10 @@ button:focus-visible {
   cursor: not-allowed;
 }
 
+.composer-send-icon {
+  display: none;
+}
+
 .composer-error {
   color: var(--color-error);
   font-size: var(--text-xs);
@@ -679,6 +683,46 @@ button:focus-visible {
 
 .spawn-btn:hover {
   background: #4a4a5e;
+}
+
+/* Metrics Link - Button style matching spawn button */
+.sidebar-footer .metrics-link,
+a.metrics-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin-bottom: 8px;
+  background: #3a3a4e;
+  border: 1px solid #4a4a5e;
+  border-radius: 6px;
+  color: #e8e8e8;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.sidebar-footer .metrics-link:hover,
+a.metrics-link:hover {
+  background: #4a4a5e;
+  border-color: #5a5a6e;
+  color: #fff;
+}
+
+.sidebar-footer .metrics-link:visited,
+a.metrics-link:visited {
+  color: #e8e8e8;
+}
+
+.metrics-link svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
 }
 
 /* =====================
@@ -2177,8 +2221,21 @@ button:focus-visible {
 
   .composer-send {
     order: 2;
-    flex: 1;
+    width: 44px;
     min-height: 44px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .composer-send-text {
+    display: none;
+  }
+
+  .composer-send-icon {
+    display: block;
   }
 
   /* Message List */
@@ -2470,7 +2527,7 @@ button:focus-visible {
   }
 
   .composer-send {
-    width: 100%;
+    width: 44px;
   }
 
   /* Message List */

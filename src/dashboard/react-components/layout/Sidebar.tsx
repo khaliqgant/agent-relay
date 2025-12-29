@@ -326,33 +326,5 @@ export const sidebarStyles = `
   background: #4a4a5e;
 }
 
-/* Metrics Link - Matches spawn button style */
-.metrics-link {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 16px;
-  margin-bottom: 8px;
-  background: #3a3a4e;
-  border: 1px solid #4a4a5e;
-  border-radius: 6px;
-  color: #e8e8e8;
-  font-size: 13px;
-  font-weight: 500;
-  text-decoration: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.metrics-link:hover {
-  background: #4a4a5e;
-  border-color: #5a5a6e;
-  color: #fff;
-}
-
-.metrics-link svg {
-  flex-shrink: 0;
-}
+/* Note: Metrics link styles are in globals.css */
 `;
