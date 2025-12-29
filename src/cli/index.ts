@@ -16,7 +16,7 @@ import { config as dotenvConfig } from 'dotenv';
 import { Daemon } from '../daemon/server.js';
 import { RelayClient } from '../wrapper/client.js';
 import { generateAgentName } from '../utils/name-generator.js';
-import { getTmuxPath, isTmuxAvailable } from '../utils/tmux-resolver.js';
+import { getTmuxPath } from '../utils/tmux-resolver.js';
 import { readWorkersMetadata, getWorkerLogsDir } from '../bridge/spawner.js';
 import { checkForUpdatesInBackground, checkForUpdates } from '../utils/update-checker.js';
 import fs from 'node:fs';
@@ -157,7 +157,8 @@ interface TeamConfig {
 }
 
 // Load teams.json from project root or .agent-relay/
-function loadTeamConfig(projectRoot: string): TeamConfig | null {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _loadTeamConfig(projectRoot: string): TeamConfig | null {
   const locations = [
     path.join(projectRoot, 'teams.json'),
     path.join(projectRoot, '.agent-relay', 'teams.json'),
@@ -177,7 +178,8 @@ function loadTeamConfig(projectRoot: string): TeamConfig | null {
 }
 
 // Spawn agents from team config using tmux
-async function spawnTeamAgents(
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _spawnTeamAgents(
   agents: TeamAgent[],
   socketPath: string,
   dataDir: string,
@@ -261,7 +263,7 @@ program
   .option('--no-dashboard', 'Disable web dashboard')
   .option('--port <port>', 'Dashboard port', DEFAULT_DASHBOARD_PORT)
   .action(async (options) => {
-    const { getProjectPaths, ensureProjectDir } = await import('../utils/project-namespace.js');
+    const { ensureProjectDir } = await import('../utils/project-namespace.js');
 
     const paths = ensureProjectDir();
     const socketPath = paths.socketPath;
@@ -811,7 +813,7 @@ program
 
     try {
       await client.connect();
-    } catch (err) {
+    } catch (_err) {
       console.error('Failed to connect to all projects');
       writeBridgeState(); // Write final state before exit
       process.exit(1);

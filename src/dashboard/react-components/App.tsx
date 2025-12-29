@@ -259,6 +259,10 @@ export function App({ wsUrl }: AppProps) {
         agents={agents}
         onAgentSelect={handleAgentSelect}
         onSpawnClick={handleSpawnClick}
+        onGeneralClick={() => {
+          selectAgent(null);
+          setCurrentChannel('general');
+        }}
       />
 
       {/* Spawn Modal */}

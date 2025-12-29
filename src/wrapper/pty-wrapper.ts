@@ -12,7 +12,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { RelayClient } from './client.js';
 import type { ParsedCommand } from './parser.js';
-import type { SendPayload, SendMeta } from '../protocol/types.js';
+import type { SendPayload } from '../protocol/types.js';
 
 /** Maximum lines to keep in output buffer */
 const MAX_BUFFER_LINES = 10000;
@@ -341,7 +341,7 @@ export class PtyWrapper extends EventEmitter {
           const name = parts[0];
           const cli = parts[1];
           // Task is everything after cli, potentially in quotes
-          let taskPart = parts.slice(2).join(' ');
+          const taskPart = parts.slice(2).join(' ');
           // Remove surrounding quotes if present
           const quoteMatch = taskPart.match(/^["'](.*)["']$/);
           const task = quoteMatch ? quoteMatch[1] : taskPart;

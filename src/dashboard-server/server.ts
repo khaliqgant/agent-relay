@@ -12,7 +12,7 @@ import { computeNeedsAttention } from './needs-attention.js';
 import { computeSystemMetrics, formatPrometheusMetrics } from './metrics.js';
 import { MultiProjectClient } from '../bridge/multi-project-client.js';
 import { AgentSpawner } from '../bridge/spawner.js';
-import type { ProjectConfig, SpawnRequest, WorkerInfo } from '../bridge/types.js';
+import type { ProjectConfig, SpawnRequest } from '../bridge/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -584,7 +584,7 @@ export async function startDashboard(
             agent.processingStartedAt = (state as { startedAt: number }).startedAt;
           }
         }
-      } catch (err) {
+      } catch (_err) {
         // Ignore errors reading processing state - it's optional
       }
     }
