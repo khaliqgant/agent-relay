@@ -23,6 +23,7 @@ export interface AgentCardProps {
   compact?: boolean;
   onClick?: (agent: Agent) => void;
   onMessageClick?: (agent: Agent) => void;
+  onReleaseClick?: (agent: Agent) => void;
 }
 
 export function AgentCard({
@@ -32,6 +33,7 @@ export function AgentCard({
   compact = false,
   onClick,
   onMessageClick,
+  onReleaseClick,
 }: AgentCardProps) {
   const colors = getAgentColor(agent.name);
   const initials = getAgentInitials(agent.name);
@@ -45,6 +47,11 @@ export function AgentCard({
   const handleMessageClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onMessageClick?.(agent);
+  };
+
+  const handleReleaseClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onReleaseClick?.(agent);
   };
 
   if (compact) {
@@ -126,12 +133,20 @@ export function AgentCard({
           {agent.messageCount !== undefined && agent.messageCount > 0 && (
             <span className="message-count">{agent.messageCount} msgs</span>
           )}
+          {agent.isSpawned && <span className="agent-spawned-badge">spawned</span>}
         </div>
-        {onMessageClick && (
-          <button className="message-btn" onClick={handleMessageClick} title="Send message">
-            <MessageIcon />
-          </button>
-        )}
+        <div className="agent-actions">
+          {agent.isSpawned && onReleaseClick && (
+            <button className="release-btn" onClick={handleReleaseClick} title="Release agent">
+              <ReleaseIcon />
+            </button>
+          )}
+          {onMessageClick && (
+            <button className="message-btn" onClick={handleMessageClick} title="Send message">
+              <MessageIcon />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -153,6 +168,28 @@ function MessageIcon() {
       strokeLinejoin="round"
     >
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+/**
+ * Release/kill icon SVG (X in circle)
+ */
+function ReleaseIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+      <line x1="9" y1="9" x2="15" y2="15" />
     </svg>
   );
 }
@@ -320,6 +357,38 @@ export const agentCardStyles = `
 
 .message-btn:hover {
   opacity: 0.9;
+}
+
+.agent-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.release-btn {
+  background: var(--color-error, #e01e5a);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s;
+}
+
+.release-btn:hover {
+  opacity: 0.9;
+}
+
+.agent-spawned-badge {
+  background: var(--color-accent-light, rgba(18, 100, 163, 0.15));
+  color: var(--color-accent, #1264a3);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 500;
 }
 
 /* Compact variant */

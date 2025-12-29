@@ -65,7 +65,7 @@ export function CommandPalette({
         description: 'Launch a new agent instance',
         category: 'actions',
         icon: <PlusIcon />,
-        shortcut: '⌘N',
+        shortcut: '⌘⇧S',
         action: () => {
           onSpawnClick();
           onClose();
