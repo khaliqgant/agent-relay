@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execSync } from 'node:child_process';
 import type net from 'node:net';
 
 /**
@@ -145,7 +146,7 @@ export function getPeerCredentials(socket: net.Socket): PeerCredentials | null {
 /**
  * Get peer credentials on Linux using /proc filesystem
  */
-function getPeerCredentialsLinux(fd: number): PeerCredentials | null {
+function getPeerCredentialsLinux(_fd: number): PeerCredentials | null {
   try {
     // We need to use getsockopt(SO_PEERCRED) which requires native bindings
     // For now, fall back to using the process's own UID (daemon owner)
@@ -154,8 +155,6 @@ function getPeerCredentialsLinux(fd: number): PeerCredentials | null {
 
     // Attempt to use native SO_PEERCRED via optional dependency
     try {
-      // Dynamic import to avoid hard dependency
-      const { execSync } = require('child_process');
 
       // Use ss command to get socket peer info (requires net-tools)
       // This is a workaround - proper implementation needs native bindings
