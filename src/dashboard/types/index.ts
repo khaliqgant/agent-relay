@@ -176,6 +176,7 @@ export interface SpawnAgentRequest {
   name: string;
   cli?: string;
   task?: string;
+  team?: string;
 }
 
 export interface SpawnAgentResponse {
