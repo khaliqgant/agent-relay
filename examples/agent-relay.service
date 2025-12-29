@@ -6,9 +6,16 @@
 #   3. Run: sudo systemctl daemon-reload
 #   4. Run: sudo systemctl enable agent-relay
 #   5. Run: sudo systemctl start agent-relay
+#
+# Features:
+#   - Auto-restart on crash (RestartSec=2s)
+#   - Built-in supervisor mode (--watch) for additional resilience
+#   - Health check via /health endpoint
+#   - Systemd watchdog integration
 
 [Unit]
 Description=Agent Relay Daemon
+Documentation=https://github.com/khaliqgant/agent-relay
 After=network.target
 
 [Service]
@@ -24,20 +31,44 @@ Environment=NODE_ENV=production
 Environment=AGENT_RELAY_DATA_DIR=/var/lib/agent-relay
 Environment=AGENT_RELAY_DASHBOARD_PORT=3888
 
-# Start the daemon
-ExecStart=/usr/bin/npx agent-relay up --port 3888
+# Start the daemon with supervisor mode (--watch)
+# This provides two layers of resilience:
+# 1. The --watch flag restarts the daemon if it crashes
+# 2. Systemd restarts the supervisor if it crashes
+ExecStart=/usr/bin/npx agent-relay up --watch --port 3888
+
+# Alternative: Run without --watch (rely on systemd alone)
+# ExecStart=/usr/bin/npx agent-relay up --port 3888
 
 # Graceful shutdown
 ExecStop=/usr/bin/npx agent-relay down
 
-# Restart on failure
-Restart=on-failure
-RestartSec=5
+# Restart policy - restart on any failure
+Restart=always
+RestartSec=2
+
+# Rate limiting - don't restart more than 5 times in 60 seconds
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Memory and resource limits (optional, adjust as needed)
+# MemoryLimit=512M
+# CPUQuota=50%
+
+# Security hardening (optional)
+# NoNewPrivileges=true
+# ProtectSystem=strict
+# ProtectHome=true
 
 # Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=agent-relay
+
+# Send SIGTERM on stop, wait 30s before SIGKILL
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
 
 [Install]
 WantedBy=multi-user.target

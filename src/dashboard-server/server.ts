@@ -829,6 +829,65 @@ export async function startDashboard(
     });
   });
 
+  // ===== Health Check API =====
+  /**
+   * GET /health - Health check endpoint for monitoring
+   * Returns 200 if the daemon is healthy
+   */
+  app.get('/health', async (req, res) => {
+    const uptime = process.uptime();
+    const memUsage = process.memoryUsage();
+    const socketExists = fs.existsSync(socketPath);
+
+    // Check relay client connectivity
+    const relayConnected = relayClient?.state === 'READY';
+
+    // If socket doesn't exist, daemon may not be running properly
+    if (!socketExists) {
+      return res.status(503).json({
+        status: 'unhealthy',
+        reason: 'Relay socket not found',
+        uptime,
+        memoryMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+      });
+    }
+
+    res.json({
+      status: 'healthy',
+      uptime,
+      memoryMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+      relayConnected,
+      websocketClients: wss.clients.size,
+    });
+  });
+
+  /**
+   * GET /api/health - Alternative health endpoint (same as /health)
+   */
+  app.get('/api/health', async (req, res) => {
+    const uptime = process.uptime();
+    const memUsage = process.memoryUsage();
+    const socketExists = fs.existsSync(socketPath);
+    const relayConnected = relayClient?.state === 'READY';
+
+    if (!socketExists) {
+      return res.status(503).json({
+        status: 'unhealthy',
+        reason: 'Relay socket not found',
+        uptime,
+        memoryMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+      });
+    }
+
+    res.json({
+      status: 'healthy',
+      uptime,
+      memoryMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+      relayConnected,
+      websocketClients: wss.clients.size,
+    });
+  });
+
   // ===== Metrics API =====
 
   /**

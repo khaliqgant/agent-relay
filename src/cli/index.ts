@@ -151,7 +151,71 @@ program
   .option('--port <port>', 'Dashboard port', DEFAULT_DASHBOARD_PORT)
   .option('--spawn', 'Force spawn all agents from teams.json')
   .option('--no-spawn', 'Do not auto-spawn agents (just start daemon)')
+  .option('--watch', 'Auto-restart daemon on crash (supervisor mode)')
+  .option('--max-restarts <n>', 'Max restarts in 60s before giving up (default: 5)', '5')
   .action(async (options) => {
+    // If --watch is specified, run in supervisor mode
+    if (options.watch) {
+      const { spawn } = await import('node:child_process');
+      const maxRestarts = parseInt(options.maxRestarts, 10) || 5;
+      const restartWindow = 60_000; // 60 seconds
+      const restartTimes: number[] = [];
+      let child: ReturnType<typeof spawn> | null = null;
+      let shuttingDown = false;
+
+      const startDaemon = (): void => {
+        // Build args without --watch to prevent infinite recursion
+        const args = ['up'];
+        if (options.dashboard === false) args.push('--no-dashboard');
+        if (options.port) args.push('--port', options.port);
+        if (options.spawn === true) args.push('--spawn');
+        if (options.spawn === false) args.push('--no-spawn');
+
+        console.log(`[supervisor] Starting daemon...`);
+        child = spawn(process.execPath, [process.argv[1], ...args], {
+          stdio: 'inherit',
+          env: { ...process.env, AGENT_RELAY_SUPERVISED: '1' },
+        });
+
+        child.on('exit', (code, signal) => {
+          if (shuttingDown) {
+            process.exit(0);
+            return;
+          }
+
+          const now = Date.now();
+          restartTimes.push(now);
+
+          // Remove restarts outside the window
+          while (restartTimes.length > 0 && restartTimes[0] < now - restartWindow) {
+            restartTimes.shift();
+          }
+
+          if (restartTimes.length >= maxRestarts) {
+            console.error(`[supervisor] Daemon crashed ${maxRestarts} times in ${restartWindow / 1000}s, giving up`);
+            process.exit(1);
+          }
+
+          const exitReason = signal ? `signal ${signal}` : `code ${code}`;
+          console.log(`[supervisor] Daemon exited (${exitReason}), restarting in 2s... (${restartTimes.length}/${maxRestarts} restarts)`);
+          setTimeout(startDaemon, 2000);
+        });
+      };
+
+      process.on('SIGINT', () => {
+        console.log('\n[supervisor] Stopping...');
+        shuttingDown = true;
+        if (child) child.kill('SIGINT');
+      });
+
+      process.on('SIGTERM', () => {
+        shuttingDown = true;
+        if (child) child.kill('SIGTERM');
+      });
+
+      startDaemon();
+      return;
+    }
     const { ensureProjectDir } = await import('../utils/project-namespace.js');
     const { loadTeamsConfig } = await import('../bridge/teams-config.js');
     const { AgentSpawner } = await import('../bridge/spawner.js');
@@ -179,6 +243,35 @@ program
 
     // Create spawner for auto-spawn (will be initialized after dashboard starts)
     let spawner: InstanceType<typeof AgentSpawner> | null = null;
+
+    // Track if we're already shutting down to prevent double-cleanup
+    let isShuttingDown = false;
+
+    const gracefulShutdown = async (reason: string): Promise<void> => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
+      console.log(`\n[daemon] ${reason}, shutting down...`);
+      try {
+        if (spawner) await spawner.releaseAll();
+        await daemon.stop();
+      } catch (err) {
+        console.error('[daemon] Error during shutdown:', err);
+      }
+      process.exit(1);
+    };
+
+    // Handle uncaught exceptions - log and exit (supervisor will restart)
+    process.on('uncaughtException', (err) => {
+      console.error('[daemon] Uncaught exception:', err);
+      gracefulShutdown('Uncaught exception');
+    });
+
+    // Handle unhandled promise rejections
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('[daemon] Unhandled rejection at:', promise, 'reason:', reason);
+      // Don't exit on unhandled rejections - just log them
+      // Most are recoverable (e.g., failed message delivery)
+    });
 
     process.on('SIGINT', async () => {
       console.log('\nStopping...');
