@@ -77,15 +77,17 @@ Real-time agent-to-agent messaging. Output `->relay:` patterns to communicate.
 
 ```
 ->relay:AgentName <<<
-Your message here.>>>
+Your message here.
+>>>
 ```
 
 ```
 ->relay:* <<<
-Broadcast to all agents.>>>
+Broadcast to all agents.
+>>>
 ```
 
-**CRITICAL:** Always end with `>>>` at the end of the last line of content!
+**CRITICAL:** Always close multi-line messages with `>>>` on its own line!
 
 ## Receiving Messages
 
@@ -112,19 +114,24 @@ Spawn workers to delegate tasks:
 
 ```
 ->relay:* <<<
-STATUS: Starting work on auth module>>>
+STATUS: Starting work on auth module
+>>>
 
 ->relay:* <<<
-DONE: Auth module complete>>>
+DONE: Auth module complete
+>>>
 
 ->relay:Developer <<<
-TASK: Implement /api/register>>>
+TASK: Implement /api/register
+>>>
 
 ->relay:Reviewer <<<
-REVIEW: Please check src/auth/*.ts>>>
+REVIEW: Please check src/auth/*.ts
+>>>
 
 ->relay:Architect <<<
-QUESTION: JWT or sessions?>>>
+QUESTION: JWT or sessions?
+>>>
 ```
 
 ## Rules

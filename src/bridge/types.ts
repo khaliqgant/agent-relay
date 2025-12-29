@@ -41,6 +41,10 @@ export interface SpawnRequest {
   task: string;
   /** Optional team name to organize agents under */
   team?: string;
+  /** Primary agent to shadow (if this agent is a shadow) */
+  shadowOf?: string;
+  /** When the shadow should speak (default: ['EXPLICIT_ASK']) */
+  shadowSpeakOn?: Array<'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES'>;
 }
 
 export interface SpawnResult {

@@ -21,7 +21,7 @@ export interface AgentCardProps {
   isSelected?: boolean;
   showBreadcrumb?: boolean;
   compact?: boolean;
-  displayNameOverride?: string; // Override the displayed name (e.g., strip team prefix)
+  displayNameOverride?: string;
   onClick?: (agent: Agent) => void;
   onMessageClick?: (agent: Agent) => void;
   onReleaseClick?: (agent: Agent) => void;
@@ -59,27 +59,32 @@ export function AgentCard({
   if (compact) {
     return (
       <div
-        className={`agent-card-compact ${isSelected ? 'selected' : ''}`}
+        className={`
+          flex items-center gap-2 py-2 px-3 rounded-md cursor-pointer transition-colors duration-200
+          hover:bg-[rgba(74,158,255,0.08)]
+          ${isSelected ? 'bg-[rgba(74,158,255,0.12)] border-l-[3px]' : ''}
+        `}
         onClick={handleClick}
         style={{
-          '--agent-primary': colors.primary,
-          '--agent-light': colors.light,
-        } as React.CSSProperties}
+          borderLeftColor: isSelected ? colors.primary : 'transparent',
+        }}
       >
-        <div className="agent-avatar-small" style={{ backgroundColor: colors.primary }}>
+        <div
+          className="w-6 h-6 rounded flex items-center justify-center font-semibold text-[10px]"
+          style={{ backgroundColor: colors.primary }}
+        >
           <span style={{ color: colors.text }}>{initials}</span>
         </div>
-        <div className="agent-compact-info">
-          <span className="agent-name">{displayName}</span>
-          {/* Hide breadcrumb when displayNameOverride is set (e.g., inside team groups) */}
+        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+          <span className="text-sm font-semibold text-text-primary truncate">{displayName}</span>
           {!displayNameOverride && (
-            <span className="agent-breadcrumb-compact">{getAgentBreadcrumb(agent.name)}</span>
+            <span className="text-[10px] text-text-muted truncate">{getAgentBreadcrumb(agent.name)}</span>
           )}
         </div>
-        <div className="agent-compact-actions">
+        <div className="flex items-center gap-1.5 shrink-0">
           {agent.isSpawned && onReleaseClick && (
             <button
-              className="release-btn-compact"
+              className="relative bg-transparent border border-transparent text-text-muted p-1 cursor-pointer flex items-center justify-center rounded transition-all duration-200 opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:bg-gradient-to-b hover:from-error-light hover:to-[rgba(180,40,40,0.2)] hover:border-error/50 hover:text-error hover:shadow-[0_0_10px_rgba(255,68,68,0.3)] hover:scale-110"
               onClick={handleReleaseClick}
               title="Kill agent"
             >
@@ -89,9 +94,9 @@ export function AgentCard({
           {agent.isProcessing ? (
             <ThinkingDot isProcessing={true} />
           ) : (
-            <div className="agent-status-dot" style={{ backgroundColor: statusColor }} />
+            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: statusColor }} />
           )}
-          {agent.needsAttention && <div className="attention-badge" />}
+          {agent.needsAttention && <div className="w-2 h-2 rounded-full bg-red-500" />}
         </div>
       </div>
     );
@@ -99,69 +104,89 @@ export function AgentCard({
 
   return (
     <div
-      className={`agent-card ${isSelected ? 'selected' : ''}`}
+      className={`
+        rounded-lg p-3 cursor-pointer transition-all duration-200
+        hover:shadow-md hover:-translate-y-px
+        ${isSelected ? 'border-2 shadow-[0_0_0_2px_rgba(74,158,255,0.15)]' : 'border'}
+      `}
       onClick={handleClick}
       style={{
-        '--agent-primary': colors.primary,
-        '--agent-light': colors.light,
-        '--agent-dark': colors.dark,
-      } as React.CSSProperties}
+        backgroundColor: colors.light,
+        borderColor: colors.primary,
+      }}
     >
-      <div className="agent-card-header">
-        <div className="agent-avatar" style={{ backgroundColor: colors.primary }}>
+      <div className="flex items-center gap-3">
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center font-semibold text-sm relative"
+          style={{ backgroundColor: colors.primary }}
+        >
           <span style={{ color: colors.text }}>{initials}</span>
-          <div className="status-indicator" style={{ backgroundColor: statusColor }} />
+          <div
+            className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
+            style={{ backgroundColor: statusColor }}
+          />
         </div>
-        <div className="agent-info">
-          <div className="agent-name-row">
-            <span className="agent-display-name">{displayName}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm text-text-primary">{displayName}</span>
             {agent.needsAttention && (
-              <span className="attention-badge" title="Needs attention">!</span>
+              <span className="bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center" title="Needs attention">!</span>
             )}
           </div>
           {showBreadcrumb ? (
-            <span className="agent-breadcrumb">{getAgentBreadcrumb(agent.name)}</span>
+            <span className="text-xs text-text-muted truncate block">{getAgentBreadcrumb(agent.name)}</span>
           ) : (
-            <span className="agent-full-name">{agent.name}</span>
+            <span className="text-xs text-text-muted truncate block">{agent.name}</span>
           )}
         </div>
       </div>
 
       {agent.isProcessing && (
-        <div className="agent-thinking">
+        <div className="mt-2 p-2 bg-indigo-50 rounded flex items-center gap-2 border border-indigo-200">
           <ThinkingIndicator
             isProcessing={true}
             processingStartedAt={agent.processingStartedAt}
             size="medium"
             showElapsed={true}
           />
-          <span className="thinking-label">Thinking...</span>
+          <span className="text-xs text-indigo-500 font-medium">Thinking...</span>
         </div>
       )}
 
       {agent.currentTask && !agent.isProcessing && (
-        <div className="agent-task">
-          <span className="task-label">Working on:</span>
-          <span className="task-text">{agent.currentTask}</span>
+        <div className="mt-2 p-2 bg-bg-hover rounded text-xs">
+          <span className="text-text-muted mr-1">Working on:</span>
+          <span className="text-text-primary">{agent.currentTask}</span>
         </div>
       )}
 
-      <div className="agent-card-footer">
-        <div className="agent-meta">
-          {agent.cli && <span className="agent-cli">{agent.cli}</span>}
+      <div className="mt-3 flex justify-between items-center">
+        <div className="flex gap-2 text-xs text-text-muted">
+          {agent.cli && <span className="bg-bg-hover py-0.5 px-1.5 rounded">{agent.cli}</span>}
           {agent.messageCount !== undefined && agent.messageCount > 0 && (
-            <span className="message-count">{agent.messageCount} msgs</span>
+            <span style={{ color: colors.primary }}>{agent.messageCount} msgs</span>
           )}
-          {agent.isSpawned && <span className="agent-spawned-badge">spawned</span>}
+          {agent.isSpawned && (
+            <span className="bg-accent-light text-accent text-[10px] py-0.5 px-1.5 rounded uppercase font-medium">spawned</span>
+          )}
         </div>
-        <div className="agent-actions">
+        <div className="flex gap-1.5">
           {agent.isSpawned && onReleaseClick && (
-            <button className="release-btn" onClick={handleReleaseClick} title="Release agent">
+            <button
+              className="relative bg-gradient-to-b from-[#3a1a1a] to-[#2a0f0f] text-[#ff6b6b] border border-[#4a2020] rounded-md py-1.5 px-2.5 cursor-pointer flex items-center justify-center gap-1 transition-all duration-200 shadow-[inset_0_1px_0_rgba(255,107,107,0.1),0_2px_4px_rgba(0,0,0,0.3)] overflow-hidden hover:bg-gradient-to-b hover:from-[#4a2020] hover:to-[#3a1515] hover:border-[#ff4444] hover:text-[#ff4444] hover:shadow-[inset_0_1px_0_rgba(255,68,68,0.2),0_0_12px_rgba(255,68,68,0.4),0_2px_8px_rgba(0,0,0,0.4)] hover:scale-105 active:scale-[0.98]"
+              onClick={handleReleaseClick}
+              title="Release agent"
+            >
               <ReleaseIcon />
             </button>
           )}
           {onMessageClick && (
-            <button className="message-btn" onClick={handleMessageClick} title="Send message">
+            <button
+              className="text-white border-none rounded py-1 px-2 cursor-pointer flex items-center justify-center transition-opacity duration-200 hover:opacity-90"
+              style={{ backgroundColor: colors.primary }}
+              onClick={handleMessageClick}
+              title="Send message"
+            >
               <MessageIcon />
             </button>
           )}
@@ -171,9 +196,6 @@ export function AgentCard({
   );
 }
 
-/**
- * Simple message icon SVG
- */
 function MessageIcon() {
   return (
     <svg
@@ -191,9 +213,6 @@ function MessageIcon() {
   );
 }
 
-/**
- * Release/kill icon SVG - Power/terminate symbol
- */
 function ReleaseIcon() {
   return (
     <svg
@@ -203,7 +222,6 @@ function ReleaseIcon() {
       fill="none"
       className="release-icon"
     >
-      {/* Outer ring with gap at top */}
       <path
         d="M12 22c5.523 0 10-4.477 10-10a9.96 9.96 0 0 0-3-7.141"
         stroke="currentColor"
@@ -216,7 +234,6 @@ function ReleaseIcon() {
         strokeWidth="2"
         strokeLinecap="round"
       />
-      {/* Vertical line (power symbol stem) */}
       <line
         x1="12"
         y1="2"
@@ -229,372 +246,3 @@ function ReleaseIcon() {
     </svg>
   );
 }
-
-/**
- * CSS styles for the component (can be moved to a CSS file)
- */
-export const agentCardStyles = `
-.agent-card {
-  background: var(--agent-light);
-  border: 1px solid var(--agent-primary);
-  border-radius: 8px;
-  padding: 12px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.agent-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
-}
-
-.agent-card.selected {
-  border-width: 2px;
-  box-shadow: 0 0 0 2px var(--agent-light);
-}
-
-.agent-card-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.agent-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 14px;
-  position: relative;
-}
-
-.agent-avatar-small {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 10px;
-}
-
-.status-indicator {
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid white;
-}
-
-.agent-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.agent-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.agent-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.agent-display-name {
-  font-weight: 600;
-  font-size: 14px;
-  color: #1a1a1a;
-}
-
-.agent-full-name,
-.agent-breadcrumb {
-  font-size: 12px;
-  color: #666;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.attention-badge {
-  background: #ef4444;
-  color: white;
-  font-size: 10px;
-  font-weight: 700;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.agent-task {
-  margin-top: 8px;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.03);
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.task-label {
-  color: #666;
-  margin-right: 4px;
-}
-
-.task-text {
-  color: #1a1a1a;
-}
-
-.agent-card-footer {
-  margin-top: 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.agent-meta {
-  display: flex;
-  gap: 8px;
-  font-size: 11px;
-  color: #888;
-}
-
-.agent-cli {
-  background: #f0f0f0;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.message-count {
-  color: var(--agent-primary);
-}
-
-.message-btn {
-  background: var(--agent-primary);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.2s;
-}
-
-.message-btn:hover {
-  opacity: 0.9;
-}
-
-.agent-actions {
-  display: flex;
-  gap: 6px;
-}
-
-/* Kill Agent Button - Industrial control panel aesthetic */
-.release-btn {
-  position: relative;
-  background: linear-gradient(180deg, #3a1a1a 0%, #2a0f0f 100%);
-  color: #ff6b6b;
-  border: 1px solid #4a2020;
-  border-radius: 6px;
-  padding: 6px 10px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  transition: all 0.2s ease;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 107, 107, 0.1),
-    0 2px 4px rgba(0, 0, 0, 0.3);
-  overflow: hidden;
-}
-
-/* Subtle scanline texture */
-.release-btn::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 0, 0, 0.1) 2px,
-    rgba(0, 0, 0, 0.1) 4px
-  );
-  pointer-events: none;
-  opacity: 0.5;
-}
-
-/* Warning glow on hover */
-.release-btn:hover {
-  background: linear-gradient(180deg, #4a2020 0%, #3a1515 100%);
-  border-color: #ff4444;
-  color: #ff4444;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 68, 68, 0.2),
-    0 0 12px rgba(255, 68, 68, 0.4),
-    0 2px 8px rgba(0, 0, 0, 0.4);
-  transform: scale(1.05);
-}
-
-/* Icon animation on hover */
-.release-btn:hover .release-icon {
-  animation: killPulse 0.6s ease-in-out infinite;
-}
-
-@keyframes killPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-/* Active/pressed state */
-.release-btn:active {
-  transform: scale(0.98);
-  box-shadow:
-    inset 0 2px 4px rgba(0, 0, 0, 0.4),
-    0 0 8px rgba(255, 68, 68, 0.3);
-}
-
-.agent-spawned-badge {
-  background: var(--color-accent-light, rgba(18, 100, 163, 0.15));
-  color: var(--color-accent, #1264a3);
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  font-weight: 500;
-}
-
-/* Compact variant */
-.agent-card-compact {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.agent-card-compact:hover {
-  background: rgba(74, 158, 255, 0.08);
-}
-
-.agent-card-compact.selected {
-  background: rgba(74, 158, 255, 0.12);
-  border-left: 3px solid var(--agent-primary);
-}
-
-.agent-compact-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.agent-card-compact .agent-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #e8e8e8;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.agent-breadcrumb-compact {
-  font-size: 10px;
-  color: #888;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.agent-compact-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-/* Compact Kill Button - Minimal but distinctive */
-.release-btn-compact {
-  position: relative;
-  background: transparent;
-  border: 1px solid transparent;
-  color: #666;
-  padding: 5px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 5px;
-  transition: all 0.25s ease;
-  opacity: 0;
-}
-
-.agent-card-compact:hover .release-btn-compact {
-  opacity: 0.7;
-}
-
-/* Hover: Transform into danger state */
-.release-btn-compact:hover {
-  opacity: 1 !important;
-  background: linear-gradient(180deg, rgba(255, 68, 68, 0.15) 0%, rgba(180, 40, 40, 0.2) 100%);
-  border-color: rgba(255, 68, 68, 0.5);
-  color: #ff5555;
-  box-shadow: 0 0 10px rgba(255, 68, 68, 0.3);
-  transform: scale(1.1);
-}
-
-/* Pulsing glow effect on hover */
-.release-btn-compact:hover .release-icon {
-  animation: killPulseCompact 0.5s ease-in-out infinite;
-  filter: drop-shadow(0 0 3px rgba(255, 68, 68, 0.6));
-}
-
-@keyframes killPulseCompact {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
-}
-
-/* Active state */
-.release-btn-compact:active {
-  transform: scale(0.95);
-  background: rgba(255, 68, 68, 0.25);
-}
-
-.agent-card-compact .attention-badge {
-  width: 8px;
-  height: 8px;
-}
-
-/* Thinking indicator section */
-.agent-thinking {
-  margin-top: 8px;
-  padding: 8px;
-  background: #eef2ff;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid #c7d2fe;
-}
-
-.thinking-label {
-  font-size: 12px;
-  color: #6366f1;
-  font-weight: 500;
-}
-`;

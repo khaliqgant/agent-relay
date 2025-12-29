@@ -16,7 +16,7 @@ Your message here.>>>
 Broadcast to all agents.>>>
 ```
 
-**CRITICAL:** Always end with `>>>` at the end of the last line of content!
+**CRITICAL:** Always end with `>>>` immediately after the last character of your message!
 
 ## Receiving Messages
 

@@ -40,10 +40,10 @@ export function MessageList({
 
   if (filteredMessages.length === 0) {
     return (
-      <div className="message-list-empty">
+      <div className="flex flex-col items-center justify-center h-full text-text-muted text-center">
         <EmptyIcon />
-        <h3>No messages yet</h3>
-        <p>
+        <h3 className="m-0 mb-2 text-base text-text-secondary">No messages yet</h3>
+        <p className="m-0 text-sm">
           {currentChannel === 'general'
             ? 'Broadcast messages will appear here'
             : `Messages with ${currentChannel} will appear here`}
@@ -53,7 +53,7 @@ export function MessageList({
   }
 
   return (
-    <div className="message-list" ref={listRef}>
+    <div className="flex flex-col gap-1 p-4 bg-bg-secondary" ref={listRef}>
       {filteredMessages.map((message) => (
         <MessageItem
           key={message.id}
@@ -78,9 +78,15 @@ function MessageItem({ message, isHighlighted, onThreadClick }: MessageItemProps
   const timestamp = formatTimestamp(message.timestamp);
 
   return (
-    <div className={`message-item ${isHighlighted ? 'highlighted' : ''}`}>
+    <div
+      className={`
+        flex gap-3 py-2 px-3 rounded-md transition-colors duration-150
+        hover:bg-white/[0.03]
+        ${isHighlighted ? 'bg-warning-light border-l-[3px] border-l-warning pl-[9px]' : ''}
+      `}
+    >
       <div
-        className="message-avatar"
+        className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center font-semibold text-xs text-white"
         style={{ backgroundColor: colors.primary }}
       >
         <span style={{ color: colors.text }}>
@@ -88,28 +94,30 @@ function MessageItem({ message, isHighlighted, onThreadClick }: MessageItemProps
         </span>
       </div>
 
-      <div className="message-content">
-        <div className="message-header">
-          <span className="message-sender">{message.from}</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="font-semibold text-sm text-text-primary">{message.from}</span>
           {message.to !== '*' && (
             <>
-              <span className="message-arrow">→</span>
-              <span className="message-recipient">{message.to}</span>
+              <span className="text-text-muted text-xs">→</span>
+              <span className="font-medium text-sm text-accent">{message.to}</span>
             </>
           )}
-          <span className="message-time">{timestamp}</span>
+          <span className="text-text-muted text-xs ml-auto">{timestamp}</span>
           {message.to === '*' && (
-            <span className="message-badge broadcast">broadcast</span>
+            <span className="text-[10px] py-0.5 px-1.5 rounded uppercase font-medium bg-warning-light text-warning">
+              broadcast
+            </span>
           )}
         </div>
 
-        <div className="message-body">
+        <div className="text-sm leading-relaxed text-text-primary whitespace-pre-wrap break-words">
           {formatMessageBody(message.content)}
         </div>
 
         {message.replyCount && message.replyCount > 0 && (
           <button
-            className="message-thread-btn"
+            className="inline-flex items-center gap-1 mt-2 py-1 px-2 bg-bg-hover border border-border rounded text-accent text-xs cursor-pointer transition-all duration-150 hover:bg-bg-active hover:border-border-dark hover:text-accent"
             onClick={() => onThreadClick?.(message.id)}
           >
             <ThreadIcon />
@@ -125,13 +133,11 @@ function MessageItem({ message, isHighlighted, onThreadClick }: MessageItemProps
  * Format message body with newline preservation and link detection
  */
 function formatMessageBody(content: string): React.ReactNode {
-  // Normalize line endings: handle \r\n, literal \\n strings, and \n
   let normalizedContent = content
-    .replace(/\\n/g, '\n')  // Convert literal \n strings to actual newlines
-    .replace(/\r\n/g, '\n') // Normalize Windows line endings
-    .replace(/\r/g, '\n');  // Handle standalone \r
+    .replace(/\\n/g, '\n')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
 
-  // Split by newlines and render each line
   const lines = normalizedContent.split('\n');
 
   return lines.map((line, i) => (
@@ -157,7 +163,7 @@ function formatLine(line: string): React.ReactNode {
           href={part}
           target="_blank"
           rel="noopener noreferrer"
-          className="message-link"
+          className="text-accent no-underline hover:underline hover:text-accent-hover"
         >
           {part}
         </a>
@@ -197,7 +203,7 @@ function formatTimestamp(timestamp: string | number): string {
 
 function EmptyIcon() {
   return (
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg className="mb-4 opacity-50 text-text-muted" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
@@ -205,192 +211,8 @@ function EmptyIcon() {
 
 function ThreadIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg className="opacity-70" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
 }
-
-/**
- * CSS styles for the message list - Dark mode styling matching v1 dashboard
- */
-export const messageListStyles = `
-.message-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px;
-  background: #222529;
-}
-
-.message-list-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #8d8d8e;
-  text-align: center;
-}
-
-.message-list-empty svg {
-  margin-bottom: 16px;
-  opacity: 0.5;
-  color: #5f6368;
-}
-
-.message-list-empty h3 {
-  margin: 0 0 8px;
-  font-size: 16px;
-  color: #ababad;
-}
-
-.message-list-empty p {
-  margin: 0;
-  font-size: 13px;
-  color: #8d8d8e;
-}
-
-.message-item {
-  display: flex;
-  gap: 12px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  transition: background 0.15s;
-}
-
-.message-item:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.message-item.highlighted {
-  background: rgba(232, 164, 39, 0.1);
-  border-left: 3px solid #e8a427;
-  padding-left: 9px;
-}
-
-.message-avatar {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 12px;
-  color: white;
-}
-
-.message-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.message-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.message-sender {
-  font-weight: 600;
-  font-size: 14px;
-  color: #d1d2d3;
-}
-
-.message-arrow {
-  color: #8d8d8e;
-  font-size: 12px;
-}
-
-.message-recipient {
-  font-weight: 500;
-  font-size: 13px;
-  color: #1d9bd1;
-}
-
-.message-time {
-  color: #8d8d8e;
-  font-size: 11px;
-  margin-left: auto;
-}
-
-.message-badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  font-weight: 500;
-}
-
-.message-badge.broadcast {
-  background: rgba(232, 164, 39, 0.15);
-  color: #e8a427;
-}
-
-.message-body {
-  font-size: 14px;
-  line-height: 1.5;
-  color: #d1d2d3;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.message-body code {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 13px;
-  background: rgba(255, 255, 255, 0.06);
-  padding: 2px 4px;
-  border-radius: 3px;
-  color: #00ffc8;
-}
-
-.message-body pre {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 13px;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 12px;
-  border-radius: 4px;
-  margin: 8px 0;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
-.message-link {
-  color: #1d9bd1;
-  text-decoration: none;
-}
-
-.message-link:hover {
-  text-decoration: underline;
-  color: #4ab8e8;
-}
-
-.message-thread-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 8px;
-  padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  color: #1d9bd1;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.message-thread-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #4ab8e8;
-}
-
-.message-thread-btn svg {
-  opacity: 0.7;
-}
-`;

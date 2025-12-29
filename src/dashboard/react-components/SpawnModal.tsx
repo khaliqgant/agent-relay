@@ -75,7 +75,6 @@ export function SpawnModal({
   const [localError, setLocalError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  // Generate suggested name based on template and existing agents
   const suggestedName = useCallback(() => {
     const prefix = selectedTemplate.id === 'claude' ? 'claude' : selectedTemplate.id;
     let num = 1;
@@ -85,7 +84,6 @@ export function SpawnModal({
     return `${prefix}-${num}`;
   }, [selectedTemplate, existingAgents]);
 
-  // Reset form when opened
   useEffect(() => {
     if (isOpen) {
       setSelectedTemplate(AGENT_TEMPLATES[0]);
@@ -98,7 +96,6 @@ export function SpawnModal({
     }
   }, [isOpen]);
 
-  // Validate name
   const validateName = useCallback(
     (value: string): string | null => {
       if (!value.trim()) {
@@ -115,7 +112,6 @@ export function SpawnModal({
     [existingAgents]
   );
 
-  // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -145,7 +141,6 @@ export function SpawnModal({
     }
   };
 
-  // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -159,49 +154,60 @@ export function SpawnModal({
   const displayError = error || localError;
 
   return (
-    <div className="spawn-modal-overlay" onClick={onClose}>
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] animate-fade-in"
+      onClick={onClose}
+    >
       <div
-        className="spawn-modal"
+        className="bg-bg-primary border border-border rounded-xl w-[480px] max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-modal animate-slide-up"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <div className="spawn-modal-header">
-          <h2>Spawn New Agent</h2>
-          <button className="spawn-modal-close" onClick={onClose} aria-label="Close">
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <h2 className="m-0 text-lg font-semibold text-text-primary">Spawn New Agent</h2>
+          <button
+            className="flex items-center justify-center w-8 h-8 bg-transparent border-none rounded-md text-text-muted cursor-pointer transition-all duration-150 hover:bg-bg-hover hover:text-text-primary"
+            onClick={onClose}
+            aria-label="Close"
+          >
             <CloseIcon />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="p-6">
           {/* Agent Type Selection */}
-          <div className="spawn-modal-section">
-            <label className="spawn-modal-label">Agent Type</label>
-            <div className="spawn-modal-templates">
+          <div className="mb-5">
+            <label className="block text-sm font-semibold text-text-primary mb-2">Agent Type</label>
+            <div className="grid grid-cols-3 gap-2">
               {AGENT_TEMPLATES.map((template) => (
                 <button
                   key={template.id}
                   type="button"
-                  className={`spawn-modal-template ${
-                    selectedTemplate.id === template.id ? 'selected' : ''
-                  }`}
+                  className={`
+                    flex flex-col items-center gap-1 py-3 px-2 border-2 rounded-lg cursor-pointer font-sans transition-all duration-150
+                    ${selectedTemplate.id === template.id
+                      ? 'bg-accent/10 border-accent'
+                      : 'bg-bg-hover border-transparent hover:bg-bg-active'
+                    }
+                  `}
                   onClick={() => setSelectedTemplate(template)}
                 >
-                  <span className="spawn-modal-template-icon">{template.icon}</span>
-                  <span className="spawn-modal-template-name">{template.name}</span>
-                  <span className="spawn-modal-template-desc">{template.description}</span>
+                  <span className="text-2xl">{template.icon}</span>
+                  <span className="text-sm font-semibold text-text-primary">{template.name}</span>
+                  <span className="text-xs text-text-muted text-center">{template.description}</span>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Agent Name */}
-          <div className="spawn-modal-section">
-            <label className="spawn-modal-label" htmlFor="agent-name">
+          <div className="mb-5">
+            <label className="block text-sm font-semibold text-text-primary mb-2" htmlFor="agent-name">
               Agent Name
             </label>
-            <div className="spawn-modal-name-input">
+            <div className="flex items-center gap-3">
               <div
-                className="spawn-modal-name-preview"
+                className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-sm font-semibold"
                 style={{ backgroundColor: colors.primary, color: colors.text }}
               >
                 {getAgentInitials(name || suggestedName())}
@@ -210,7 +216,7 @@ export function SpawnModal({
                 ref={nameInputRef}
                 id="agent-name"
                 type="text"
-                className="spawn-modal-input"
+                className="flex-1 py-2.5 px-3.5 border border-border rounded-md text-sm font-sans outline-none bg-transparent text-text-primary transition-colors duration-150 focus:border-accent disabled:bg-bg-hover disabled:text-text-muted placeholder:text-text-muted"
                 placeholder={suggestedName()}
                 value={name}
                 onChange={(e) => {
@@ -220,12 +226,12 @@ export function SpawnModal({
                 disabled={isSpawning}
               />
             </div>
-            <div className="spawn-modal-name-suggestions">
+            <div className="flex gap-1.5 mt-2">
               {NAME_PREFIXES.slice(0, 4).map((prefix) => (
                 <button
                   key={prefix}
                   type="button"
-                  className="spawn-modal-suggestion"
+                  className="py-1 px-2 bg-bg-hover border border-border rounded text-xs text-text-secondary cursor-pointer font-sans transition-all duration-150 hover:bg-bg-active hover:text-text-primary"
                   onClick={() => setName(`${prefix}-1`)}
                 >
                   {prefix}-
@@ -236,14 +242,14 @@ export function SpawnModal({
 
           {/* Custom Command (if custom template) */}
           {selectedTemplate.id === 'custom' && (
-            <div className="spawn-modal-section">
-              <label className="spawn-modal-label" htmlFor="agent-command">
+            <div className="mb-5">
+              <label className="block text-sm font-semibold text-text-primary mb-2" htmlFor="agent-command">
                 Command
               </label>
               <input
                 id="agent-command"
                 type="text"
-                className="spawn-modal-input"
+                className="w-full py-2.5 px-3.5 border border-border rounded-md text-sm font-sans outline-none bg-transparent text-text-primary transition-colors duration-150 focus:border-accent disabled:bg-bg-hover disabled:text-text-muted placeholder:text-text-muted"
                 placeholder="e.g., python agent.py"
                 value={customCommand}
                 onChange={(e) => setCustomCommand(e.target.value)}
@@ -253,14 +259,14 @@ export function SpawnModal({
           )}
 
           {/* Working Directory (optional) */}
-          <div className="spawn-modal-section">
-            <label className="spawn-modal-label" htmlFor="agent-cwd">
-              Working Directory <span className="spawn-modal-optional">(optional)</span>
+          <div className="mb-5">
+            <label className="block text-sm font-semibold text-text-primary mb-2" htmlFor="agent-cwd">
+              Working Directory <span className="font-normal text-text-muted">(optional)</span>
             </label>
             <input
               id="agent-cwd"
               type="text"
-              className="spawn-modal-input"
+              className="w-full py-2.5 px-3.5 border border-border rounded-md text-sm font-sans outline-none bg-transparent text-text-primary transition-colors duration-150 focus:border-accent disabled:bg-bg-hover disabled:text-text-muted placeholder:text-text-muted"
               placeholder="Current directory"
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
@@ -269,14 +275,14 @@ export function SpawnModal({
           </div>
 
           {/* Team Assignment (optional) */}
-          <div className="spawn-modal-section">
-            <label className="spawn-modal-label" htmlFor="agent-team">
-              Team <span className="spawn-modal-optional">(optional)</span>
+          <div className="mb-5">
+            <label className="block text-sm font-semibold text-text-primary mb-2" htmlFor="agent-team">
+              Team <span className="font-normal text-text-muted">(optional)</span>
             </label>
             <input
               id="agent-team"
               type="text"
-              className="spawn-modal-input"
+              className="w-full py-2.5 px-3.5 border border-border rounded-md text-sm font-sans outline-none bg-transparent text-text-primary transition-colors duration-150 focus:border-accent disabled:bg-bg-hover disabled:text-text-muted placeholder:text-text-muted"
               placeholder="e.g., frontend, backend, infra"
               value={team}
               onChange={(e) => setTeam(e.target.value)}
@@ -286,17 +292,17 @@ export function SpawnModal({
 
           {/* Error Display */}
           {displayError && (
-            <div className="spawn-modal-error">
+            <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/30 rounded-md text-error text-sm mb-5">
               <ErrorIcon />
               <span>{displayError}</span>
             </div>
           )}
 
           {/* Actions */}
-          <div className="spawn-modal-actions">
+          <div className="flex justify-end gap-2 pt-2 border-t border-border">
             <button
               type="button"
-              className="spawn-modal-btn spawn-modal-btn-secondary"
+              className="flex items-center gap-1.5 py-2.5 px-4 border-none rounded-md text-sm font-medium cursor-pointer font-sans transition-all duration-150 bg-bg-hover text-text-secondary hover:bg-bg-active hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={onClose}
               disabled={isSpawning}
             >
@@ -304,7 +310,7 @@ export function SpawnModal({
             </button>
             <button
               type="submit"
-              className="spawn-modal-btn spawn-modal-btn-primary"
+              className="flex items-center gap-1.5 py-2.5 px-4 border-none rounded-md text-sm font-medium cursor-pointer font-sans transition-all duration-150 bg-accent text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={isSpawning}
             >
               {isSpawning ? (
@@ -326,7 +332,6 @@ export function SpawnModal({
   );
 }
 
-// Icon components
 function CloseIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -338,7 +343,7 @@ function CloseIcon() {
 
 function ErrorIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg className="shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
       <line x1="12" y1="8" x2="12" y2="12" />
       <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -359,7 +364,7 @@ function RocketIcon() {
 
 function Spinner() {
   return (
-    <svg className="spawn-modal-spinner" width="16" height="16" viewBox="0 0 24 24">
+    <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24">
       <circle
         cx="12"
         cy="12"
@@ -373,278 +378,3 @@ function Spinner() {
     </svg>
   );
 }
-
-/**
- * CSS styles for the spawn modal
- */
-export const spawnModalStyles = `
-.spawn-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  animation: fadeIn 0.15s ease;
-}
-
-.spawn-modal {
-  background: #ffffff;
-  border-radius: 12px;
-  width: 480px;
-  max-width: 90vw;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 16px 70px rgba(0, 0, 0, 0.2);
-  animation: slideUp 0.2s ease;
-}
-
-.spawn-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid #e8e8e8;
-}
-
-.spawn-modal-header h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.spawn-modal-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  color: #666;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.spawn-modal-close:hover {
-  background: #f5f5f5;
-  color: #333;
-}
-
-.spawn-modal form {
-  padding: 24px;
-}
-
-.spawn-modal-section {
-  margin-bottom: 20px;
-}
-
-.spawn-modal-label {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 8px;
-}
-
-.spawn-modal-optional {
-  font-weight: 400;
-  color: #888;
-}
-
-.spawn-modal-templates {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.spawn-modal-template {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 8px;
-  background: #f9f9f9;
-  border: 2px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: inherit;
-}
-
-.spawn-modal-template:hover {
-  background: #f0f0f0;
-}
-
-.spawn-modal-template.selected {
-  background: #e8f4fd;
-  border-color: #1264a3;
-}
-
-.spawn-modal-template-icon {
-  font-size: 24px;
-}
-
-.spawn-modal-template-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
-}
-
-.spawn-modal-template-desc {
-  font-size: 11px;
-  color: #888;
-  text-align: center;
-}
-
-.spawn-modal-name-input {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.spawn-modal-name-preview {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.spawn-modal-input {
-  flex: 1;
-  padding: 10px 14px;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  font-size: 14px;
-  font-family: inherit;
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.spawn-modal-input:focus {
-  border-color: #1264a3;
-}
-
-.spawn-modal-input:disabled {
-  background: #f9f9f9;
-  color: #888;
-}
-
-.spawn-modal-name-suggestions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.spawn-modal-suggestion {
-  padding: 4px 8px;
-  background: #f5f5f5;
-  border: 1px solid #e8e8e8;
-  border-radius: 4px;
-  font-size: 12px;
-  color: #666;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s;
-}
-
-.spawn-modal-suggestion:hover {
-  background: #e8e8e8;
-  color: #333;
-}
-
-.spawn-modal-error {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 6px;
-  color: #dc2626;
-  font-size: 13px;
-  margin-bottom: 20px;
-}
-
-.spawn-modal-error svg {
-  flex-shrink: 0;
-}
-
-.spawn-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #e8e8e8;
-}
-
-.spawn-modal-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 16px;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s;
-}
-
-.spawn-modal-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.spawn-modal-btn-secondary {
-  background: #f5f5f5;
-  color: #666;
-}
-
-.spawn-modal-btn-secondary:hover:not(:disabled) {
-  background: #e8e8e8;
-  color: #333;
-}
-
-.spawn-modal-btn-primary {
-  background: #1264a3;
-  color: #ffffff;
-}
-
-.spawn-modal-btn-primary:hover:not(:disabled) {
-  background: #0d4f82;
-}
-
-.spawn-modal-spinner {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-`;

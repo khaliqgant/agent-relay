@@ -62,6 +62,8 @@ program
   .option('-n, --name <name>', 'Agent name (auto-generated if not set)')
   .option('-q, --quiet', 'Disable debug output', false)
   .option('--prefix <pattern>', 'Relay prefix pattern (default: ->relay:)')
+  .option('--shadow <name>', 'Spawn a shadow agent with this name that monitors the primary')
+  .option('--shadow-role <role>', 'Shadow role: reviewer, auditor, or triggers (comma-separated: SESSION_END,CODE_WRITTEN,REVIEW_REQUEST,EXPLICIT_ASK,ALL_MESSAGES)')
   .argument('[command...]', 'Command to wrap (e.g., claude)')
   .action(async (commandParts, options) => {
     // If no command provided, show help
@@ -141,6 +143,50 @@ program
     });
 
     await wrapper.start();
+
+    // If --shadow flag is set, spawn a shadow agent after primary starts
+    if (options.shadow) {
+      const shadowName = options.shadow;
+      const shadowRole = options.shadowRole || 'EXPLICIT_ASK';
+
+      // Parse shadow role - can be a preset or comma-separated triggers
+      type SpeakOnTrigger = 'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES';
+      let speakOn: SpeakOnTrigger[];
+
+      const rolePresets: Record<string, SpeakOnTrigger[]> = {
+        reviewer: ['CODE_WRITTEN', 'REVIEW_REQUEST', 'EXPLICIT_ASK'],
+        auditor: ['SESSION_END', 'EXPLICIT_ASK'],
+        active: ['ALL_MESSAGES'],
+      };
+
+      if (rolePresets[shadowRole.toLowerCase()]) {
+        speakOn = rolePresets[shadowRole.toLowerCase()];
+      } else {
+        // Parse as comma-separated triggers
+        speakOn = shadowRole.split(',').map((s: string) => s.trim().toUpperCase()) as SpeakOnTrigger[];
+      }
+
+      console.error(`Shadow: ${shadowName} (shadowing ${agentName}, speakOn: ${speakOn.join(',')})`);
+
+      // Wait for primary to register before spawning shadow
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Spawn shadow agent using the same CLI
+      const shadowTask = `You are a shadow agent monitoring "${agentName}". You receive copies of their messages. Your role: ${shadowRole}. Stay passive unless your triggers activate.`;
+      const result = await spawner.spawn({
+        name: shadowName,
+        cli: mainCommand,
+        task: shadowTask,
+        shadowOf: agentName,
+        shadowSpeakOn: speakOn,
+      });
+
+      if (result.success) {
+        console.error(`Shadow ${shadowName} started [pid: ${result.pid}]`);
+      } else {
+        console.error(`Failed to spawn shadow ${shadowName}: ${result.error}`);
+      }
+    }
   });
 
 // up - Start daemon + dashboard

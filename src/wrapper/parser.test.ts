@@ -301,6 +301,17 @@ Let me know if that works.
       expect(result.commands[0].body).toBe('Multi-line\nreview comments');
     });
 
+    it('handles cross-project thread syntax in fenced messages', () => {
+      const input = '->relay:Backend [thread:frontend-app:auth-flow] <<<\nCan you check the session handling?\n>>>\n';
+      const result = parser.parse(input);
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0].to).toBe('Backend');
+      expect(result.commands[0].thread).toBe('auth-flow');
+      expect(result.commands[0].threadProject).toBe('frontend-app');
+      expect(result.commands[0].body).toBe('Can you check the session handling?');
+    });
+
     it('handles cross-project syntax in fenced messages', () => {
       const input = '->relay:other-project:agent2 <<<\nCross-project message\n>>>\n';
       const result = parser.parse(input);
@@ -415,6 +426,23 @@ Let me know if that works.
       // Only Agent2's message should be sent (Agent1's was empty)
       expect(result.commands).toHaveLength(1);
       expect(result.commands[0].to).toBe('Agent2');
+    });
+
+    it('auto-closes fenced block when MAX_FENCED_LINES exceeded (agent-relay-9igw)', () => {
+      // When agent forgets >>> and sends many lines, the parser auto-closes
+      // MAX_FENCED_LINES is set to 30 to prevent messages getting stuck forever
+      const parser = new OutputParser();
+      let lines = '->relay:Lead <<<\n';
+      for (let i = 1; i <= 35; i++) {
+        lines += `Line ${i} of message content\n`;
+      }
+      lines += 'Output after message\n';
+
+      const result = parser.parse(lines);
+
+      // Message should be auto-closed and sent (discarded due to exceeding limit)
+      // Parser should not be stuck in fenced mode
+      expect((parser as unknown as { inFencedInline: boolean }).inFencedInline).toBe(false);
     });
   });
 
@@ -773,6 +801,32 @@ Out3
         project: 'proj',
         thread: 'abc123',
         body: 'Threaded cross-project message',
+      });
+    });
+
+    it('handles cross-project thread syntax in inline messages', () => {
+      const result = parser.parse('->relay:Backend [thread:frontend-app:auth-flow] Can you check session handling?\n');
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0]).toMatchObject({
+        to: 'Backend',
+        thread: 'auth-flow',
+        threadProject: 'frontend-app',
+        body: 'Can you check session handling?',
+      });
+    });
+
+    it('handles cross-project thread with cross-project target', () => {
+      // Both target and thread are cross-project
+      const result = parser.parse('->relay:backend-api:AuthService [thread:shared:auth-session] Verify token\n');
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0]).toMatchObject({
+        to: 'AuthService',
+        project: 'backend-api',
+        thread: 'auth-session',
+        threadProject: 'shared',
+        body: 'Verify token',
       });
     });
 

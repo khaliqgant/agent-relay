@@ -114,6 +114,9 @@ export class AgentSpawner {
         cwd: this.projectRoot,
         logsDir: this.logsDir,
         dashboardPort: this.dashboardPort,
+        // Shadow agent configuration
+        shadowOf: request.shadowOf,
+        shadowSpeakOn: request.shadowSpeakOn,
         // Only use callbacks if dashboardPort is not set (for backwards compatibility)
         onSpawn: this.dashboardPort ? undefined : async (workerName, workerCli, workerTask) => {
           // Handle nested spawn requests (legacy path, may fail in non-TTY)
@@ -156,10 +159,42 @@ export class AgentSpawner {
         };
       }
 
-      // Inject the initial task if provided
+      // Send task via relay message if provided (not via direct PTY injection)
+      // This ensures the agent is ready to receive before processing the task
       if (task && task.trim()) {
-        if (debug) console.log(`[spawner:debug] Injecting task: ${task.substring(0, 50)}...`);
-        pty.write(task + '\r');
+        if (debug) console.log(`[spawner:debug] Will send task via relay: ${task.substring(0, 50)}...`);
+
+        // If we have dashboard API, send task as relay message
+        if (this.dashboardPort) {
+          // Wait a moment for the agent's relay client to be ready
+          await sleep(1000);
+          try {
+            const response = await fetch(`http://localhost:${this.dashboardPort}/api/send`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: name,
+                body: task,
+                from: '__spawner__',
+              }),
+            });
+            const result = await response.json() as { success: boolean; error?: string };
+            if (result.success) {
+              if (debug) console.log(`[spawner:debug] Task sent via relay to ${name}`);
+            } else {
+              console.warn(`[spawner] Failed to send task via relay: ${result.error}`);
+              // Fall back to direct injection
+              pty.write(task + '\r');
+            }
+          } catch (err: any) {
+            console.warn(`[spawner] Relay send failed, falling back to direct injection: ${err.message}`);
+            pty.write(task + '\r');
+          }
+        } else {
+          // No dashboard API available - use direct injection as fallback
+          if (debug) console.log(`[spawner:debug] No dashboard API, using direct injection`);
+          pty.write(task + '\r');
+        }
       }
 
       // Track the worker
@@ -177,7 +212,8 @@ export class AgentSpawner {
       this.saveWorkersMetadata();
 
       const teamInfo = team ? ` [team: ${team}]` : '';
-      console.log(`[spawner] Spawned ${name} (${cli})${teamInfo} [pid: ${pty.pid}]`);
+      const shadowInfo = request.shadowOf ? ` [shadow of: ${request.shadowOf}]` : '';
+      console.log(`[spawner] Spawned ${name} (${cli})${teamInfo}${shadowInfo} [pid: ${pty.pid}]`);
 
       return {
         success: true,

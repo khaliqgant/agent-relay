@@ -856,19 +856,25 @@ export class TmuxWrapper {
     for (const line of lines) {
       const trimmed = line.trim();
 
-      // Match ->relay:spawn WorkerName cli "task"
-      // Pattern: ->relay:spawn <name> <cli> "<task>" or ->relay:spawn <name> <cli> '<task>'
+      // Match ->relay:spawn WorkerName cli OR ->relay:spawn WorkerName cli "task"
+      // Task is now optional - agents can be spawned without immediate task injection
+      // Pattern: ->relay:spawn <name> <cli> [optional: "<task>" or '<task>']
       // Allow trailing whitespace and optional bullet prefixes that TUIs might add
-      const spawnMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:spawn\s+(\S+)\s+(\S+)\s+["'](.+?)["']\s*$/);
+      const spawnMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:spawn\s+(\S+)\s+(\S+)(?:\s+["'](.+?)["'])?\s*$/);
       if (spawnMatch && this.config.onSpawn) {
         const [, name, cli, task] = spawnMatch;
-        const spawnKey = `${name}:${cli}:${task}`;
+        const taskStr = task || ''; // Task is optional, default to empty string
+        const spawnKey = `${name}:${cli}`;
 
-        // Dedup - only process each spawn once
+        // Dedup - only process each spawn once (keyed by name:cli, not including task)
         if (!this.processedSpawnCommands.has(spawnKey)) {
           this.processedSpawnCommands.add(spawnKey);
-          this.logStderr(`Spawn command: ${name} (${cli}) - "${task.substring(0, 50)}..."`);
-          this.config.onSpawn(name, cli, task).catch(err => {
+          if (taskStr) {
+            this.logStderr(`Spawn command: ${name} (${cli}) - "${taskStr.substring(0, 50)}..."`);
+          } else {
+            this.logStderr(`Spawn command: ${name} (${cli}) - no task`);
+          }
+          this.config.onSpawn(name, cli, taskStr).catch(err => {
             this.logStderr(`Spawn failed: ${err.message}`, true);
           });
         }
