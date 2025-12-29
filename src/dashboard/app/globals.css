@@ -1975,3 +1975,668 @@ button:focus-visible {
 .settings-done-btn:hover {
   background: #0d4f82;
 }
+
+/* =====================
+   Mobile Responsive Styles
+   ===================== */
+
+/* Mobile breakpoints:
+   - xs: 320px (small phones)
+   - sm: 480px (phones)
+   - md: 768px (tablets)
+   - lg: 1024px (desktops)
+*/
+
+/* Touch target minimum size */
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Mobile hamburger menu button */
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.mobile-menu-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.mobile-menu-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Mobile overlay for sidebar */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  animation: fadeIn var(--transition-fast);
+}
+
+.sidebar-overlay.visible {
+  display: block;
+}
+
+/* =====================
+   Tablet Breakpoint (768px)
+   ===================== */
+@media (max-width: 768px) {
+  /* Show hamburger menu */
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  /* Sidebar becomes overlay drawer */
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform var(--transition-normal);
+    width: 280px;
+    max-width: 85vw;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    display: none;
+  }
+
+  .sidebar-overlay.visible {
+    display: block;
+  }
+
+  /* Main content takes full width */
+  .dashboard-app {
+    flex-direction: column;
+  }
+
+  .dashboard-main {
+    width: 100%;
+  }
+
+  /* Header adjustments */
+  .header {
+    padding: 0 12px;
+  }
+
+  .header-left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .channel-name {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .channel-topic,
+  .channel-breadcrumb {
+    display: none;
+  }
+
+  .header-btn span {
+    display: none;
+  }
+
+  .header-btn kbd {
+    display: none;
+  }
+
+  .command-palette-btn {
+    padding: 8px;
+  }
+
+  /* Command Palette - larger on tablet */
+  .command-palette {
+    width: 90vw;
+    max-height: 70vh;
+  }
+
+  .command-palette-item {
+    padding: 12px;
+    min-height: 44px;
+  }
+
+  /* Spawn Modal adjustments */
+  .spawn-modal {
+    width: 95vw;
+    max-height: 85vh;
+  }
+
+  .spawn-modal-templates {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .spawn-modal-template {
+    padding: 10px 6px;
+    min-height: 44px;
+  }
+
+  /* Settings Panel */
+  .settings-panel {
+    width: 95vw;
+    max-height: 85vh;
+  }
+
+  .settings-tabs {
+    overflow-x: auto;
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .settings-tab {
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  .settings-theme-options {
+    flex-direction: column;
+  }
+
+  .settings-theme-btn {
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 12px 16px;
+    min-height: 44px;
+  }
+
+  /* Message Composer */
+  .message-composer {
+    padding: 12px;
+  }
+
+  .composer-form {
+    flex-wrap: wrap;
+  }
+
+  .composer-input-wrapper {
+    width: 100%;
+    order: 1;
+  }
+
+  .composer-send {
+    order: 2;
+    flex: 1;
+    min-height: 44px;
+  }
+
+  /* Message List */
+  .message-list {
+    padding: 12px;
+  }
+
+  .message-item {
+    padding: 12px 8px;
+  }
+
+  .message-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Agent Cards */
+  .agent-card {
+    padding: 16px;
+  }
+
+  .agent-card-compact {
+    padding: 12px;
+    min-height: 44px;
+  }
+
+  .agent-avatar {
+    width: 36px;
+    height: 36px;
+  }
+
+  /* Agent List */
+  .agent-group-header {
+    padding: 12px;
+    min-height: 44px;
+  }
+
+  .agent-group-content {
+    padding: 8px 0 8px 8px;
+  }
+
+  /* Fleet Overview */
+  .fleet-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Decision Queue */
+  .decision-item {
+    padding: 16px;
+  }
+
+  /* Trajectory Viewer */
+  .trajectory-step {
+    padding: 12px;
+  }
+
+  /* Server Card */
+  .server-card {
+    padding: 16px;
+  }
+
+  /* Notification Toast */
+  .notification-toast {
+    width: calc(100vw - 24px);
+    max-width: 400px;
+    left: 12px;
+    right: 12px;
+    margin: 0 auto;
+  }
+
+  /* Project List */
+  .project-header {
+    padding: 12px;
+    min-height: 44px;
+  }
+
+  .project-agents {
+    padding: 8px 0 8px 12px;
+  }
+}
+
+/* =====================
+   Phone Breakpoint (480px)
+   ===================== */
+@media (max-width: 480px) {
+  /* Sidebar full width on phones */
+  .sidebar {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  .sidebar-header {
+    padding: 12px;
+  }
+
+  .sidebar-title h1 {
+    font-size: 16px;
+  }
+
+  .sidebar-search {
+    margin: 8px;
+    padding: 10px 12px;
+  }
+
+  .sidebar-footer {
+    padding: 12px;
+  }
+
+  .spawn-btn {
+    min-height: 44px;
+  }
+
+  /* Header compact */
+  .header {
+    height: 48px;
+    padding: 0 8px;
+  }
+
+  .header-left {
+    gap: 6px;
+  }
+
+  .channel-name {
+    font-size: 14px;
+    max-width: 120px;
+  }
+
+  .agent-avatar-small {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+  }
+
+  /* Command Palette full screen */
+  .command-palette-overlay {
+    padding-top: 0;
+    align-items: stretch;
+  }
+
+  .command-palette {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .command-palette-input-wrapper {
+    padding: 12px;
+  }
+
+  .command-palette-input {
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  .command-palette-item {
+    padding: 14px 12px;
+  }
+
+  /* Spawn Modal full screen */
+  .spawn-modal-overlay {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .spawn-modal {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .spawn-modal-header {
+    padding: 16px;
+  }
+
+  .spawn-modal form {
+    padding: 16px;
+  }
+
+  .spawn-modal-templates {
+    grid-template-columns: 1fr;
+  }
+
+  .spawn-modal-template {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .spawn-modal-template-icon {
+    font-size: 20px;
+  }
+
+  .spawn-modal-name-input {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .spawn-modal-name-preview {
+    display: none;
+  }
+
+  .spawn-modal-input {
+    font-size: 16px; /* Prevents zoom on iOS */
+    min-height: 44px;
+  }
+
+  .spawn-modal-name-suggestions {
+    flex-wrap: wrap;
+  }
+
+  .spawn-modal-suggestion {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+  }
+
+  .spawn-modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .spawn-modal-btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  /* Settings Panel full screen */
+  .settings-overlay {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .settings-panel {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .settings-header {
+    padding: 16px;
+  }
+
+  .settings-tabs {
+    padding: 8px 12px;
+  }
+
+  .settings-tab {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
+  .settings-content {
+    padding: 16px;
+  }
+
+  .settings-toggle-option {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .settings-toggle {
+    align-self: flex-end;
+  }
+
+  .settings-footer {
+    flex-direction: column-reverse;
+    gap: 8px;
+    padding: 16px;
+  }
+
+  .settings-reset-btn,
+  .settings-done-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  /* Message Composer */
+  .composer-input {
+    font-size: 16px; /* Prevents zoom on iOS */
+    min-height: 44px;
+  }
+
+  .composer-send {
+    width: 100%;
+  }
+
+  /* Message List */
+  .message-list {
+    padding: 8px;
+  }
+
+  .message-item {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .message-avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .message-header {
+    flex-wrap: wrap;
+  }
+
+  .message-time {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+
+  /* Agent Cards */
+  .agent-card-compact .agent-name {
+    font-size: 14px;
+  }
+
+  .agent-compact-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Mention autocomplete */
+  .mention-autocomplete {
+    max-height: 50vh;
+  }
+
+  .mention-item {
+    padding: 12px;
+    min-height: 44px;
+  }
+
+  /* Notification Toast */
+  .notification-toast {
+    bottom: 12px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
+
+  .toast-content {
+    padding: 14px 16px;
+  }
+
+  .toast-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* =====================
+   Small Phone Breakpoint (320px)
+   ===================== */
+@media (max-width: 320px) {
+  .header {
+    height: 44px;
+  }
+
+  .mobile-menu-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .channel-name {
+    font-size: 13px;
+    max-width: 100px;
+  }
+
+  .sidebar-title h1 {
+    font-size: 14px;
+  }
+
+  .spawn-modal-header h2,
+  .settings-header h2 {
+    font-size: 16px;
+  }
+
+  .command-palette-input {
+    font-size: 14px;
+  }
+
+  .agent-card-compact {
+    padding: 10px;
+  }
+}
+
+/* =====================
+   Landscape Phone
+   ===================== */
+@media (max-width: 768px) and (orientation: landscape) {
+  .sidebar {
+    width: 300px;
+  }
+
+  .command-palette {
+    max-height: 90vh;
+  }
+
+  .spawn-modal,
+  .settings-panel {
+    max-height: 95vh;
+  }
+}
+
+/* =====================
+   High DPI / Retina
+   ===================== */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .connection-indicator,
+  .stat-dot,
+  .agent-status-dot {
+    /* Sharper borders on retina */
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* =====================
+   Reduced Motion
+   ===================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .sidebar {
+    transition: none;
+  }
+}
+
+/* =====================
+   Safe Area Insets (iPhone X+)
+   ===================== */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .sidebar-footer {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .message-composer {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .spawn-modal-actions,
+  .settings-footer {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .notification-toast {
+    bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}

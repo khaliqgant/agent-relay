@@ -53,9 +53,9 @@ const BLOCK_METADATA_END = /\[\[\/RELAY_METADATA\]\]/;
 const CODE_FENCE = /^```/;
 
 // Fenced inline patterns: ->relay:Target <<< ... >>>
-// FENCE_END is lenient - matches >>> at start of line regardless of trailing content
-// This prevents stuck fenced mode when >>> has trailing text like ">>> done"
-const FENCE_END = /^(?:\s*)?>>>/;
+// FENCE_END is lenient - matches >>> at start OR end of line regardless of surrounding content
+// This handles both ">>>" on its own line and "content>>>" at end of message
+const FENCE_END = /^(?:\s*)?>>>|>>>\s*$/;
 
 // Maximum lines in a fenced block before assuming it's stuck
 const MAX_FENCED_LINES = 200;
@@ -814,10 +814,24 @@ export class OutputParser {
       }
 
       // Check if a new relay command started (means previous fenced block was never closed)
-      // This prevents a stuck fenced block from swallowing all subsequent messages
-      // Note: This is an expected recovery path, not an error - don't log to avoid noise
+      // Auto-close and SEND the incomplete message instead of discarding it
+      // This preserves message content when agents forget to close with >>>
       if (this.inlineRelayPattern.test(stripped) || this.fencedRelayPattern.test(stripped)) {
-        // Discard the incomplete fenced block
+        // Auto-close and send the incomplete fenced block (if it has content)
+        if (this.fencedInlineBuffer.trim().length > 0) {
+          const body = this.fencedInlineBuffer.trim();
+          const command: ParsedCommand = {
+            to: this.fencedInlineTarget,
+            kind: this.fencedInlineKind,
+            body,
+            thread: this.fencedInlineThread,
+            project: this.fencedInlineProject,
+            raw: this.fencedInlineRaw.join('\n'),
+          };
+          commands.push(command);
+        }
+
+        // Reset fenced inline state
         this.inFencedInline = false;
         this.fencedInlineBuffer = '';
         this.fencedInlineTarget = '';
@@ -836,6 +850,19 @@ export class OutputParser {
 
       // Check if this line closes the fenced block
       if (FENCE_END.test(stripped)) {
+        // If >>> is at end of line (not start), extract content before it
+        const endsWithFence = />>>\s*$/.test(stripped) && !/^(?:\s*)?>>>/.test(stripped);
+        if (endsWithFence) {
+          const contentBeforeFence = stripped.replace(/>>>\s*$/, '');
+          if (contentBeforeFence.trim()) {
+            if (this.fencedInlineBuffer.length > 0) {
+              this.fencedInlineBuffer += '\n' + contentBeforeFence;
+            } else {
+              this.fencedInlineBuffer = contentBeforeFence;
+            }
+          }
+        }
+
         // Complete the fenced inline command
         const body = this.fencedInlineBuffer.trim();
         this.fencedInlineRaw.push(line);

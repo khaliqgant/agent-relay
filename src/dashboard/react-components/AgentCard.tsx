@@ -21,6 +21,7 @@ export interface AgentCardProps {
   isSelected?: boolean;
   showBreadcrumb?: boolean;
   compact?: boolean;
+  displayNameOverride?: string; // Override the displayed name (e.g., strip team prefix)
   onClick?: (agent: Agent) => void;
   onMessageClick?: (agent: Agent) => void;
   onReleaseClick?: (agent: Agent) => void;
@@ -31,13 +32,14 @@ export function AgentCard({
   isSelected = false,
   showBreadcrumb = false,
   compact = false,
+  displayNameOverride,
   onClick,
   onMessageClick,
   onReleaseClick,
 }: AgentCardProps) {
   const colors = getAgentColor(agent.name);
   const initials = getAgentInitials(agent.name);
-  const displayName = getAgentDisplayName(agent.name);
+  const displayName = displayNameOverride || getAgentDisplayName(agent.name);
   const statusColor = STATUS_COLORS[agent.status] || STATUS_COLORS.offline;
 
   const handleClick = () => {

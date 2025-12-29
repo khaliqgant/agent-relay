@@ -1,41 +1,57 @@
 /**
  * Sidebar Component
  *
- * Main navigation sidebar with agent list, view mode toggle,
- * and quick actions.
+ * Main navigation sidebar with project/agent list, view mode toggle,
+ * and quick actions. Supports unified project navigation with nested agents.
  */
 
 import React, { useState } from 'react';
-import type { Agent } from '../../types';
+import type { Agent, Project } from '../../types';
 import { AgentList } from '../AgentList';
+import { ProjectList } from '../ProjectList';
 
 export interface SidebarProps {
   agents: Agent[];
+  projects?: Project[];
+  currentProject?: string;
   selectedAgent?: string;
   viewMode: 'local' | 'fleet';
   isFleetAvailable: boolean;
   isConnected: boolean;
-  onAgentSelect?: (agent: Agent) => void;
+  /** Mobile: whether sidebar is open */
+  isOpen?: boolean;
+  onAgentSelect?: (agent: Agent, project?: Project) => void;
+  onProjectSelect?: (project: Project) => void;
   onViewModeChange?: (mode: 'local' | 'fleet') => void;
   onSpawnClick?: () => void;
   onReleaseClick?: (agent: Agent) => void;
+  /** Mobile: close sidebar handler */
+  onClose?: () => void;
 }
 
 export function Sidebar({
   agents,
+  projects = [],
+  currentProject,
   selectedAgent,
   viewMode,
   isFleetAvailable,
   isConnected,
+  isOpen = false,
   onAgentSelect,
+  onProjectSelect,
   onViewModeChange,
   onSpawnClick,
   onReleaseClick,
+  onClose,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Determine if we should show unified project view
+  const hasProjects = projects.length > 0;
+
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
       {/* Header */}
       <div className="sidebar-header">
         <div className="sidebar-title">
@@ -78,17 +94,31 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Agent List */}
+      {/* Agent/Project List */}
       <div className="sidebar-content">
-        <AgentList
-          agents={agents}
-          selectedAgent={selectedAgent}
-          searchQuery={searchQuery}
-          onAgentSelect={onAgentSelect}
-          onReleaseClick={onReleaseClick}
-          compact={true}
-          showGroupStats={true}
-        />
+        {hasProjects ? (
+          <ProjectList
+            projects={projects}
+            localAgents={agents}
+            currentProject={currentProject}
+            selectedAgent={selectedAgent}
+            searchQuery={searchQuery}
+            onProjectSelect={onProjectSelect}
+            onAgentSelect={onAgentSelect}
+            onReleaseClick={onReleaseClick}
+            compact={true}
+          />
+        ) : (
+          <AgentList
+            agents={agents}
+            selectedAgent={selectedAgent}
+            searchQuery={searchQuery}
+            onAgentSelect={(agent) => onAgentSelect?.(agent)}
+            onReleaseClick={onReleaseClick}
+            compact={true}
+            showGroupStats={true}
+          />
+        )}
       </div>
 
       {/* Footer Actions */}
