@@ -337,7 +337,7 @@ export const agentListStyles = `
 
 .group-name {
   font-weight: 600;
-  color: #1a1a1a;
+  color: #e8e8e8;
 }
 
 .group-count {

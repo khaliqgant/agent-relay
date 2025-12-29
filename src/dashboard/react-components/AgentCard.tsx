@@ -67,13 +67,27 @@ export function AgentCard({
         <div className="agent-avatar-small" style={{ backgroundColor: colors.primary }}>
           <span style={{ color: colors.text }}>{initials}</span>
         </div>
-        <span className="agent-name">{agent.name}</span>
-        {agent.isProcessing ? (
-          <ThinkingDot isProcessing={true} />
-        ) : (
-          <div className="agent-status-dot" style={{ backgroundColor: statusColor }} />
-        )}
-        {agent.needsAttention && <div className="attention-badge" />}
+        <div className="agent-compact-info">
+          <span className="agent-name">{displayName}</span>
+          <span className="agent-breadcrumb-compact">{getAgentBreadcrumb(agent.name)}</span>
+        </div>
+        <div className="agent-compact-actions">
+          {agent.isSpawned && onReleaseClick && (
+            <button
+              className="release-btn-compact"
+              onClick={handleReleaseClick}
+              title="Kill agent"
+            >
+              <ReleaseIcon />
+            </button>
+          )}
+          {agent.isProcessing ? (
+            <ThinkingDot isProcessing={true} />
+          ) : (
+            <div className="agent-status-dot" style={{ backgroundColor: statusColor }} />
+          )}
+          {agent.needsAttention && <div className="attention-badge" />}
+        </div>
       </div>
     );
   }
@@ -397,32 +411,78 @@ export const agentCardStyles = `
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .agent-card-compact:hover {
-  background: var(--agent-light);
+  background: rgba(74, 158, 255, 0.08);
 }
 
 .agent-card-compact.selected {
-  background: var(--agent-light);
+  background: rgba(74, 158, 255, 0.12);
   border-left: 3px solid var(--agent-primary);
 }
 
-.agent-card-compact .agent-name {
+.agent-compact-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-card-compact .agent-name {
   font-size: 13px;
+  font-weight: 600;
+  color: #e8e8e8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.agent-breadcrumb-compact {
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-compact-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.release-btn-compact {
+  background: transparent;
+  border: none;
+  color: #666;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+  opacity: 0;
+}
+
+.agent-card-compact:hover .release-btn-compact {
+  opacity: 1;
+}
+
+.release-btn-compact:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
 .agent-card-compact .attention-badge {
   width: 8px;
   height: 8px;
-  margin-left: auto;
 }
 
 /* Thinking indicator section */
