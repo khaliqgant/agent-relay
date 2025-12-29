@@ -123,7 +123,7 @@ export function Sidebar({
 
       {/* Footer Actions */}
       <div className="sidebar-footer">
-        <a href="/metrics" className="nav-link metrics-link">
+        <a href="/metrics" className="metrics-link">
           <MetricsIcon />
           <span>Metrics</span>
         </a>
@@ -174,18 +174,11 @@ function PlusIcon() {
 
 function MetricsIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" strokeWidth="2">
-      {/* Animated bars with gradient */}
-      <defs>
-        <linearGradient id="metricsGradient" x1="0%" y1="100%" x2="0%" y2="0%">
-          <stop offset="0%" stopColor="#10b981" />
-          <stop offset="100%" stopColor="#34d399" />
-        </linearGradient>
-      </defs>
-      <path d="M3 3v18h18" stroke="currentColor" opacity="0.5" />
-      <rect x="6" y="14" width="3" height="6" rx="1" fill="url(#metricsGradient)" opacity="0.7" />
-      <rect x="11" y="8" width="3" height="12" rx="1" fill="url(#metricsGradient)" opacity="0.85" />
-      <rect x="16" y="4" width="3" height="16" rx="1" fill="url(#metricsGradient)" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18" />
+      <path d="M18 17V9" />
+      <path d="M13 17V5" />
+      <path d="M8 17v-3" />
     </svg>
   );
 }
@@ -333,93 +326,33 @@ export const sidebarStyles = `
   background: #4a4a5e;
 }
 
-.nav-link {
+/* Metrics Link - Matches spawn button style */
+.metrics-link {
+  width: 100%;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 10px 16px;
   margin-bottom: 8px;
-  background: linear-gradient(135deg, #2a2a3e 0%, #1e1e2e 100%);
-  border: 1px solid #3a3a4e;
-  border-radius: 8px;
+  background: #3a3a4e;
+  border: 1px solid #4a4a5e;
+  border-radius: 6px;
   color: #e8e8e8;
   font-size: 13px;
   font-weight: 500;
   text-decoration: none;
+  cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.nav-link:hover {
-  background: linear-gradient(135deg, #3a3a4e 0%, #2a2a3e 100%);
-  border-color: #00ffc8;
-  color: #00ffc8;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 255, 200, 0.15);
+.metrics-link:hover {
+  background: #4a4a5e;
+  border-color: #5a5a6e;
+  color: #fff;
 }
 
-.nav-link svg {
-  opacity: 0.8;
+.metrics-link svg {
   flex-shrink: 0;
-}
-
-.nav-link:hover svg {
-  opacity: 1;
-}
-
-/* Metrics Link - Distinctive emerald accent */
-.nav-link.metrics-link {
-  position: relative;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%);
-  border: 1px solid rgba(16, 185, 129, 0.4);
-  color: #34d399;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  overflow: hidden;
-}
-
-/* Subtle inner glow */
-.nav-link.metrics-link::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(52, 211, 153, 0.5), transparent);
-}
-
-/* Animated pulse dot indicator */
-.nav-link.metrics-link::after {
-  content: '';
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 6px;
-  height: 6px;
-  background: #10b981;
-  border-radius: 50%;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
-  animation: metricsPulse 2s ease-in-out infinite;
-}
-
-@keyframes metricsPulse {
-  0%, 100% { opacity: 0.6; transform: translateY(-50%) scale(1); }
-  50% { opacity: 1; transform: translateY(-50%) scale(1.2); }
-}
-
-.nav-link.metrics-link:hover {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0.1) 100%);
-  border-color: #10b981;
-  color: #6ee7b7;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-.nav-link.metrics-link:hover::after {
-  animation: none;
-  opacity: 1;
-  transform: translateY(-50%) scale(1.3);
 }
 `;
