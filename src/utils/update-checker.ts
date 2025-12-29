@@ -10,6 +10,7 @@ import path from 'node:path';
 import https from 'node:https';
 import http from 'node:http';
 import os from 'node:os';
+import { compare } from 'compare-versions';
 
 const PACKAGE_NAME = 'agent-relay';
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -101,22 +102,6 @@ function handleResponse(
   res.on('error', reject);
 }
 
-/**
- * Compare semver versions
- * Returns: 1 if a > b, -1 if a < b, 0 if equal
- */
-function compareVersions(a: string, b: string): number {
-  const partsA = a.replace(/^v/, '').split('.').map(Number);
-  const partsB = b.replace(/^v/, '').split('.').map(Number);
-
-  for (let i = 0; i < 3; i++) {
-    const numA = partsA[i] || 0;
-    const numB = partsB[i] || 0;
-    if (numA > numB) return 1;
-    if (numA < numB) return -1;
-  }
-  return 0;
-}
 
 export interface UpdateInfo {
   updateAvailable: boolean;
@@ -135,7 +120,7 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateInf
   // Return cached result if still valid
   if (cache && (now - cache.lastCheck) < CHECK_INTERVAL_MS) {
     const updateAvailable = cache.latestVersion
-      ? compareVersions(cache.latestVersion, currentVersion) > 0
+      ? compare(cache.latestVersion, currentVersion, '>')
       : false;
     return {
       updateAvailable,
@@ -148,7 +133,7 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateInf
   // Fetch latest version from npm
   try {
     const latestVersion = await fetchLatestVersion();
-    const updateAvailable = compareVersions(latestVersion, currentVersion) > 0;
+    const updateAvailable = compare(latestVersion, currentVersion, '>');
 
     writeCache({
       lastCheck: now,
