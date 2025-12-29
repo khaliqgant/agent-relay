@@ -55,7 +55,6 @@ function getDefaultUrl(): string {
 
 export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketReturn {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const wsUrl = opts.url || getDefaultUrl();
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -69,6 +68,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
+
+    // Compute URL at connection time (always on client)
+    const wsUrl = opts.url || getDefaultUrl();
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -115,7 +117,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     } catch (e) {
       setError(e instanceof Error ? e : new Error('Failed to create WebSocket'));
     }
-  }, [wsUrl, opts.reconnect, opts.maxReconnectAttempts, opts.reconnectDelay]);
+  }, [opts.url, opts.reconnect, opts.maxReconnectAttempts, opts.reconnectDelay]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
