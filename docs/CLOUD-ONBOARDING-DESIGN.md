@@ -2,11 +2,220 @@
 
 ## Overview
 
-Agent Relay Cloud provides a hosted version of agent-relay with:
+Agent Relay supports two deployment models with a unified authentication experience:
+
+### Deployment Models
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         AGENT RELAY CLOUD                                    │
+│                         (Fully Hosted)                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│  │   GitHub     │  │  Provider    │  │   Agent      │  │  Dashboard   │    │
+│  │   Repos      │  │   Auth       │  │   Execution  │  │   & Logs     │    │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
+│                                                                              │
+│  Everything runs in the cloud. Users just connect accounts.                 │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         SELF-HOSTED                                          │
+│                         (Local Execution)                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────────┐              │
+│  │  User's Machine / Server                                  │              │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │              │
+│  │  │  agent-relay │  │    Agents    │  │   Local      │    │              │
+│  │  │  daemon      │  │  (claude,    │  │   Repos      │    │              │
+│  │  │              │  │   codex)     │  │              │    │              │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘    │              │
+│  └───────────────────────────────────────────────────────────┘              │
+│                          │                                                   │
+│                          │ Optional: Sync to cloud dashboard                 │
+│                          ▼                                                   │
+│  ┌───────────────────────────────────────────────────────────┐              │
+│  │  Agent Relay Cloud (Optional)                             │              │
+│  │  • Auth management          • Team collaboration          │              │
+│  │  • Dashboard & logs         • Credential vault            │              │
+│  └───────────────────────────────────────────────────────────┘              │
+│                                                                              │
+│  Agents run locally. Cloud is optional for auth/dashboard.                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Feature Comparison
+
+| Feature | Cloud Hosted | Self-Hosted | Self-Hosted + Cloud |
+|---------|--------------|-------------|---------------------|
+| Agent execution | Cloud | Local | Local |
+| GitHub integration | ✅ Automatic | Manual clone | ✅ Webhook sync |
+| Provider auth | ✅ Device flow | Local login | ✅ Device flow |
+| Credential storage | ✅ Vault | Local files | ✅ Vault |
+| Dashboard | ✅ Hosted | localhost:3888 | ✅ Synced |
+| Team collaboration | ✅ Full | N/A | ✅ Full |
+| Offline mode | ❌ | ✅ | ✅ (degraded) |
+| Data locality | Cloud | Local | Hybrid |
+
+### When to Use Each
+
+**Cloud Hosted** - Best for:
+- Teams wanting zero infrastructure management
+- CI/CD integration with GitHub Actions
+- Users without local GPU/compute resources
+
+**Self-Hosted** - Best for:
+- Air-gapped environments
+- Strict data locality requirements
+- Users who already have agents installed locally
+
+**Self-Hosted + Cloud** - Best for:
+- Teams wanting local execution with cloud collaboration
+- Developers who want dashboard/logs without running locally
+- Enterprises with hybrid requirements
+
+---
+
+## Cloud Hosted Mode
+
+Agent Relay Cloud (fully hosted) provides:
 - Automatic server provisioning with supervisor
 - GitHub repository integration
-- Multi-provider agent authentication
+- Multi-provider agent authentication via device flow
 - Team management and collaboration
+- Centralized dashboard and logs
+
+---
+
+## Self-Hosted Mode
+
+For users running agent-relay locally, authentication can work in two ways:
+
+### Option A: Local Authentication (Fully Offline)
+
+Users authenticate directly with each provider's CLI:
+
+```bash
+# Install agent-relay
+npm install -g agent-relay
+
+# Authenticate providers locally (each opens browser)
+claude /login          # Login to Anthropic
+codex                  # Login to OpenAI (first run prompts)
+
+# Start agent-relay with local credentials
+agent-relay up
+agent-relay -n Alice claude "Start working on the feature"
+```
+
+Credentials are stored locally:
+- Claude: `~/.claude/.credentials.json` or macOS Keychain
+- Codex: `~/.codex/`
+- Google: `~/.config/gcloud/`
+
+### Option B: Self-Hosted + Cloud Auth (Hybrid)
+
+Users can optionally connect their local agent-relay to Agent Relay Cloud for:
+- Centralized credential management (device flow auth)
+- Team collaboration features
+- Cloud dashboard with synced logs
+
+```bash
+# Install and link to cloud account
+npm install -g agent-relay
+agent-relay cloud login    # Opens browser, authenticates with cloud
+
+# Cloud handles provider auth, syncs credentials down
+agent-relay cloud connect anthropic   # Device flow auth
+agent-relay cloud connect openai      # Device flow auth
+
+# Start locally - credentials pulled from cloud
+agent-relay up --cloud-sync
+agent-relay -n Alice claude "Start working"
+```
+
+### Self-Hosted Onboarding Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  agent-relay cloud login                                         │
+│                                                                  │
+│  Opening browser to authenticate...                             │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  If browser doesn't open, visit:                            ││
+│  │  https://relay.cloud/cli/auth?code=ABCD-1234               ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  ⏳ Waiting for authentication...                               │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+  ↓ After successful auth
+
+┌─────────────────────────────────────────────────────────────────┐
+│  ✅ Authenticated as user@example.com                            │
+│                                                                  │
+│  Your local agent-relay is now linked to Agent Relay Cloud.    │
+│                                                                  │
+│  Connected providers:                                           │
+│  • Anthropic (Claude)  ✅ Ready                                 │
+│  • OpenAI (Codex)      ❌ Not connected                         │
+│  • Google (Gemini)     ❌ Not connected                         │
+│                                                                  │
+│  To connect more providers:                                     │
+│    agent-relay cloud connect openai                             │
+│    agent-relay cloud connect google                             │
+│                                                                  │
+│  To start the daemon with cloud sync:                          │
+│    agent-relay up --cloud-sync                                  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Credential Sync Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Agent Relay Cloud                             │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Credential Vault (encrypted)                             │  │
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐                   │  │
+│  │  │Anthropic│  │ OpenAI  │  │ Google  │                   │  │
+│  │  │ tokens  │  │ tokens  │  │ tokens  │                   │  │
+│  │  └────┬────┘  └────┬────┘  └────┬────┘                   │  │
+│  └───────┼────────────┼────────────┼────────────────────────┘  │
+│          │            │            │                            │
+│          └────────────┼────────────┘                            │
+│                       │                                          │
+│                       ▼ Encrypted sync                           │
+└───────────────────────┼──────────────────────────────────────────┘
+                        │
+                        │ TLS + E2E encrypted
+                        │
+┌───────────────────────▼──────────────────────────────────────────┐
+│                    User's Machine                                 │
+│  ┌───────────────────────────────────────────────────────────┐   │
+│  │  agent-relay daemon                                       │   │
+│  │  ┌─────────────────────────────────────────────────────┐ │   │
+│  │  │  Local credential cache (encrypted, auto-refresh)  │ │   │
+│  │  └─────────────────────────────────────────────────────┘ │   │
+│  │                      │                                    │   │
+│  │           ┌──────────┼──────────┐                        │   │
+│  │           ▼          ▼          ▼                        │   │
+│  │      ┌────────┐ ┌────────┐ ┌────────┐                   │   │
+│  │      │ claude │ │ codex  │ │ gemini │                   │   │
+│  │      │ agent  │ │ agent  │ │ agent  │                   │   │
+│  │      └────────┘ └────────┘ └────────┘                   │   │
+│  └───────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
 
 ## Provider Authentication Architecture
 
