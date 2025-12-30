@@ -3,6 +3,7 @@
  */
 
 @import "tailwindcss";
+@config "../tailwind.config.js";
 
 /* CSS Custom Properties for Theme Switching */
 :root {
@@ -137,65 +138,6 @@ body {
 ::selection {
   background: var(--color-accent-light);
   color: var(--color-accent);
-}
-
-/* Mention Autocomplete Styles */
-.mention-autocomplete {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  right: 0;
-  max-height: 200px;
-  overflow-y: auto;
-  background: #1a1d21;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
-  z-index: 100;
-  margin-bottom: 4px;
-}
-
-.mention-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.mention-item:hover,
-.mention-item.selected {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.mention-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.mention-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.mention-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #d1d2d3;
-}
-
-.mention-description {
-  font-size: 12px;
-  color: #8d8d8e;
 }
 
 /* Reduced motion preference */

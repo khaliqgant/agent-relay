@@ -24,11 +24,7 @@ export function MessageList({
 }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+  const prevFilteredLengthRef = useRef<number>(0);
 
   // Filter messages for current channel
   const filteredMessages = messages.filter((msg) => {
@@ -37,6 +33,28 @@ export function MessageList({
     }
     return msg.from === currentChannel || msg.to === currentChannel;
   });
+
+  // Auto-scroll to bottom when new messages arrive in current channel
+  useEffect(() => {
+    const currentLength = filteredMessages.length;
+    const prevLength = prevFilteredLengthRef.current;
+
+    // Only scroll if new messages were added (not on initial render or channel switch)
+    if (currentLength > prevLength && prevLength > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (currentLength > 0 && prevLength === 0) {
+      // Initial load or channel switch - scroll immediately without animation
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+
+    prevFilteredLengthRef.current = currentLength;
+  }, [filteredMessages.length]);
+
+  // Reset scroll position when channel changes
+  useEffect(() => {
+    prevFilteredLengthRef.current = 0;
+    bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [currentChannel]);
 
   if (filteredMessages.length === 0) {
     return (
@@ -76,11 +94,12 @@ interface MessageItemProps {
 function MessageItem({ message, isHighlighted, onThreadClick }: MessageItemProps) {
   const colors = getAgentColor(message.from);
   const timestamp = formatTimestamp(message.timestamp);
+  const hasReplies = message.replyCount && message.replyCount > 0;
 
   return (
     <div
       className={`
-        flex gap-3 py-2 px-3 rounded-md transition-colors duration-150
+        group flex gap-3 py-2 px-3 rounded-md transition-colors duration-150
         hover:bg-white/[0.03]
         ${isHighlighted ? 'bg-warning-light border-l-[3px] border-l-warning pl-[9px]' : ''}
       `}
@@ -103,34 +122,96 @@ function MessageItem({ message, isHighlighted, onThreadClick }: MessageItemProps
               <span className="font-medium text-sm text-accent">{message.to}</span>
             </>
           )}
-          <span className="text-text-muted text-xs ml-auto">{timestamp}</span>
+          {message.thread && (
+            <span className="text-[10px] py-0.5 px-1.5 rounded font-medium bg-accent-light text-accent ml-1">
+              {message.thread}
+            </span>
+          )}
           {message.to === '*' && (
-            <span className="text-[10px] py-0.5 px-1.5 rounded uppercase font-medium bg-warning-light text-warning">
+            <span className="text-[10px] py-0.5 px-1.5 rounded uppercase font-medium bg-warning-light text-warning ml-1">
               broadcast
             </span>
           )}
+          <span className="text-text-muted text-xs ml-auto">{timestamp}</span>
+
+          {/* Thread/Reply button - icon on far right */}
+          <button
+            className={`
+              inline-flex items-center gap-1 p-1 rounded transition-all duration-150 cursor-pointer
+              ${hasReplies
+                ? 'text-accent hover:bg-bg-hover'
+                : 'text-text-muted opacity-0 group-hover:opacity-100 hover:text-accent hover:bg-bg-hover'}
+            `}
+            onClick={() => onThreadClick?.(message.id)}
+            title={hasReplies ? `${message.replyCount} ${message.replyCount === 1 ? 'reply' : 'replies'}` : 'Reply in thread'}
+          >
+            <ThreadIcon />
+            {hasReplies && (
+              <span className="text-xs">{message.replyCount}</span>
+            )}
+          </button>
         </div>
 
         <div className="text-sm leading-relaxed text-text-primary whitespace-pre-wrap break-words">
           {formatMessageBody(message.content)}
         </div>
-
-        {message.replyCount && message.replyCount > 0 && (
-          <button
-            className="inline-flex items-center gap-1 mt-2 py-1 px-2 bg-bg-hover border border-border rounded text-accent text-xs cursor-pointer transition-all duration-150 hover:bg-bg-active hover:border-border-dark hover:text-accent"
-            onClick={() => onThreadClick?.(message.id)}
-          >
-            <ThreadIcon />
-            <span>{message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}</span>
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
 /**
- * Format message body with newline preservation and link detection
+ * Check if a line looks like part of a table (has pipe characters)
+ */
+function isTableLine(line: string): boolean {
+  // Line has multiple pipe characters or starts/ends with pipe
+  const pipeCount = (line.match(/\|/g) || []).length;
+  return pipeCount >= 2 || (line.trim().startsWith('|') && line.trim().endsWith('|'));
+}
+
+/**
+ * Check if a line is a table separator (dashes and pipes)
+ */
+function isTableSeparator(line: string): boolean {
+  return /^[\s|:-]+$/.test(line) && line.includes('-') && line.includes('|');
+}
+
+interface ContentSection {
+  type: 'text' | 'table';
+  content: string;
+}
+
+/**
+ * Split content into text and table sections
+ */
+function splitContentSections(content: string): ContentSection[] {
+  const lines = content.split('\n');
+  const sections: ContentSection[] = [];
+  let currentSection: ContentSection | null = null;
+
+  for (const line of lines) {
+    const lineIsTable = isTableLine(line) || isTableSeparator(line);
+    const sectionType = lineIsTable ? 'table' : 'text';
+
+    if (!currentSection || currentSection.type !== sectionType) {
+      if (currentSection) {
+        sections.push(currentSection);
+      }
+      currentSection = { type: sectionType, content: line };
+    } else {
+      currentSection.content += '\n' + line;
+    }
+  }
+
+  if (currentSection) {
+    sections.push(currentSection);
+  }
+
+  return sections;
+}
+
+/**
+ * Format message body with newline preservation, link detection, and table support
  */
 function formatMessageBody(content: string): React.ReactNode {
   let normalizedContent = content
@@ -138,14 +219,45 @@ function formatMessageBody(content: string): React.ReactNode {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
 
-  const lines = normalizedContent.split('\n');
+  const sections = splitContentSections(normalizedContent);
 
-  return lines.map((line, i) => (
-    <React.Fragment key={i}>
-      {i > 0 && <br />}
-      {formatLine(line)}
-    </React.Fragment>
-  ));
+  // If only one section and not a table, use simple rendering
+  if (sections.length === 1 && sections[0].type === 'text') {
+    const lines = normalizedContent.split('\n');
+    return lines.map((line, i) => (
+      <React.Fragment key={i}>
+        {i > 0 && <br />}
+        {formatLine(line)}
+      </React.Fragment>
+    ));
+  }
+
+  // Render mixed content with tables
+  return sections.map((section, sectionIndex) => {
+    if (section.type === 'table') {
+      return (
+        <pre
+          key={sectionIndex}
+          className="font-mono text-xs leading-relaxed whitespace-pre overflow-x-auto my-2 p-3 bg-black/20 rounded border border-white/5"
+        >
+          {section.content}
+        </pre>
+      );
+    }
+
+    // Regular text section
+    const lines = section.content.split('\n');
+    return (
+      <span key={sectionIndex}>
+        {lines.map((line, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <br />}
+            {formatLine(line)}
+          </React.Fragment>
+        ))}
+      </span>
+    );
+  });
 }
 
 /**
@@ -216,3 +328,4 @@ function ThreadIcon() {
     </svg>
   );
 }
+

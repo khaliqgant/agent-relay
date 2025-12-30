@@ -15,6 +15,8 @@ export interface HeaderProps {
   selectedAgent?: Agent | null;
   onCommandPaletteOpen?: () => void;
   onSettingsClick?: () => void;
+  onHistoryClick?: () => void;
+  onNewConversationClick?: () => void;
   /** Mobile: open sidebar handler */
   onMenuClick?: () => void;
 }
@@ -24,6 +26,8 @@ export function Header({
   selectedAgent,
   onCommandPaletteOpen,
   onSettingsClick,
+  onHistoryClick,
+  onNewConversationClick,
   onMenuClick,
 }: HeaderProps) {
   const isGeneral = currentChannel === 'general';
@@ -83,6 +87,15 @@ export function Header({
 
       <div className="flex items-center gap-2">
         <button
+          className="flex items-center gap-1.5 py-1.5 px-3 bg-accent text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 hover:bg-accent-hover"
+          onClick={onNewConversationClick}
+          title="Start new conversation (⌘N)"
+        >
+          <NewMessageIcon />
+          <span className="max-md:hidden">New Message</span>
+        </button>
+
+        <button
           className="flex items-center gap-1.5 py-1.5 px-3 bg-bg-hover border border-border rounded-md text-text-secondary text-sm cursor-pointer transition-all duration-200 hover:bg-bg-active hover:text-text-primary"
           onClick={onCommandPaletteOpen}
           title="Command Palette (⌘K)"
@@ -94,10 +107,18 @@ export function Header({
           </kbd>
         </button>
 
+        <button
+          className="flex items-center justify-center p-1.5 bg-bg-hover border border-border rounded-md text-text-secondary cursor-pointer transition-all duration-200 hover:bg-bg-active hover:text-text-primary"
+          onClick={onHistoryClick}
+          title="Message History - View past conversations"
+        >
+          <HistoryIcon />
+        </button>
+
         <a
           href="/metrics"
           className="flex items-center justify-center p-1.5 bg-bg-hover border border-border rounded-md text-text-secondary cursor-pointer transition-all duration-200 hover:bg-bg-active hover:text-text-primary no-underline"
-          title="Metrics"
+          title="Fleet Metrics - View agent activity and statistics"
         >
           <MetricsIcon />
         </a>
@@ -114,11 +135,29 @@ export function Header({
   );
 }
 
+function NewMessageIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
 function SearchIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }

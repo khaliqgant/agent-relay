@@ -85,6 +85,8 @@ export interface TmuxWrapperConfig {
   outputStabilityTimeoutMs?: number;
   /** Poll interval when checking pane stability before injection (ms) */
   outputStabilityPollMs?: number;
+  /** Stream output to daemon for dashboard log viewing (default: true) */
+  streamLogs?: boolean;
 }
 
 /**
@@ -117,6 +119,7 @@ export class TmuxWrapper {
   private isInjecting = false;
   // Track processed output to avoid re-parsing
   private processedOutputLength = 0;
+  private lastLoggedLength = 0; // Track length for incremental log streaming
   private lastDebugLog = 0;
   private cliType: 'claude' | 'codex' | 'gemini' | 'droid' | 'other';
   private relayPrefix: string;
@@ -146,6 +149,7 @@ export class TmuxWrapper {
       activityIdleThresholdMs: 30_000, // Consider idle after 30s with no output
       outputStabilityTimeoutMs: 2000,
       outputStabilityPollMs: 200,
+      streamLogs: true, // Stream output to daemon for dashboard
       ...config,
     };
 
@@ -550,6 +554,16 @@ export class TmuxWrapper {
         this.lastOutputTime = Date.now();
         this.markActivity();
         this.processedOutputLength = stdout.length;
+
+        // Stream new output to daemon for dashboard log viewing
+        if (this.config.streamLogs && this.client.state === 'READY') {
+          // Send incremental output since last log
+          const newContent = cleanContent.substring(this.lastLoggedLength);
+          if (newContent.length > 0) {
+            this.client.sendLog(newContent);
+            this.lastLoggedLength = cleanContent.length;
+          }
+        }
       }
 
       // Send any commands found (deduplication handles repeats)

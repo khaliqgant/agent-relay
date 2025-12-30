@@ -10,9 +10,12 @@ import type { Agent, Project } from '../types';
 import { Sidebar } from './layout/Sidebar';
 import { Header } from './layout/Header';
 import { MessageList } from './MessageList';
+import { ThreadPanel } from './ThreadPanel';
 import { CommandPalette } from './CommandPalette';
 import { SpawnModal, type SpawnConfig } from './SpawnModal';
+import { NewConversationModal } from './NewConversationModal';
 import { SettingsPanel, defaultSettings, type Settings } from './SettingsPanel';
+import { ConversationHistory } from './ConversationHistory';
 import { MentionAutocomplete, getMentionQuery, completeMentionInValue } from './MentionAutocomplete';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAgents } from './hooks/useAgents';
@@ -47,6 +50,12 @@ export function App({ wsUrl }: AppProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
 
+  // Conversation history panel state
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  // New conversation modal state
+  const [isNewConversationOpen, setIsNewConversationOpen] = useState(false);
+
   // Mobile sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -75,6 +84,7 @@ export function App({ wsUrl }: AppProps) {
   // Message state management
   const {
     messages,
+    threadMessages,
     currentChannel,
     setCurrentChannel,
     currentThread,
@@ -141,12 +151,49 @@ export function App({ wsUrl }: AppProps) {
     setIsSettingsOpen(true);
   }, []);
 
+  // Handle history click
+  const handleHistoryClick = useCallback(() => {
+    setIsHistoryOpen(true);
+  }, []);
+
+  // Handle new conversation click
+  const handleNewConversationClick = useCallback(() => {
+    setIsNewConversationOpen(true);
+  }, []);
+
+  // Handle send from new conversation modal - select the channel after sending
+  const handleNewConversationSend = useCallback(async (to: string, content: string): Promise<boolean> => {
+    const success = await sendMessage(to, content);
+    if (success) {
+      // Switch to the channel we just messaged
+      if (to === '*') {
+        selectAgent(null);
+        setCurrentChannel('general');
+      } else {
+        const targetAgent = agents.find((a) => a.name === to);
+        if (targetAgent) {
+          selectAgent(targetAgent.name);
+          setCurrentChannel(targetAgent.name);
+        } else {
+          setCurrentChannel(to);
+        }
+      }
+    }
+    return success;
+  }, [sendMessage, selectAgent, setCurrentChannel, agents]);
+
   // Handle spawn agent
   const handleSpawn = useCallback(async (config: SpawnConfig): Promise<boolean> => {
     setIsSpawning(true);
     setSpawnError(null);
     try {
-      const result = await api.spawnAgent({ name: config.name, cli: config.command, team: config.team });
+      const result = await api.spawnAgent({
+        name: config.name,
+        cli: config.command,
+        team: config.team,
+        shadowOf: config.shadowOf,
+        shadowSpeakOn: config.shadowSpeakOn,
+      });
       if (!result.success) {
         setSpawnError(result.error || 'Failed to spawn agent');
         return false;
@@ -180,6 +227,10 @@ export function App({ wsUrl }: AppProps) {
   // Handle command palette
   const handleCommandPaletteOpen = useCallback(() => {
     setIsCommandPaletteOpen(true);
+  }, []);
+
+  const handleCommandPaletteClose = useCallback(() => {
+    setIsCommandPaletteOpen(false);
   }, []);
 
   // Apply theme to document
@@ -220,15 +271,21 @@ export function App({ wsUrl }: AppProps) {
         handleSpawnClick();
       }
 
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        handleNewConversationClick();
+      }
+
       if (e.key === 'Escape') {
         setIsCommandPaletteOpen(false);
         setIsSpawnModalOpen(false);
+        setIsNewConversationOpen(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleSpawnClick]);
+  }, [handleSpawnClick, handleNewConversationClick]);
 
   return (
     <div className="flex h-screen bg-bg-primary">
@@ -268,35 +325,58 @@ export function App({ wsUrl }: AppProps) {
           selectedAgent={selectedAgent}
           onCommandPaletteOpen={handleCommandPaletteOpen}
           onSettingsClick={handleSettingsClick}
+          onHistoryClick={handleHistoryClick}
+          onNewConversationClick={handleNewConversationClick}
           onMenuClick={() => setIsSidebarOpen(true)}
         />
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto">
-          {wsError ? (
-            <div className="flex flex-col items-center justify-center h-full text-text-muted text-center">
-              <ErrorIcon />
-              <h2 className="m-0 mb-2 text-text-primary">Connection Error</h2>
-              <p className="text-text-muted">{wsError.message}</p>
-              <button
-                className="mt-4 py-2 px-4 bg-accent text-white border-none rounded cursor-pointer transition-colors duration-200 hover:bg-accent-hover"
-                onClick={() => window.location.reload()}
-              >
-                Retry Connection
-              </button>
-            </div>
-          ) : !data ? (
-            <div className="flex flex-col items-center justify-center h-full text-text-muted text-center">
-              <LoadingSpinner />
-              <p>Connecting to dashboard...</p>
-            </div>
-          ) : (
-            <div className="h-full">
-              <MessageList
-                messages={messages}
-                currentChannel={currentChannel}
-                onThreadClick={(messageId) => setCurrentThread(messageId)}
-                highlightedMessageId={currentThread ?? undefined}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Message List */}
+          <div className={`flex-1 overflow-y-auto ${currentThread ? 'hidden md:block md:flex-[2]' : ''}`}>
+            {wsError ? (
+              <div className="flex flex-col items-center justify-center h-full text-text-muted text-center">
+                <ErrorIcon />
+                <h2 className="m-0 mb-2 text-text-primary">Connection Error</h2>
+                <p className="text-text-muted">{wsError.message}</p>
+                <button
+                  className="mt-4 py-2 px-4 bg-accent text-white border-none rounded cursor-pointer transition-colors duration-200 hover:bg-accent-hover"
+                  onClick={() => window.location.reload()}
+                >
+                  Retry Connection
+                </button>
+              </div>
+            ) : !data ? (
+              <div className="flex flex-col items-center justify-center h-full text-text-muted text-center">
+                <LoadingSpinner />
+                <p>Connecting to dashboard...</p>
+              </div>
+            ) : (
+              <div className="h-full">
+                <MessageList
+                  messages={messages}
+                  currentChannel={currentChannel}
+                  onThreadClick={(messageId) => setCurrentThread(messageId)}
+                  highlightedMessageId={currentThread ?? undefined}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Thread Panel */}
+          {currentThread && (
+            <div className="w-full md:w-[400px] md:min-w-[320px] md:max-w-[500px] flex-shrink-0">
+              <ThreadPanel
+                originalMessage={messages.find((m) => m.id === currentThread) ?? null}
+                replies={threadMessages(currentThread)}
+                onClose={() => setCurrentThread(null)}
+                onReply={async (content) => {
+                  // Send reply with thread ID
+                  const originalMessage = messages.find((m) => m.id === currentThread);
+                  if (!originalMessage) return false;
+                  return sendMessage(originalMessage.from, content, currentThread);
+                }}
+                isSending={isSending}
               />
             </div>
           )}
@@ -317,7 +397,7 @@ export function App({ wsUrl }: AppProps) {
       {/* Command Palette */}
       <CommandPalette
         isOpen={isCommandPaletteOpen}
-        onClose={() => setIsCommandPaletteOpen(false)}
+        onClose={handleCommandPaletteClose}
         agents={agents}
         projects={projects}
         currentProject={currentProject}
@@ -347,6 +427,22 @@ export function App({ wsUrl }: AppProps) {
         settings={settings}
         onSettingsChange={setSettings}
         onResetSettings={() => setSettings(defaultSettings)}
+      />
+
+      {/* Conversation History */}
+      <ConversationHistory
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+      />
+
+      {/* New Conversation Modal */}
+      <NewConversationModal
+        isOpen={isNewConversationOpen}
+        onClose={() => setIsNewConversationOpen(false)}
+        onSend={handleNewConversationSend}
+        agents={agents}
+        isSending={isSending}
+        error={sendError}
       />
     </div>
   );

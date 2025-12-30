@@ -348,31 +348,31 @@ export class SqliteStorageAdapter implements StorageAdapter {
     const params: unknown[] = [];
 
     if (query.sinceTs) {
-      clauses.push('ts >= ?');
+      clauses.push('m.ts >= ?');
       params.push(query.sinceTs);
     }
     if (query.from) {
-      clauses.push('sender = ?');
+      clauses.push('m.sender = ?');
       params.push(query.from);
     }
     if (query.to) {
-      clauses.push('recipient = ?');
+      clauses.push('m.recipient = ?');
       params.push(query.to);
     }
     if (query.topic) {
-      clauses.push('topic = ?');
+      clauses.push('m.topic = ?');
       params.push(query.topic);
     }
     if (query.thread) {
-      clauses.push('thread = ?');
+      clauses.push('m.thread = ?');
       params.push(query.thread);
     }
     if (query.unreadOnly) {
-      clauses.push('status = ?');
+      clauses.push('m.status = ?');
       params.push('unread');
     }
     if (query.urgentOnly) {
-      clauses.push('is_urgent = ?');
+      clauses.push('m.is_urgent = ?');
       params.push(1);
     }
 
@@ -381,10 +381,11 @@ export class SqliteStorageAdapter implements StorageAdapter {
     const limit = query.limit ?? 200;
 
     const stmt = this.db.prepare(`
-      SELECT id, ts, sender, recipient, topic, kind, body, data, payload_meta, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent, is_broadcast
-      FROM messages
+      SELECT m.id, m.ts, m.sender, m.recipient, m.topic, m.kind, m.body, m.data, m.payload_meta, m.thread, m.delivery_seq, m.delivery_session_id, m.session_id, m.status, m.is_urgent, m.is_broadcast,
+        (SELECT COUNT(*) FROM messages WHERE thread = m.id) as reply_count
+      FROM messages m
       ${where}
-      ORDER BY ts ${order}
+      ORDER BY m.ts ${order}
       LIMIT ?
     `);
 
@@ -406,6 +407,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
       status: row.status,
       is_urgent: row.is_urgent === 1,
       is_broadcast: row.is_broadcast === 1,
+      replyCount: row.reply_count || 0,
     }));
   }
 
@@ -424,10 +426,11 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
     // Support both exact match and prefix match (for short IDs like "06eb33da")
     const stmt = this.db.prepare(`
-      SELECT id, ts, sender, recipient, topic, kind, body, data, payload_meta, thread, delivery_seq, delivery_session_id, session_id, status, is_urgent, is_broadcast
-      FROM messages
-      WHERE id = ? OR id LIKE ?
-      ORDER BY ts DESC
+      SELECT m.id, m.ts, m.sender, m.recipient, m.topic, m.kind, m.body, m.data, m.payload_meta, m.thread, m.delivery_seq, m.delivery_session_id, m.session_id, m.status, m.is_urgent, m.is_broadcast,
+        (SELECT COUNT(*) FROM messages WHERE thread = m.id) as reply_count
+      FROM messages m
+      WHERE m.id = ? OR m.id LIKE ?
+      ORDER BY m.ts DESC
       LIMIT 1
     `);
 
@@ -451,6 +454,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
       status: row.status ?? 'unread',
       is_urgent: row.is_urgent === 1,
       is_broadcast: row.is_broadcast === 1,
+      replyCount: row.reply_count || 0,
     };
   }
 

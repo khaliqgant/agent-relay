@@ -300,7 +300,167 @@ export const api = {
       return { success: false, error: 'Network error' };
     }
   },
+
+  // ===== Conversation History API =====
+
+  /**
+   * Get historical sessions
+   */
+  async getHistorySessions(params?: {
+    agent?: string;
+    since?: number;
+    limit?: number;
+  }): Promise<ApiResponse<{ sessions: HistorySession[] }>> {
+    try {
+      const query = new URLSearchParams();
+      if (params?.agent) query.set('agent', params.agent);
+      if (params?.since) query.set('since', String(params.since));
+      if (params?.limit) query.set('limit', String(params.limit));
+
+      const response = await fetch(`${API_BASE}/api/history/sessions?${query}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        return { success: true, data };
+      }
+
+      return { success: false, error: 'Failed to fetch sessions' };
+    } catch (_error) {
+      return { success: false, error: 'Network error' };
+    }
+  },
+
+  /**
+   * Get historical messages
+   */
+  async getHistoryMessages(params?: {
+    from?: string;
+    to?: string;
+    thread?: string;
+    since?: number;
+    limit?: number;
+    order?: 'asc' | 'desc';
+    search?: string;
+  }): Promise<ApiResponse<{ messages: HistoryMessage[] }>> {
+    try {
+      const query = new URLSearchParams();
+      if (params?.from) query.set('from', params.from);
+      if (params?.to) query.set('to', params.to);
+      if (params?.thread) query.set('thread', params.thread);
+      if (params?.since) query.set('since', String(params.since));
+      if (params?.limit) query.set('limit', String(params.limit));
+      if (params?.order) query.set('order', params.order);
+      if (params?.search) query.set('search', params.search);
+
+      const response = await fetch(`${API_BASE}/api/history/messages?${query}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        return { success: true, data };
+      }
+
+      return { success: false, error: 'Failed to fetch messages' };
+    } catch (_error) {
+      return { success: false, error: 'Network error' };
+    }
+  },
+
+  /**
+   * Get unique conversations (agent pairs)
+   */
+  async getHistoryConversations(): Promise<ApiResponse<{ conversations: Conversation[] }>> {
+    try {
+      const response = await fetch(`${API_BASE}/api/history/conversations`);
+      const data = await response.json();
+
+      if (response.ok) {
+        return { success: true, data };
+      }
+
+      return { success: false, error: 'Failed to fetch conversations' };
+    } catch (_error) {
+      return { success: false, error: 'Network error' };
+    }
+  },
+
+  /**
+   * Get a single message by ID
+   */
+  async getHistoryMessage(id: string): Promise<ApiResponse<HistoryMessage>> {
+    try {
+      const response = await fetch(`${API_BASE}/api/history/message/${encodeURIComponent(id)}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        return { success: true, data };
+      }
+
+      return { success: false, error: data.error || 'Failed to fetch message' };
+    } catch (_error) {
+      return { success: false, error: 'Network error' };
+    }
+  },
+
+  /**
+   * Get storage statistics
+   */
+  async getHistoryStats(): Promise<ApiResponse<HistoryStats>> {
+    try {
+      const response = await fetch(`${API_BASE}/api/history/stats`);
+      const data = await response.json();
+
+      if (response.ok) {
+        return { success: true, data };
+      }
+
+      return { success: false, error: 'Failed to fetch stats' };
+    } catch (_error) {
+      return { success: false, error: 'Network error' };
+    }
+  },
 };
+
+// History API types
+export interface HistorySession {
+  id: string;
+  agentName: string;
+  cli?: string;
+  startedAt: string;
+  endedAt?: string;
+  duration: string;
+  messageCount: number;
+  summary?: string;
+  isActive: boolean;
+  closedBy?: 'agent' | 'disconnect' | 'error';
+}
+
+export interface HistoryMessage {
+  id: string;
+  from: string;
+  to: string;
+  content: string;
+  timestamp: string;
+  thread?: string;
+  isBroadcast?: boolean;
+  isUrgent?: boolean;
+  status?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface Conversation {
+  participants: string[];
+  lastMessage: string;
+  lastTimestamp: string;
+  messageCount: number;
+}
+
+export interface HistoryStats {
+  messageCount: number | string;
+  sessionCount: number | string;
+  activeSessions: number | string;
+  uniqueAgents: number | string;
+  oldestMessageDate?: string | null;
+}
 
 /**
  * Create a singleton WebSocket connection

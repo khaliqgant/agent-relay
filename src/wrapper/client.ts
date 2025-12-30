@@ -16,6 +16,7 @@ import {
   type ErrorPayload,
   type PayloadKind,
   type SpeakOnTrigger,
+  type LogPayload,
   PROTOCOL_VERSION,
 } from '../protocol/types.js';
 import { encodeFrame, FrameParser } from '../protocol/framing.js';
@@ -310,6 +311,31 @@ export class RelayClient {
     });
   }
 
+
+  /**
+   * Send log/output data to the daemon for dashboard streaming.
+   * Used by daemon-connected agents (not spawned workers) to stream their output.
+   * @param data - The log/output data to send
+   * @returns true if sent successfully, false otherwise
+   */
+  sendLog(data: string): boolean {
+    if (this._state !== 'READY') {
+      return false;
+    }
+
+    const envelope: Envelope<LogPayload> = {
+      v: PROTOCOL_VERSION,
+      type: 'LOG',
+      id: uuid(),
+      ts: Date.now(),
+      payload: {
+        data,
+        timestamp: Date.now(),
+      },
+    };
+
+    return this.send(envelope);
+  }
   private setState(state: ClientState): void {
     this._state = state;
     if (this.onStateChange) {

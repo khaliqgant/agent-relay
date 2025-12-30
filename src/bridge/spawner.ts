@@ -10,7 +10,14 @@ import { sleep } from './utils.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
 import { resolveCommand } from '../utils/command-resolver.js';
 import { PtyWrapper, type PtyWrapperConfig } from '../wrapper/pty-wrapper.js';
-import type { SpawnRequest, SpawnResult, WorkerInfo } from './types.js';
+import type {
+  SpawnRequest,
+  SpawnResult,
+  WorkerInfo,
+  SpawnWithShadowRequest,
+  SpawnWithShadowResult,
+  SpeakOnTrigger,
+} from './types.js';
 
 /** Worker metadata stored in workers.json */
 interface WorkerMeta {
@@ -142,6 +149,16 @@ export class AgentSpawner {
 
       // Create and start the pty wrapper
       const pty = new PtyWrapper(ptyConfig);
+
+      // Hook up output events for live log streaming
+      pty.on('output', (data: string) => {
+        // Broadcast to any connected WebSocket clients via global function
+        const broadcast = (global as any).__broadcastLogOutput;
+        if (broadcast) {
+          broadcast(name, data);
+        }
+      });
+
       await pty.start();
 
       if (debug) console.log(`[spawner:debug] PTY started, pid: ${pty.pid}`);
@@ -229,6 +246,97 @@ export class AgentSpawner {
         error: err.message,
       };
     }
+  }
+
+  /** Role presets for shadow agents */
+  private static readonly ROLE_PRESETS: Record<string, SpeakOnTrigger[]> = {
+    reviewer: ['CODE_WRITTEN', 'REVIEW_REQUEST', 'EXPLICIT_ASK'],
+    auditor: ['SESSION_END', 'EXPLICIT_ASK'],
+    active: ['ALL_MESSAGES'],
+  };
+
+  /**
+   * Spawn a primary agent with its shadow agent
+   *
+   * Example usage:
+   * ```ts
+   * const result = await spawner.spawnWithShadow({
+   *   primary: { name: 'Lead', command: 'claude', task: 'Implement feature X' },
+   *   shadow: { name: 'Auditor', role: 'reviewer', speakOn: ['CODE_WRITTEN'] }
+   * });
+   * ```
+   */
+  async spawnWithShadow(request: SpawnWithShadowRequest): Promise<SpawnWithShadowResult> {
+    const { primary, shadow } = request;
+    const debug = process.env.DEBUG_SPAWN === '1';
+
+    // Resolve shadow speakOn triggers
+    let speakOn: SpeakOnTrigger[] = ['EXPLICIT_ASK']; // Default
+
+    // Check for role preset
+    if (shadow.role && AgentSpawner.ROLE_PRESETS[shadow.role.toLowerCase()]) {
+      speakOn = AgentSpawner.ROLE_PRESETS[shadow.role.toLowerCase()];
+    }
+
+    // Override with explicit speakOn if provided
+    if (shadow.speakOn && shadow.speakOn.length > 0) {
+      speakOn = shadow.speakOn;
+    }
+
+    // Build shadow task prompt
+    const defaultPrompt = `You are a shadow agent monitoring "${primary.name}". You receive copies of their messages. Your role: ${shadow.role || 'observer'}. Stay passive unless your triggers activate: ${speakOn.join(', ')}.`;
+    const shadowTask = shadow.prompt || defaultPrompt;
+
+    if (debug) {
+      console.log(`[spawner] spawnWithShadow: primary=${primary.name}, shadow=${shadow.name}, speakOn=${speakOn.join(',')}`);
+    }
+
+    // Step 1: Spawn primary agent
+    const primaryResult = await this.spawn({
+      name: primary.name,
+      cli: primary.command || 'claude',
+      task: primary.task || '',
+      team: primary.team,
+    });
+
+    if (!primaryResult.success) {
+      return {
+        success: false,
+        primary: primaryResult,
+        error: `Failed to spawn primary agent: ${primaryResult.error}`,
+      };
+    }
+
+    // Step 2: Wait for primary to register before spawning shadow
+    // The spawn() method already waits, but we add a small delay for stability
+    await sleep(1000);
+
+    // Step 3: Spawn shadow agent with shadowOf and shadowSpeakOn
+    const shadowResult = await this.spawn({
+      name: shadow.name,
+      cli: shadow.command || primary.command || 'claude',
+      task: shadowTask,
+      shadowOf: primary.name,
+      shadowSpeakOn: speakOn,
+    });
+
+    if (!shadowResult.success) {
+      console.warn(`[spawner] Shadow agent ${shadow.name} failed to spawn, primary ${primary.name} continues without shadow`);
+      return {
+        success: true, // Primary succeeded, overall operation is partial success
+        primary: primaryResult,
+        shadow: shadowResult,
+        error: `Shadow spawn failed: ${shadowResult.error}`,
+      };
+    }
+
+    console.log(`[spawner] Spawned pair: ${primary.name} with shadow ${shadow.name} (speakOn: ${speakOn.join(',')})`);
+
+    return {
+      success: true,
+      primary: primaryResult,
+      shadow: shadowResult,
+    };
   }
 
   /**

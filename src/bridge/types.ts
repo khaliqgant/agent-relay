@@ -65,3 +65,54 @@ export interface WorkerInfo {
   /** PID of the pty process */
   pid?: number;
 }
+
+/** SpeakOn trigger types for shadow agents */
+export type SpeakOnTrigger = 'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES';
+
+/** Shadow role preset names */
+export type ShadowRolePreset = 'reviewer' | 'auditor' | 'active';
+
+/** Primary agent configuration for spawnWithShadow */
+export interface PrimaryAgentConfig {
+  /** Agent name */
+  name: string;
+  /** CLI command (default: 'claude') */
+  command?: string;
+  /** Initial task to send to the agent */
+  task?: string;
+  /** Team name to organize under */
+  team?: string;
+}
+
+/** Shadow agent configuration for spawnWithShadow */
+export interface ShadowAgentConfig {
+  /** Shadow agent name */
+  name: string;
+  /** CLI command (default: same as primary) */
+  command?: string;
+  /** Role preset (reviewer, auditor, active) or custom prompt */
+  role?: ShadowRolePreset | string;
+  /** Custom speakOn triggers (overrides role preset) */
+  speakOn?: SpeakOnTrigger[];
+  /** Custom prompt for the shadow agent */
+  prompt?: string;
+}
+
+/** Request for spawning a primary agent with its shadow */
+export interface SpawnWithShadowRequest {
+  /** Primary agent configuration */
+  primary: PrimaryAgentConfig;
+  /** Shadow agent configuration */
+  shadow: ShadowAgentConfig;
+}
+
+/** Result from spawnWithShadow */
+export interface SpawnWithShadowResult {
+  success: boolean;
+  /** Primary agent spawn result */
+  primary?: SpawnResult;
+  /** Shadow agent spawn result */
+  shadow?: SpawnResult;
+  /** Error message if overall operation failed */
+  error?: string;
+}

@@ -8,11 +8,15 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { getAgentColor, getAgentInitials } from '../lib/colors';
 
+export type SpeakOnTrigger = 'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES';
+
 export interface SpawnConfig {
   name: string;
   command: string;
   cwd?: string;
   team?: string;
+  shadowOf?: string;
+  shadowSpeakOn?: SpeakOnTrigger[];
 }
 
 export interface SpawnModalProps {
@@ -72,8 +76,19 @@ export function SpawnModal({
   const [customCommand, setCustomCommand] = useState('');
   const [cwd, setCwd] = useState('');
   const [team, setTeam] = useState('');
+  const [isShadow, setIsShadow] = useState(false);
+  const [shadowOf, setShadowOf] = useState('');
+  const [shadowSpeakOn, setShadowSpeakOn] = useState<SpeakOnTrigger[]>(['EXPLICIT_ASK']);
   const [localError, setLocalError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+
+  const SPEAK_ON_OPTIONS: { value: SpeakOnTrigger; label: string; description: string }[] = [
+    { value: 'EXPLICIT_ASK', label: 'Explicit Ask', description: 'When directly asked' },
+    { value: 'SESSION_END', label: 'Session End', description: 'When session ends' },
+    { value: 'CODE_WRITTEN', label: 'Code Written', description: 'When code is written' },
+    { value: 'REVIEW_REQUEST', label: 'Review Request', description: 'When review requested' },
+    { value: 'ALL_MESSAGES', label: 'All Messages', description: 'On every message' },
+  ];
 
   const suggestedName = useCallback(() => {
     const prefix = selectedTemplate.id === 'claude' ? 'claude' : selectedTemplate.id;
@@ -91,6 +106,9 @@ export function SpawnModal({
       setCustomCommand('');
       setCwd('');
       setTeam('');
+      setIsShadow(false);
+      setShadowOf('');
+      setShadowSpeakOn(['EXPLICIT_ASK']);
       setLocalError(null);
       setTimeout(() => nameInputRef.current?.focus(), 100);
     }
@@ -128,12 +146,19 @@ export function SpawnModal({
       return;
     }
 
+    if (isShadow && !shadowOf) {
+      setLocalError('Please select an agent to shadow');
+      return;
+    }
+
     setLocalError(null);
     const success = await onSpawn({
       name: finalName,
       command: command.trim(),
       cwd: cwd.trim() || undefined,
       team: team.trim() || undefined,
+      shadowOf: isShadow ? shadowOf : undefined,
+      shadowSpeakOn: isShadow ? shadowSpeakOn : undefined,
     });
 
     if (success) {
@@ -288,6 +313,93 @@ export function SpawnModal({
               onChange={(e) => setTeam(e.target.value)}
               disabled={isSpawning}
             />
+          </div>
+
+          {/* Shadow Agent Configuration */}
+          <div className="mb-5 p-4 border border-border rounded-lg bg-bg-hover/50">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <label className="block text-sm font-semibold text-text-primary">
+                  Shadow Mode
+                </label>
+                <span className="text-xs text-text-muted">Monitor another agent's messages</span>
+              </div>
+              <button
+                type="button"
+                className={`
+                  relative w-11 h-6 rounded-full transition-colors duration-200
+                  ${isShadow ? 'bg-accent' : 'bg-bg-active'}
+                `}
+                onClick={() => setIsShadow(!isShadow)}
+                disabled={isSpawning}
+                aria-pressed={isShadow}
+              >
+                <span
+                  className={`
+                    absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform duration-200 shadow-sm
+                    ${isShadow ? 'translate-x-5' : 'translate-x-0'}
+                  `}
+                />
+              </button>
+            </div>
+
+            {isShadow && (
+              <>
+                {/* Primary Agent Selection */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-text-secondary mb-2" htmlFor="shadow-of">
+                    Shadow Agent
+                  </label>
+                  <select
+                    id="shadow-of"
+                    className="w-full py-2.5 px-3.5 border border-border rounded-md text-sm font-sans outline-none bg-bg-primary text-text-primary transition-colors duration-150 focus:border-accent disabled:bg-bg-hover disabled:text-text-muted"
+                    value={shadowOf}
+                    onChange={(e) => setShadowOf(e.target.value)}
+                    disabled={isSpawning}
+                  >
+                    <option value="">Select an agent to shadow...</option>
+                    {existingAgents.map((agent) => (
+                      <option key={agent} value={agent}>
+                        {agent}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Speak On Triggers */}
+                <div>
+                  <label className="block text-sm font-medium text-text-secondary mb-2">
+                    Speak When
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {SPEAK_ON_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`
+                          py-1.5 px-3 rounded-md text-xs font-medium transition-all duration-150 border
+                          ${shadowSpeakOn.includes(option.value)
+                            ? 'bg-accent/20 border-accent text-accent'
+                            : 'bg-bg-primary border-border text-text-secondary hover:bg-bg-active hover:text-text-primary'
+                          }
+                        `}
+                        onClick={() => {
+                          if (shadowSpeakOn.includes(option.value)) {
+                            setShadowSpeakOn(shadowSpeakOn.filter(t => t !== option.value));
+                          } else {
+                            setShadowSpeakOn([...shadowSpeakOn, option.value]);
+                          }
+                        }}
+                        disabled={isSpawning}
+                        title={option.description}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Error Display */}

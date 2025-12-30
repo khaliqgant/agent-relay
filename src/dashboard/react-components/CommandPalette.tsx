@@ -19,6 +19,8 @@ export interface Command {
   action: () => void;
 }
 
+const CATEGORY_ORDER = ['projects', 'agents', 'actions', 'navigation', 'settings'] as const;
+
 export interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
@@ -33,8 +35,12 @@ export interface CommandPaletteProps {
   customCommands?: Command[];
 }
 
-export function CommandPalette({
-  isOpen,
+export function CommandPalette(props: CommandPaletteProps) {
+  if (!props.isOpen) return null;
+  return <CommandPaletteContent {...props} />;
+}
+
+function CommandPaletteContent({
   onClose,
   agents,
   projects = [],
@@ -48,8 +54,15 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedIndexRef = useRef(selectedIndex);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
 
   // Build command list
   const commands = useMemo(() => {
@@ -159,44 +172,43 @@ export function CommandPalette({
   }, [filteredCommands]);
 
   const flatCommands = useMemo(() => {
-    const order = ['projects', 'agents', 'actions', 'navigation', 'settings'];
-    return order.flatMap((cat) => groupedCommands[cat] || []);
+    return CATEGORY_ORDER.flatMap((cat) => groupedCommands[cat] || []);
   }, [groupedCommands]);
 
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
 
+  // Reset state when component mounts (palette opens)
   useEffect(() => {
-    if (isOpen) {
-      setQuery('');
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
-  }, [isOpen]);
+    setQuery('');
+    setSelectedIndex(0);
+  }, []);
 
+  // Scroll selected item into view
   useEffect(() => {
-    if (listRef.current && flatCommands.length > 0) {
-      const selectedEl = listRef.current.querySelector(`[data-index="${selectedIndex}"]`);
-      selectedEl?.scrollIntoView({ block: 'nearest' });
+    const selectedItem = itemRefs.current[selectedIndex];
+    if (selectedItem) {
+      selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
-  }, [selectedIndex, flatCommands.length]);
+  }, [selectedIndex]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setSelectedIndex((i) => Math.min(i + 1, flatCommands.length - 1));
+          setSelectedIndex(prev => Math.min(prev + 1, flatCommands.length - 1));
           break;
         case 'ArrowUp':
           e.preventDefault();
-          setSelectedIndex((i) => Math.max(i - 1, 0));
+          setSelectedIndex(prev => Math.max(prev - 1, 0));
           break;
         case 'Enter':
           e.preventDefault();
-          if (flatCommands[selectedIndex]) {
-            flatCommands[selectedIndex].action();
+          if (flatCommands[selectedIndexRef.current]) {
+            flatCommands[selectedIndexRef.current].action();
           }
           break;
         case 'Escape':
@@ -204,11 +216,11 @@ export function CommandPalette({
           onClose();
           break;
       }
-    },
-    [flatCommands, selectedIndex, onClose]
-  );
+    };
 
-  if (!isOpen) return null;
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [flatCommands, selectedIndex, onClose]);
 
   const categoryLabels: Record<string, string> = {
     projects: 'Projects',
@@ -233,12 +245,12 @@ export function CommandPalette({
           <SearchIcon />
           <input
             ref={inputRef}
+            autoFocus
             type="text"
             className="flex-1 border-none text-base font-sans outline-none bg-transparent text-text-primary placeholder:text-text-muted"
             placeholder="Search commands, agents..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
           />
           <kbd className="bg-sidebar-border border border-sidebar-hover rounded px-1.5 py-0.5 text-xs text-text-muted font-sans">
             ESC
@@ -251,8 +263,9 @@ export function CommandPalette({
               No results for "{query}"
             </div>
           ) : (
-            Object.entries(groupedCommands).map(([category, cmds]) => {
-              if (!cmds.length) return null;
+            CATEGORY_ORDER.map((category) => {
+              const cmds = groupedCommands[category];
+              if (!cmds?.length) return null;
               return (
                 <div key={category} className="mb-2">
                   <div className="text-xs font-semibold text-text-muted uppercase tracking-wider py-2 px-3">
@@ -263,11 +276,10 @@ export function CommandPalette({
                     return (
                       <button
                         key={cmd.id}
-                        data-index={idx}
+                        ref={el => { itemRefs.current[idx] = el; }}
                         className={`
-                          flex items-center gap-3 w-full py-2.5 px-3 border-none bg-transparent rounded-lg cursor-pointer text-left font-sans transition-colors duration-100
-                          hover:bg-sidebar-border
-                          ${idx === selectedIndex ? 'bg-accent-light border border-accent/30' : ''}
+                          flex items-center gap-3 w-full py-2.5 px-3 border-none rounded-lg cursor-pointer text-left font-sans transition-colors duration-100
+                          ${idx === selectedIndex ? 'bg-accent-light border border-accent/30' : 'bg-transparent hover:bg-sidebar-border'}
                         `}
                         onClick={cmd.action}
                         onMouseEnter={() => setSelectedIndex(idx)}

@@ -172,11 +172,17 @@ export interface SendMessageRequest {
   thread?: string;
 }
 
+export type SpeakOnTrigger = 'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES';
+
 export interface SpawnAgentRequest {
   name: string;
   cli?: string;
   task?: string;
   team?: string;
+  /** Primary agent to shadow (if this agent is a shadow) */
+  shadowOf?: string;
+  /** When the shadow should speak */
+  shadowSpeakOn?: SpeakOnTrigger[];
 }
 
 export interface SpawnAgentResponse {

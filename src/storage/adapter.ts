@@ -24,6 +24,8 @@ export interface StoredMessage {
   is_urgent: boolean;
   /** Whether the message was sent as a broadcast (to: '*') */
   is_broadcast?: boolean;
+  /** Number of replies in this thread (when message.id is used as thread) */
+  replyCount?: number;
 }
 
 export interface MessageQuery {
@@ -161,12 +163,21 @@ export class MemoryStorageAdapter implements StorageAdapter {
       result = result.slice(0, query.limit);
     }
 
-    return result;
+    // Calculate replyCount for each message (count of messages where thread === message.id)
+    return result.map(m => ({
+      ...m,
+      replyCount: this.messages.filter(msg => msg.thread === m.id).length,
+    }));
   }
 
   async getMessageById(id: string): Promise<StoredMessage | null> {
     // Support both exact match and prefix match (for short IDs)
-    return this.messages.find(m => m.id === id || m.id.startsWith(id)) ?? null;
+    const msg = this.messages.find(m => m.id === id || m.id.startsWith(id));
+    if (!msg) return null;
+    return {
+      ...msg,
+      replyCount: this.messages.filter(m => m.thread === msg.id).length,
+    };
   }
 
   async updateMessageStatus(id: string, status: MessageStatus): Promise<void> {

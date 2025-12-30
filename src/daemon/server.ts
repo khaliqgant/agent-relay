@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Connection, type ConnectionConfig, DEFAULT_CONFIG } from './connection.js';
 import { Router } from './router.js';
-import type { Envelope, SendPayload, ShadowBindPayload, ShadowUnbindPayload } from '../protocol/types.js';
+import type { Envelope, SendPayload, ShadowBindPayload, ShadowUnbindPayload, LogPayload } from '../protocol/types.js';
 import { createStorageAdapter, type StorageAdapter, type StorageConfig } from '../storage/adapter.js';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
@@ -43,6 +43,9 @@ export class Daemon {
   private storageInitialized = false;
   private registry?: AgentRegistry;
   private processingStateInterval?: NodeJS.Timeout;
+
+  /** Callback for log output from agents (used by dashboard for streaming) */
+  onLogOutput?: (agentName: string, data: string, timestamp: number) => void;
 
   /** Interval for writing processing state file (500ms for responsive UI) */
   private static readonly PROCESSING_STATE_INTERVAL_MS = 500;
@@ -378,6 +381,18 @@ export class Daemon {
           const currentPrimary = this.router.getPrimaryForShadow(connection.agentName);
           if (currentPrimary === payload.primaryAgent) {
             this.router.unbindShadow(connection.agentName);
+          }
+        }
+        break;
+
+      case 'LOG':
+        // Handle log output from daemon-connected agents
+        if (connection.agentName) {
+          const payload = envelope.payload as LogPayload;
+          const timestamp = payload.timestamp ?? envelope.ts;
+          // Forward to dashboard via callback
+          if (this.onLogOutput) {
+            this.onLogOutput(connection.agentName, payload.data, timestamp);
           }
         }
         break;

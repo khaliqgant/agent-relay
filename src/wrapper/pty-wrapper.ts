@@ -40,6 +40,8 @@ export interface PtyWrapperConfig {
   shadowOf?: string;
   /** When the shadow should speak (default: ['EXPLICIT_ASK']) */
   shadowSpeakOn?: SpeakOnTrigger[];
+  /** Stream output to daemon for dashboard log viewing (default: true) */
+  streamLogs?: boolean;
 }
 
 export interface PtyWrapperEvents {
@@ -61,6 +63,7 @@ export class PtyWrapper extends EventEmitter {
   private processedReleaseCommands: Set<string> = new Set();
   private messageQueue: Array<{ from: string; body: string; messageId: string }> = [];
   private isInjecting = false;
+  private readyForMessages = false;
   private logFilePath?: string;
   private logStream?: fs.WriteStream;
   private hasAcceptedPrompt = false;
@@ -164,8 +167,13 @@ export class PtyWrapper extends EventEmitter {
       this.client.destroy();
     });
 
-    // Inject initial instructions after a delay
-    setTimeout(() => this.injectInstructions(), 2000);
+    // Inject initial instructions after a delay, then mark ready for messages
+    setTimeout(() => {
+      this.injectInstructions();
+      this.readyForMessages = true;
+      // Process any messages that arrived while waiting
+      this.processMessageQueue();
+    }, 2000);
   }
 
   /**
@@ -182,6 +190,11 @@ export class PtyWrapper extends EventEmitter {
 
     // Emit for external listeners
     this.emit('output', data);
+
+    // Stream to daemon for dashboard log viewing (if connected)
+    if (this.config.streamLogs !== false && this.client.state === 'READY') {
+      this.client.sendLog(data);
+    }
 
     // Auto-accept Claude's first-run prompt for --dangerously-skip-permissions
     // The prompt shows: "2. Yes, I accept" - we send "2" to accept
@@ -507,6 +520,8 @@ export class PtyWrapper extends EventEmitter {
    * Process queued messages
    */
   private async processMessageQueue(): Promise<void> {
+    // Wait until instructions have been injected and agent is ready
+    if (!this.readyForMessages) return;
     if (this.isInjecting || this.messageQueue.length === 0) return;
     if (!this.ptyProcess || !this.running) return;
 
