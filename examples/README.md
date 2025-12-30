@@ -9,6 +9,8 @@ This folder contains examples for configuring agent-relay in different environme
 | `.env.example` | Environment variables for dotenv configuration |
 | `cli-usage.sh` | CLI command examples and options |
 | `programmatic-usage.ts` | Using agent-relay as a Node.js library |
+| `slack-claude-bot.ts` | Slack bot with Claude Code via agent-relay |
+| `slack-claude-standalone.ts` | Standalone Slack + Claude Code bot (no relay) |
 | `docker-compose.yml` | Docker Compose setup for containerized deployment |
 | `agent-relay.service` | Systemd service file for Linux servers |
 | `team-config.json` | Team configuration with multiple agents |
@@ -53,6 +55,42 @@ const daemon = new Daemon({
   storagePath: paths.dbPath,
 });
 ```
+
+## Slack Bot Examples
+
+Two Slack bot examples are included - both use Claude Code CLI (your subscription, no API costs).
+
+### Standalone Bot (Quick Test)
+
+No agent-relay needed - just Slack + Claude Code:
+
+```bash
+# Install Slack SDK
+npm install @slack/bolt
+
+# Run (ensure `claude` CLI is logged in)
+SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... npx ts-node examples/slack-claude-standalone.ts
+```
+
+### Agent-Relay Bridge
+
+Bridges Slack with your relay network - agents can send messages to Slack:
+
+```bash
+# Start relay daemon first
+agent-relay up
+
+# Run the bridge
+SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... npx ts-node examples/slack-claude-bot.ts
+```
+
+### Slack App Setup
+
+1. Create app at https://api.slack.com/apps
+2. Enable **Socket Mode** → copy App Token (`xapp-...`)
+3. **OAuth & Permissions** → add scopes: `app_mentions:read`, `chat:write`
+4. **Event Subscriptions** → subscribe to `app_mention`
+5. Install to workspace → copy Bot Token (`xoxb-...`)
 
 ## Configuration Priority
 
