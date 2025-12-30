@@ -47,6 +47,21 @@ export interface CloudConfig {
       apiToken: string;
     };
   };
+
+  // Stripe billing
+  stripe: {
+    secretKey: string;
+    publishableKey: string;
+    webhookSecret: string;
+    priceIds: {
+      proMonthly?: string;
+      proYearly?: string;
+      teamMonthly?: string;
+      teamYearly?: string;
+      enterpriseMonthly?: string;
+      enterpriseYearly?: string;
+    };
+  };
 }
 
 function requireEnv(name: string): string {
@@ -110,6 +125,20 @@ export function loadConfig(): CloudConfig {
             apiToken: optionalEnv('RAILWAY_API_TOKEN')!,
           }
         : undefined,
+    },
+
+    stripe: {
+      secretKey: requireEnv('STRIPE_SECRET_KEY'),
+      publishableKey: requireEnv('STRIPE_PUBLISHABLE_KEY'),
+      webhookSecret: requireEnv('STRIPE_WEBHOOK_SECRET'),
+      priceIds: {
+        proMonthly: optionalEnv('STRIPE_PRO_MONTHLY_PRICE_ID'),
+        proYearly: optionalEnv('STRIPE_PRO_YEARLY_PRICE_ID'),
+        teamMonthly: optionalEnv('STRIPE_TEAM_MONTHLY_PRICE_ID'),
+        teamYearly: optionalEnv('STRIPE_TEAM_YEARLY_PRICE_ID'),
+        enterpriseMonthly: optionalEnv('STRIPE_ENTERPRISE_MONTHLY_PRICE_ID'),
+        enterpriseYearly: optionalEnv('STRIPE_ENTERPRISE_YEARLY_PRICE_ID'),
+      },
     },
   };
 }

@@ -24,6 +24,8 @@ export { App, appStyles, type AppProps } from './App';
 export { MentionAutocomplete, mentionAutocompleteStyles, useMentionAutocomplete, getMentionQuery, completeMentionInValue, type MentionAutocompleteProps } from './MentionAutocomplete';
 export { WorkspaceSelector, workspaceSelectorStyles, type WorkspaceSelectorProps, type Workspace } from './WorkspaceSelector';
 export { AddWorkspaceModal, addWorkspaceModalStyles, type AddWorkspaceModalProps } from './AddWorkspaceModal';
+export { PricingPlans, pricingPlansStyles, type PricingPlansProps, type Plan } from './PricingPlans';
+export { BillingPanel, billingPanelStyles, type BillingPanelProps, type Subscription, type Invoice, type PaymentMethod } from './BillingPanel';
 
 // Layout Components
 export { Sidebar, sidebarStyles, type SidebarProps } from './layout/Sidebar';

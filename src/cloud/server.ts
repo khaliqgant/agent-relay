@@ -17,6 +17,7 @@ import { workspacesRouter } from './api/workspaces';
 import { reposRouter } from './api/repos';
 import { onboardingRouter } from './api/onboarding';
 import { teamsRouter } from './api/teams';
+import { billingRouter } from './api/billing';
 
 export interface CloudServer {
   app: Express;
@@ -69,6 +70,7 @@ export async function createServer(): Promise<CloudServer> {
   app.use('/api/repos', reposRouter);
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/teams', teamsRouter);
+  app.use('/api/billing', billingRouter);
 
   // Error handler
   app.use((err: Error, req: Request, res: Response, next: NextFunction) => {

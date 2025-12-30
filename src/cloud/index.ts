@@ -11,6 +11,9 @@ export { getConfig, loadConfig, CloudConfig } from './config';
 export { CredentialVault } from './vault';
 export { WorkspaceProvisioner, ProvisionConfig, Workspace, WorkspaceStatus } from './provisioner';
 
+// Billing
+export * from './billing';
+
 // Run if executed directly
 if (require.main === module) {
   (async () => {
