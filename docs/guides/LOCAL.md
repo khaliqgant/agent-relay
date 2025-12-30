@@ -26,9 +26,9 @@ This builds everything and starts:
 **URLs:**
 | Page | URL |
 |------|-----|
-| Landing Page | http://localhost:4281 |
-| Pricing | http://localhost:4281/pricing |
-| Dashboard | http://localhost:4281/app |
+| Landing Page | http://localhost:3888 |
+| Pricing | http://localhost:3888/pricing |
+| Dashboard | http://localhost:3888/app |
 
 **Commands:**
 ```bash
