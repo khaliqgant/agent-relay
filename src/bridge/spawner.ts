@@ -10,7 +10,14 @@ import { sleep } from './utils.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
 import { resolveCommand } from '../utils/command-resolver.js';
 import { PtyWrapper, type PtyWrapperConfig } from '../wrapper/pty-wrapper.js';
-import type { SpawnRequest, SpawnResult, WorkerInfo } from './types.js';
+import type {
+  SpawnRequest,
+  SpawnResult,
+  WorkerInfo,
+  SpawnWithShadowRequest,
+  SpawnWithShadowResult,
+  SpeakOnTrigger,
+} from './types.js';
 
 /** Worker metadata stored in workers.json */
 interface WorkerMeta {
@@ -114,6 +121,9 @@ export class AgentSpawner {
         cwd: this.projectRoot,
         logsDir: this.logsDir,
         dashboardPort: this.dashboardPort,
+        // Shadow agent configuration
+        shadowOf: request.shadowOf,
+        shadowSpeakOn: request.shadowSpeakOn,
         // Only use callbacks if dashboardPort is not set (for backwards compatibility)
         onSpawn: this.dashboardPort ? undefined : async (workerName, workerCli, workerTask) => {
           // Handle nested spawn requests (legacy path, may fail in non-TTY)
@@ -139,6 +149,16 @@ export class AgentSpawner {
 
       // Create and start the pty wrapper
       const pty = new PtyWrapper(ptyConfig);
+
+      // Hook up output events for live log streaming
+      pty.on('output', (data: string) => {
+        // Broadcast to any connected WebSocket clients via global function
+        const broadcast = (global as any).__broadcastLogOutput;
+        if (broadcast) {
+          broadcast(name, data);
+        }
+      });
+
       await pty.start();
 
       if (debug) console.log(`[spawner:debug] PTY started, pid: ${pty.pid}`);
@@ -156,10 +176,42 @@ export class AgentSpawner {
         };
       }
 
-      // Inject the initial task if provided
+      // Send task via relay message if provided (not via direct PTY injection)
+      // This ensures the agent is ready to receive before processing the task
       if (task && task.trim()) {
-        if (debug) console.log(`[spawner:debug] Injecting task: ${task.substring(0, 50)}...`);
-        pty.write(task + '\r');
+        if (debug) console.log(`[spawner:debug] Will send task via relay: ${task.substring(0, 50)}...`);
+
+        // If we have dashboard API, send task as relay message
+        if (this.dashboardPort) {
+          // Wait a moment for the agent's relay client to be ready
+          await sleep(1000);
+          try {
+            const response = await fetch(`http://localhost:${this.dashboardPort}/api/send`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: name,
+                body: task,
+                from: '__spawner__',
+              }),
+            });
+            const result = await response.json() as { success: boolean; error?: string };
+            if (result.success) {
+              if (debug) console.log(`[spawner:debug] Task sent via relay to ${name}`);
+            } else {
+              console.warn(`[spawner] Failed to send task via relay: ${result.error}`);
+              // Fall back to direct injection
+              pty.write(task + '\r');
+            }
+          } catch (err: any) {
+            console.warn(`[spawner] Relay send failed, falling back to direct injection: ${err.message}`);
+            pty.write(task + '\r');
+          }
+        } else {
+          // No dashboard API available - use direct injection as fallback
+          if (debug) console.log(`[spawner:debug] No dashboard API, using direct injection`);
+          pty.write(task + '\r');
+        }
       }
 
       // Track the worker
@@ -177,7 +229,8 @@ export class AgentSpawner {
       this.saveWorkersMetadata();
 
       const teamInfo = team ? ` [team: ${team}]` : '';
-      console.log(`[spawner] Spawned ${name} (${cli})${teamInfo} [pid: ${pty.pid}]`);
+      const shadowInfo = request.shadowOf ? ` [shadow of: ${request.shadowOf}]` : '';
+      console.log(`[spawner] Spawned ${name} (${cli})${teamInfo}${shadowInfo} [pid: ${pty.pid}]`);
 
       return {
         success: true,
@@ -193,6 +246,97 @@ export class AgentSpawner {
         error: err.message,
       };
     }
+  }
+
+  /** Role presets for shadow agents */
+  private static readonly ROLE_PRESETS: Record<string, SpeakOnTrigger[]> = {
+    reviewer: ['CODE_WRITTEN', 'REVIEW_REQUEST', 'EXPLICIT_ASK'],
+    auditor: ['SESSION_END', 'EXPLICIT_ASK'],
+    active: ['ALL_MESSAGES'],
+  };
+
+  /**
+   * Spawn a primary agent with its shadow agent
+   *
+   * Example usage:
+   * ```ts
+   * const result = await spawner.spawnWithShadow({
+   *   primary: { name: 'Lead', command: 'claude', task: 'Implement feature X' },
+   *   shadow: { name: 'Auditor', role: 'reviewer', speakOn: ['CODE_WRITTEN'] }
+   * });
+   * ```
+   */
+  async spawnWithShadow(request: SpawnWithShadowRequest): Promise<SpawnWithShadowResult> {
+    const { primary, shadow } = request;
+    const debug = process.env.DEBUG_SPAWN === '1';
+
+    // Resolve shadow speakOn triggers
+    let speakOn: SpeakOnTrigger[] = ['EXPLICIT_ASK']; // Default
+
+    // Check for role preset
+    if (shadow.role && AgentSpawner.ROLE_PRESETS[shadow.role.toLowerCase()]) {
+      speakOn = AgentSpawner.ROLE_PRESETS[shadow.role.toLowerCase()];
+    }
+
+    // Override with explicit speakOn if provided
+    if (shadow.speakOn && shadow.speakOn.length > 0) {
+      speakOn = shadow.speakOn;
+    }
+
+    // Build shadow task prompt
+    const defaultPrompt = `You are a shadow agent monitoring "${primary.name}". You receive copies of their messages. Your role: ${shadow.role || 'observer'}. Stay passive unless your triggers activate: ${speakOn.join(', ')}.`;
+    const shadowTask = shadow.prompt || defaultPrompt;
+
+    if (debug) {
+      console.log(`[spawner] spawnWithShadow: primary=${primary.name}, shadow=${shadow.name}, speakOn=${speakOn.join(',')}`);
+    }
+
+    // Step 1: Spawn primary agent
+    const primaryResult = await this.spawn({
+      name: primary.name,
+      cli: primary.command || 'claude',
+      task: primary.task || '',
+      team: primary.team,
+    });
+
+    if (!primaryResult.success) {
+      return {
+        success: false,
+        primary: primaryResult,
+        error: `Failed to spawn primary agent: ${primaryResult.error}`,
+      };
+    }
+
+    // Step 2: Wait for primary to register before spawning shadow
+    // The spawn() method already waits, but we add a small delay for stability
+    await sleep(1000);
+
+    // Step 3: Spawn shadow agent with shadowOf and shadowSpeakOn
+    const shadowResult = await this.spawn({
+      name: shadow.name,
+      cli: shadow.command || primary.command || 'claude',
+      task: shadowTask,
+      shadowOf: primary.name,
+      shadowSpeakOn: speakOn,
+    });
+
+    if (!shadowResult.success) {
+      console.warn(`[spawner] Shadow agent ${shadow.name} failed to spawn, primary ${primary.name} continues without shadow`);
+      return {
+        success: true, // Primary succeeded, overall operation is partial success
+        primary: primaryResult,
+        shadow: shadowResult,
+        error: `Shadow spawn failed: ${shadowResult.error}`,
+      };
+    }
+
+    console.log(`[spawner] Spawned pair: ${primary.name} with shadow ${shadow.name} (speakOn: ${speakOn.join(',')})`);
+
+    return {
+      success: true,
+      primary: primaryResult,
+      shadow: shadowResult,
+    };
   }
 
   /**

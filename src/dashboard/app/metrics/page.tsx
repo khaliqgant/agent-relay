@@ -2,6 +2,7 @@
  * Dashboard V2 - Metrics Page
  *
  * System metrics view showing agent health, throughput, and session lifecycle.
+ * Refined "mission control" aesthetic with Tailwind CSS.
  */
 
 'use client';
@@ -108,11 +109,10 @@ export default function MetricsPage() {
 
   if (loading) {
     return (
-      <div className="metrics-page">
-        <style>{styles}</style>
-        <div className="loading">
-          <div className="spinner" />
-          <p>Loading metrics...</p>
+      <div className="min-h-screen bg-bg-primary text-text-primary font-sans">
+        <div className="flex flex-col items-center justify-center h-screen gap-4">
+          <div className="w-8 h-8 border-2 border-border border-t-accent rounded-full animate-spin" />
+          <p className="text-text-muted text-sm">Loading metrics...</p>
         </div>
       </div>
     );
@@ -120,11 +120,20 @@ export default function MetricsPage() {
 
   if (error || !metrics) {
     return (
-      <div className="metrics-page">
-        <style>{styles}</style>
-        <div className="error-state">
-          <p>{error || 'No metrics available'}</p>
-          <button onClick={() => window.location.reload()}>Retry</button>
+      <div className="min-h-screen bg-bg-primary text-text-primary font-sans">
+        <div className="flex flex-col items-center justify-center h-screen gap-4">
+          <div className="w-12 h-12 rounded-full bg-error/10 flex items-center justify-center">
+            <svg className="w-6 h-6 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <p className="text-text-secondary">{error || 'No metrics available'}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-5 py-2.5 bg-accent text-white rounded-lg text-sm font-medium transition-colors hover:bg-accent-hover"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -134,21 +143,22 @@ export default function MetricsPage() {
                          (metrics.sessions?.errorRate ?? 0) <= 5 ? 'warning' : 'critical';
 
   return (
-    <div className="metrics-page">
-      <style>{styles}</style>
-
+    <div className="min-h-screen bg-bg-primary text-text-primary font-sans">
       {/* Header */}
-      <header className="header">
-        <div className="header-content">
-          <div className="header-left">
-            <Link href="/" className="back-link">
+      <header className="sticky top-0 z-50 bg-sidebar-bg border-b border-sidebar-border px-4 md:px-8 py-4">
+        <div className="max-w-[1400px] mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-text-muted text-sm font-medium px-3 py-2 rounded-md transition-all hover:text-accent hover:bg-accent/10"
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M19 12H5M12 19l-7-7 7-7"/>
               </svg>
-              Dashboard
+              <span className="hidden sm:inline">Dashboard</span>
             </Link>
-            <div className="logo">
-              <div className="logo-icon">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-gradient-to-br from-accent/80 to-accent rounded-lg flex items-center justify-center border border-accent/30">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M3 3v18h18"/>
                   <path d="M18 17V9"/>
@@ -156,51 +166,53 @@ export default function MetricsPage() {
                   <path d="M8 17v-3"/>
                 </svg>
               </div>
-              <div className="logo-text">Agent <span>Metrics</span></div>
+              <div className="text-lg font-semibold tracking-tight">
+                Agent <span className="text-accent">Metrics</span>
+              </div>
             </div>
           </div>
-          <div className="live-indicator">
-            <span className="live-dot" />
-            LIVE
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-success/10 border border-success/30 rounded-full">
+            <span className="w-2 h-2 bg-success rounded-full animate-pulse shadow-[0_0_8px_rgba(43,172,118,0.5)]" />
+            <span className="text-success text-xs font-semibold font-mono tracking-wide">LIVE</span>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="main">
+      <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-6">
         {/* Stats Overview */}
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-label">Total Agents</div>
-            <div className="stat-value accent-cyan">{metrics.totalAgents}</div>
-            <div className="stat-subtext">{metrics.onlineAgents} online / {metrics.offlineAgents} offline</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Online Now</div>
-            <div className="stat-value accent-green">{metrics.onlineAgents}</div>
-            <div className="stat-subtext">
-              {metrics.totalAgents > 0 ? Math.round((metrics.onlineAgents / metrics.totalAgents) * 100) : 0}% availability
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Total Messages</div>
-            <div className="stat-value accent-blue">{metrics.totalMessages.toLocaleString()}</div>
-            <div className="stat-subtext">all time</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Avg. Throughput</div>
-            <div className="stat-value accent-orange">{metrics.throughput.avgMessagesPerMinute}</div>
-            <div className="stat-subtext">messages / minute</div>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <StatCard
+            label="Total Agents"
+            value={metrics.totalAgents}
+            subtext={`${metrics.onlineAgents} online / ${metrics.offlineAgents} offline`}
+            accent="cyan"
+          />
+          <StatCard
+            label="Online Now"
+            value={metrics.onlineAgents}
+            subtext={`${metrics.totalAgents > 0 ? Math.round((metrics.onlineAgents / metrics.totalAgents) * 100) : 0}% availability`}
+            accent="green"
+          />
+          <StatCard
+            label="Total Messages"
+            value={metrics.totalMessages.toLocaleString()}
+            subtext="all time"
+            accent="purple"
+          />
+          <StatCard
+            label="Avg. Throughput"
+            value={metrics.throughput.avgMessagesPerMinute}
+            subtext="messages / minute"
+            accent="orange"
+          />
         </div>
 
         {/* Throughput Section */}
-        <section className="section">
-          <div className="section-header">
-            <h2 className="section-title">Message Throughput</h2>
-          </div>
-          <div className="throughput-panel">
-            <div className="throughput-grid">
+        <section className="mb-6">
+          <SectionHeader title="Message Throughput" />
+          <div className="bg-bg-secondary border border-border rounded-lg p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               <ThroughputItem value={metrics.throughput.messagesLastMinute} label="Last Minute" max={10} />
               <ThroughputItem value={metrics.throughput.messagesLastHour} label="Last Hour" max={100} />
               <ThroughputItem value={metrics.throughput.messagesLast24Hours} label="Last 24 Hours" max={1000} />
@@ -211,145 +223,109 @@ export default function MetricsPage() {
 
         {/* Session Lifecycle Section */}
         {metrics.sessions && (
-          <section className="section">
-            <div className="section-header">
-              <h2 className="section-title">Session Lifecycle</h2>
-              <span className={`error-rate-indicator ${errorRateClass}`}>
-                {(metrics.sessions.errorRate || 0).toFixed(1)}% error rate
-              </span>
+          <section className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <SectionHeader title="Session Lifecycle" />
+              <ErrorRateIndicator rate={metrics.sessions.errorRate || 0} status={errorRateClass} />
             </div>
-            <div className="lifecycle-panel">
-              <div className="lifecycle-grid">
-                <div className="lifecycle-item">
-                  <div className="lifecycle-value accent-purple">{metrics.sessions.totalSessions}</div>
-                  <div className="lifecycle-label">Total Sessions</div>
-                </div>
-                <div className="lifecycle-item">
-                  <div className="lifecycle-value accent-blue">{metrics.sessions.activeSessions}</div>
-                  <div className="lifecycle-label">Active</div>
-                </div>
-                <div className="lifecycle-item">
-                  <div className="lifecycle-value accent-green">{metrics.sessions.closedByAgent}</div>
-                  <div className="lifecycle-label">Clean Close</div>
-                </div>
-                <div className="lifecycle-item">
-                  <div className="lifecycle-value accent-orange">{metrics.sessions.closedByDisconnect}</div>
-                  <div className="lifecycle-label">Disconnect</div>
-                </div>
-                <div className="lifecycle-item">
-                  <div className="lifecycle-value accent-red">{metrics.sessions.closedByError}</div>
-                  <div className="lifecycle-label">Error</div>
-                </div>
+            <div className="bg-bg-secondary border border-border rounded-lg p-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-5 mb-6">
+                <LifecycleItem value={metrics.sessions.totalSessions} label="Total Sessions" accent="purple" />
+                <LifecycleItem value={metrics.sessions.activeSessions} label="Active" accent="blue" />
+                <LifecycleItem value={metrics.sessions.closedByAgent} label="Clean Close" accent="green" />
+                <LifecycleItem value={metrics.sessions.closedByDisconnect} label="Disconnect" accent="orange" />
+                <LifecycleItem value={metrics.sessions.closedByError} label="Error" accent="red" />
               </div>
 
               {metrics.sessions.recentSessions && metrics.sessions.recentSessions.length > 0 && (
-                <table className="sessions-table">
-                  <thead>
-                    <tr>
-                      <th>Agent</th>
-                      <th>Status</th>
-                      <th>Messages</th>
-                      <th>Started</th>
-                      <th>Duration</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {metrics.sessions.recentSessions.slice(0, 5).map((session, i) => {
-                      const started = new Date(session.startedAt);
-                      const ended = session.endedAt ? new Date(session.endedAt) : new Date();
-                      const durationSec = Math.floor((ended.getTime() - started.getTime()) / 1000);
-                      const closedClass = session.closedBy || 'active';
-                      const closedLabel = !session.closedBy ? 'Active' :
-                                         session.closedBy === 'agent' ? 'Clean' :
-                                         session.closedBy === 'disconnect' ? 'Disconnect' : 'Error';
+                <div className="overflow-x-auto -mx-6 px-6">
+                  <table className="w-full min-w-[500px]">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Agent</th>
+                        <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Status</th>
+                        <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Messages</th>
+                        <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Started</th>
+                        <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Duration</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {metrics.sessions.recentSessions.slice(0, 5).map((session, i) => {
+                        const started = new Date(session.startedAt);
+                        const ended = session.endedAt ? new Date(session.endedAt) : new Date();
+                        const durationSec = Math.floor((ended.getTime() - started.getTime()) / 1000);
 
-                      return (
-                        <tr key={i}>
-                          <td>
-                            <div className="agent-name">
-                              <div
-                                className="agent-avatar"
-                                style={{ background: getAvatarColor(session.agentName) }}
-                              >
-                                {getInitials(session.agentName)}
-                              </div>
-                              <span className="agent-name-text">{session.agentName}</span>
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`closed-badge ${closedClass}`}>{closedLabel}</span>
-                          </td>
-                          <td className="metric-cell">{session.messageCount}</td>
-                          <td className="uptime-cell">{formatTime(session.startedAt)}</td>
-                          <td className="uptime-cell">{formatDuration(durationSec)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                        return (
+                          <tr key={i} className="border-b border-border/50 last:border-0">
+                            <td className="py-3 px-4">
+                              <AgentCell name={session.agentName} />
+                            </td>
+                            <td className="py-3 px-4">
+                              <SessionStatusBadge closedBy={session.closedBy} />
+                            </td>
+                            <td className="py-3 px-4 font-mono text-sm text-accent">{session.messageCount}</td>
+                            <td className="py-3 px-4 font-mono text-sm text-text-muted">{formatTime(session.startedAt)}</td>
+                            <td className="py-3 px-4 font-mono text-sm text-text-muted">{formatDuration(durationSec)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </section>
         )}
 
         {/* Agent Health Section */}
-        <section className="section">
-          <div className="section-header">
-            <h2 className="section-title">Agent Health</h2>
-          </div>
-          <div className="agents-table-container">
+        <section className="mb-6">
+          <SectionHeader title="Agent Health" />
+          <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
             {metrics.agents.length === 0 ? (
-              <div className="empty-state">
-                <svg className="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <div className="py-12 text-center">
+                <svg className="w-12 h-12 mx-auto mb-4 text-text-muted opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                   <circle cx="12" cy="7" r="4"/>
                 </svg>
-                <p className="empty-state-text">No agents registered yet</p>
+                <p className="text-text-muted text-sm">No agents registered yet</p>
               </div>
             ) : (
-              <table className="agents-table">
-                <thead>
-                  <tr>
-                    <th>Agent</th>
-                    <th>Status</th>
-                    <th>Messages Sent</th>
-                    <th>Messages Received</th>
-                    <th>Uptime</th>
-                    <th>Last Seen</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {metrics.agents.map((agent) => (
-                    <tr key={agent.name}>
-                      <td>
-                        <div className="agent-name">
-                          <div
-                            className="agent-avatar"
-                            style={{ background: getAvatarColor(agent.name) }}
-                          >
-                            {getInitials(agent.name)}
-                          </div>
-                          <span className="agent-name-text">{agent.name}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className={`status-badge ${agent.isOnline ? 'online' : 'offline'}`}>
-                          {agent.isOnline ? 'Online' : 'Offline'}
-                        </span>
-                      </td>
-                      <td className="metric-cell sent">{agent.messagesSent.toLocaleString()}</td>
-                      <td className="metric-cell received">{agent.messagesReceived.toLocaleString()}</td>
-                      <td className="uptime-cell">{formatDuration(agent.uptimeSeconds)}</td>
-                      <td className="uptime-cell">{formatTime(agent.lastSeen)}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px]">
+                  <thead>
+                    <tr className="bg-bg-tertiary border-b border-border">
+                      <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Agent</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Status</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Sent</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Received</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Uptime</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-text-muted">Last Seen</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {metrics.agents.map((agent) => (
+                      <tr key={agent.name} className="border-b border-border/50 last:border-0 transition-colors hover:bg-bg-hover">
+                        <td className="py-3 px-4">
+                          <AgentCell name={agent.name} />
+                        </td>
+                        <td className="py-3 px-4">
+                          <OnlineStatusBadge isOnline={agent.isOnline} />
+                        </td>
+                        <td className="py-3 px-4 font-mono text-sm text-accent">{agent.messagesSent.toLocaleString()}</td>
+                        <td className="py-3 px-4 font-mono text-sm text-[#a78bfa]">{agent.messagesReceived.toLocaleString()}</td>
+                        <td className="py-3 px-4 font-mono text-sm text-text-muted">{formatDuration(agent.uptimeSeconds)}</td>
+                        <td className="py-3 px-4 font-mono text-sm text-text-muted">{formatTime(agent.lastSeen)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </section>
 
-        <div className="last-updated">
+        {/* Footer */}
+        <div className="text-center py-4 text-text-muted text-xs font-mono">
           Last updated: {formatTime(metrics.timestamp)}
         </div>
       </main>
@@ -357,531 +333,135 @@ export default function MetricsPage() {
   );
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Sub-components
+───────────────────────────────────────────────────────────── */
+
+function StatCard({ label, value, subtext, accent }: {
+  label: string;
+  value: string | number;
+  subtext: string;
+  accent: 'cyan' | 'green' | 'purple' | 'orange';
+}) {
+  const accentColors = {
+    cyan: 'text-accent',
+    green: 'text-success',
+    purple: 'text-[#a78bfa]',
+    orange: 'text-warning',
+  };
+
+  return (
+    <div className="bg-bg-secondary border border-border rounded-lg p-5 transition-all hover:border-border-dark hover:bg-bg-tertiary group">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-2">{label}</div>
+      <div className={`font-mono text-3xl font-bold ${accentColors[accent]} transition-transform group-hover:scale-105 origin-left`}>
+        {value}
+      </div>
+      <div className="text-xs text-text-muted font-mono mt-2">{subtext}</div>
+    </div>
+  );
+}
+
+function SectionHeader({ title }: { title: string }) {
+  return (
+    <h2 className="flex items-center gap-2.5 text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">
+      <span className="w-[3px] h-3.5 bg-accent rounded-sm" />
+      {title}
+    </h2>
+  );
+}
+
 function ThroughputItem({ value, label, max }: { value: number; label: string; max: number }) {
   const percentage = Math.min((value / max) * 100, 100);
+
   return (
-    <div className="throughput-item">
-      <div className="throughput-value">{value}</div>
-      <div className="throughput-label">{label}</div>
-      <div className="throughput-bar">
-        <div className="throughput-bar-fill" style={{ width: `${percentage}%` }} />
+    <div className="text-center">
+      <div className="font-mono text-4xl font-bold text-accent leading-none">{value}</div>
+      <div className="text-xs text-text-muted uppercase tracking-wide mt-2">{label}</div>
+      <div className="h-1 bg-border rounded-full mt-3 overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-accent to-[#6366f1] rounded-full transition-all duration-500"
+          style={{ width: `${percentage}%` }}
+        />
       </div>
     </div>
   );
 }
 
-const styles = `
-  .metrics-page {
-    min-height: 100vh;
-    background: #1a1d21;
-    color: #e8e8e8;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-
-  .header {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: #1a1a2e;
-    border-bottom: 1px solid #2a2a3e;
-    padding: 16px 32px;
-  }
-
-  .header-content {
-    max-width: 1400px;
-    margin: 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .back-link {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #888;
-    text-decoration: none;
-    font-size: 14px;
-    font-weight: 500;
-    padding: 8px 12px;
-    border-radius: 6px;
-    transition: all 0.2s;
-  }
-
-  .back-link:hover {
-    color: #4a9eff;
-    background: rgba(74, 158, 255, 0.1);
-  }
-
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .logo-icon {
-    width: 32px;
-    height: 32px;
-    background: linear-gradient(135deg, #1e3a5f 0%, #2a4a6e 100%);
-    border: 1px solid #3a5a7e;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .logo-text {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.3px;
-  }
-
-  .logo-text span {
-    color: #4a9eff;
-  }
-
-  .live-indicator {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    background: rgba(34, 197, 94, 0.1);
-    border: 1px solid rgba(34, 197, 94, 0.3);
-    border-radius: 20px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    font-weight: 500;
-    color: #22c55e;
-  }
-
-  .live-dot {
-    width: 8px;
-    height: 8px;
-    background: #22c55e;
-    border-radius: 50%;
-    animation: pulse 2s ease-in-out infinite;
-    box-shadow: 0 0 10px rgba(34, 197, 94, 0.4);
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(0.9); }
-  }
-
-  .main {
-    position: relative;
-    z-index: 1;
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 24px 32px 48px;
-  }
-
-  .loading, .error-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    gap: 16px;
-  }
-
-  .spinner {
-    width: 32px;
-    height: 32px;
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-top-color: #4a9eff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .error-state button {
-    padding: 10px 20px;
-    background: #1264a3;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin-bottom: 24px;
-  }
-
-  .stat-card {
-    background: #222529;
-    border: 1px solid #2a2a3e;
-    border-radius: 8px;
-    padding: 20px;
-    transition: all 0.2s ease;
-  }
-
-  .stat-card:hover {
-    border-color: #3a3a4e;
-    background: #282c30;
-  }
-
-  .stat-label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #888;
-    margin-bottom: 8px;
-  }
-
-  .stat-value {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 32px;
-    font-weight: 700;
-    line-height: 1;
-  }
-
-  .stat-value.accent-cyan { color: #4a9eff; }
-  .stat-value.accent-green { color: #22c55e; }
-  .stat-value.accent-orange { color: #f59e0b; }
-  .stat-value.accent-blue { color: #6366f1; }
-
-  .stat-subtext {
-    font-size: 12px;
-    color: #666;
-    margin-top: 8px;
-    font-family: 'IBM Plex Mono', monospace;
-  }
-
-  .section {
-    margin-bottom: 24px;
-  }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-  }
-
-  .section-title {
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #888;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .section-title::before {
-    content: '';
-    width: 3px;
-    height: 14px;
-    background: #4a9eff;
-    border-radius: 2px;
-  }
-
-  .throughput-panel, .lifecycle-panel {
-    background: #222529;
-    border: 1px solid #2a2a3e;
-    border-radius: 8px;
-    padding: 24px;
-  }
-
-  .throughput-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 24px;
-  }
-
-  .throughput-item {
-    text-align: center;
-  }
-
-  .throughput-value {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 40px;
-    font-weight: 700;
-    color: #4a9eff;
-    line-height: 1;
-  }
-
-  .throughput-label {
-    font-size: 12px;
-    color: #888;
-    margin-top: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .throughput-bar {
-    height: 4px;
-    background: #2a2a3e;
-    border-radius: 2px;
-    margin-top: 12px;
-    overflow: hidden;
-  }
-
-  .throughput-bar-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #4a9eff, #6366f1);
-    border-radius: 2px;
-    transition: width 0.5s ease;
-  }
-
-  .lifecycle-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 20px;
-  }
-
-  .lifecycle-item {
-    text-align: center;
-  }
-
-  .lifecycle-value {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 32px;
-    font-weight: 700;
-    line-height: 1;
-  }
-
-  .lifecycle-value.accent-purple { color: #a78bfa; }
-  .lifecycle-value.accent-red { color: #ef4444; }
-
-  .lifecycle-label {
-    font-size: 11px;
-    color: #888;
-    margin-top: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .error-rate-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: 'IBM Plex Mono', monospace;
-  }
-
-  .error-rate-indicator.healthy {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-  }
-
-  .error-rate-indicator.warning {
-    background: rgba(245, 158, 11, 0.15);
-    color: #f59e0b;
-  }
-
-  .error-rate-indicator.critical {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-  }
-
-  .sessions-table, .agents-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 16px;
-  }
-
-  .sessions-table th, .sessions-table td,
-  .agents-table th, .agents-table td {
-    padding: 12px 16px;
-    text-align: left;
-  }
-
-  .sessions-table th, .agents-table th {
-    background: #1a1a2e;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #888;
-    border-bottom: 1px solid #2a2a3e;
-  }
-
-  .sessions-table tr, .agents-table tr {
-    border-bottom: 1px solid #2a2a3e;
-  }
-
-  .sessions-table tr:last-child, .agents-table tr:last-child {
-    border-bottom: none;
-  }
-
-  .agents-table tr:hover {
-    background: rgba(74, 158, 255, 0.03);
-  }
-
-  .agents-table-container {
-    background: #222529;
-    border: 1px solid #2a2a3e;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .agent-name {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .agent-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 12px;
-    color: white;
-  }
-
-  .agent-name-text {
-    font-weight: 600;
-    font-family: 'IBM Plex Mono', monospace;
-  }
-
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 500;
-  }
-
-  .status-badge.online {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-  }
-
-  .status-badge.offline {
-    background: rgba(107, 114, 128, 0.15);
-    color: #6b7280;
-  }
-
-  .status-badge::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-  }
-
-  .closed-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 11px;
-    font-weight: 500;
-  }
-
-  .closed-badge.agent {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-  }
-
-  .closed-badge.disconnect {
-    background: rgba(245, 158, 11, 0.15);
-    color: #f59e0b;
-  }
-
-  .closed-badge.error {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-  }
-
-  .closed-badge.active {
-    background: rgba(74, 158, 255, 0.15);
-    color: #4a9eff;
-  }
-
-  .metric-cell {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 14px;
-  }
-
-  .metric-cell.sent { color: #4a9eff; }
-  .metric-cell.received { color: #a78bfa; }
-
-  .uptime-cell {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-    color: #888;
-  }
-
-  .empty-state {
-    padding: 48px 32px;
-    text-align: center;
-  }
-
-  .empty-state-icon {
-    width: 48px;
-    height: 48px;
-    margin: 0 auto 16px;
-    color: #666;
-    opacity: 0.5;
-  }
-
-  .empty-state-text {
-    color: #666;
-    font-size: 14px;
-  }
-
-  .last-updated {
-    text-align: center;
-    padding: 20px;
-    font-size: 12px;
-    color: #666;
-    font-family: 'IBM Plex Mono', monospace;
-  }
-
-  @media (max-width: 1200px) {
-    .stats-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    .throughput-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    .lifecycle-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-
-  @media (max-width: 768px) {
-    .header {
-      padding: 12px 16px;
-    }
-    .main {
-      padding: 16px;
-    }
-    .stats-grid {
-      grid-template-columns: 1fr;
-    }
-    .throughput-grid {
-      grid-template-columns: 1fr;
-    }
-    .lifecycle-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-`;
+function LifecycleItem({ value, label, accent }: {
+  value: number;
+  label: string;
+  accent: 'purple' | 'blue' | 'green' | 'orange' | 'red';
+}) {
+  const accentColors = {
+    purple: 'text-[#a78bfa]',
+    blue: 'text-accent',
+    green: 'text-success',
+    orange: 'text-warning',
+    red: 'text-error',
+  };
+
+  return (
+    <div className="text-center">
+      <div className={`font-mono text-3xl font-bold ${accentColors[accent]} leading-none`}>{value}</div>
+      <div className="text-[11px] text-text-muted uppercase tracking-wide mt-2">{label}</div>
+    </div>
+  );
+}
+
+function ErrorRateIndicator({ rate, status }: { rate: number; status: string }) {
+  const statusStyles = {
+    healthy: 'bg-success/15 text-success border-success/30',
+    warning: 'bg-warning/15 text-warning border-warning/30',
+    critical: 'bg-error/15 text-error border-error/30',
+  };
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold font-mono border ${statusStyles[status as keyof typeof statusStyles]}`}>
+      {rate.toFixed(1)}% error rate
+    </span>
+  );
+}
+
+function AgentCell({ name }: { name: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div
+        className="w-8 h-8 rounded-md flex items-center justify-center text-white text-xs font-semibold"
+        style={{ backgroundColor: getAvatarColor(name) }}
+      >
+        {getInitials(name)}
+      </div>
+      <span className="font-semibold font-mono text-sm">{name}</span>
+    </div>
+  );
+}
+
+function OnlineStatusBadge({ isOnline }: { isOnline: boolean }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+      isOnline
+        ? 'bg-success/15 text-success'
+        : 'bg-bg-hover text-text-muted'
+    }`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-success' : 'bg-text-muted'}`} />
+      {isOnline ? 'Online' : 'Offline'}
+    </span>
+  );
+}
+
+function SessionStatusBadge({ closedBy }: { closedBy?: 'agent' | 'disconnect' | 'error' }) {
+  const statusConfig = {
+    agent: { label: 'Clean', className: 'bg-success/15 text-success' },
+    disconnect: { label: 'Disconnect', className: 'bg-warning/15 text-warning' },
+    error: { label: 'Error', className: 'bg-error/15 text-error' },
+    active: { label: 'Active', className: 'bg-accent/15 text-accent' },
+  };
+
+  const config = statusConfig[closedBy || 'active'];
+
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-medium ${config.className}`}>
+      {config.label}
+    </span>
+  );
+}

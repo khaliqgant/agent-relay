@@ -19,6 +19,8 @@ export interface Command {
   action: () => void;
 }
 
+const CATEGORY_ORDER = ['projects', 'agents', 'actions', 'navigation', 'settings'] as const;
+
 export interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
@@ -33,8 +35,12 @@ export interface CommandPaletteProps {
   customCommands?: Command[];
 }
 
-export function CommandPalette({
-  isOpen,
+export function CommandPalette(props: CommandPaletteProps) {
+  if (!props.isOpen) return null;
+  return <CommandPaletteContent {...props} />;
+}
+
+function CommandPaletteContent({
   onClose,
   agents,
   projects = [],
@@ -48,13 +54,19 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedIndexRef = useRef(selectedIndex);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
 
   // Build command list
   const commands = useMemo(() => {
     const cmds: Command[] = [
-      // Project commands (if projects available)
       ...projects.map((project) => {
         const displayName = project.name || project.path.split('/').pop() || project.id;
         const isCurrent = project.id === currentProject;
@@ -72,7 +84,6 @@ export function CommandPalette({
           },
         };
       }),
-      // Agent commands
       ...agents.map((agent) => ({
         id: `agent-${agent.name}`,
         label: agent.name,
@@ -84,7 +95,6 @@ export function CommandPalette({
           onClose();
         },
       })),
-      // Action commands
       {
         id: 'spawn-agent',
         label: 'Spawn Agent',
@@ -104,11 +114,9 @@ export function CommandPalette({
         category: 'actions',
         icon: <BroadcastIcon />,
         action: () => {
-          // Focus composer with broadcast target
           onClose();
         },
       },
-      // Navigation commands
       {
         id: 'nav-general',
         label: 'Go to #general',
@@ -120,7 +128,6 @@ export function CommandPalette({
           onClose();
         },
       },
-      // Settings commands
       ...(onSettingsClick
         ? [
             {
@@ -137,16 +144,13 @@ export function CommandPalette({
             },
           ]
         : []),
-      // Custom commands
       ...customCommands,
     ];
     return cmds;
   }, [agents, projects, currentProject, onAgentSelect, onProjectSelect, onSpawnClick, onSettingsClick, onGeneralClick, onClose, customCommands]);
 
-  // Filter commands based on query
   const filteredCommands = useMemo(() => {
     if (!query.trim()) return commands;
-
     const lowerQuery = query.toLowerCase();
     return commands.filter(
       (cmd) =>
@@ -156,7 +160,6 @@ export function CommandPalette({
     );
   }, [commands, query]);
 
-  // Group commands by category
   const groupedCommands = useMemo(() => {
     const groups: Record<string, Command[]> = {};
     for (const cmd of filteredCommands) {
@@ -168,50 +171,44 @@ export function CommandPalette({
     return groups;
   }, [filteredCommands]);
 
-  // Flatten for keyboard navigation
   const flatCommands = useMemo(() => {
-    const order = ['projects', 'agents', 'actions', 'navigation', 'settings'];
-    return order.flatMap((cat) => groupedCommands[cat] || []);
+    return CATEGORY_ORDER.flatMap((cat) => groupedCommands[cat] || []);
   }, [groupedCommands]);
 
-  // Reset selection when query changes
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
 
-  // Focus input when opened
+  // Reset state when component mounts (palette opens)
   useEffect(() => {
-    if (isOpen) {
-      setQuery('');
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
-  }, [isOpen]);
+    setQuery('');
+    setSelectedIndex(0);
+  }, []);
 
   // Scroll selected item into view
   useEffect(() => {
-    if (listRef.current && flatCommands.length > 0) {
-      const selectedEl = listRef.current.querySelector(`[data-index="${selectedIndex}"]`);
-      selectedEl?.scrollIntoView({ block: 'nearest' });
+    const selectedItem = itemRefs.current[selectedIndex];
+    if (selectedItem) {
+      selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
-  }, [selectedIndex, flatCommands.length]);
+  }, [selectedIndex]);
 
   // Keyboard navigation
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setSelectedIndex((i) => Math.min(i + 1, flatCommands.length - 1));
+          setSelectedIndex(prev => Math.min(prev + 1, flatCommands.length - 1));
           break;
         case 'ArrowUp':
           e.preventDefault();
-          setSelectedIndex((i) => Math.max(i - 1, 0));
+          setSelectedIndex(prev => Math.max(prev - 1, 0));
           break;
         case 'Enter':
           e.preventDefault();
-          if (flatCommands[selectedIndex]) {
-            flatCommands[selectedIndex].action();
+          if (flatCommands[selectedIndexRef.current]) {
+            flatCommands[selectedIndexRef.current].action();
           }
           break;
         case 'Escape':
@@ -219,11 +216,11 @@ export function CommandPalette({
           onClose();
           break;
       }
-    },
-    [flatCommands, selectedIndex, onClose]
-  );
+    };
 
-  if (!isOpen) return null;
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [flatCommands, selectedIndex, onClose]);
 
   const categoryLabels: Record<string, string> = {
     projects: 'Projects',
@@ -236,33 +233,42 @@ export function CommandPalette({
   let globalIndex = 0;
 
   return (
-    <div className="command-palette-overlay" onClick={onClose}>
-      <div className="command-palette" onClick={(e) => e.stopPropagation()}>
-        <div className="command-palette-input-wrapper">
+    <div
+      className="fixed inset-0 bg-black/60 flex items-start justify-center pt-[15vh] z-[1000] animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="bg-sidebar-bg border border-sidebar-border rounded-xl w-[560px] max-w-[90vw] max-h-[60vh] flex flex-col shadow-modal animate-slide-down"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 p-4 border-b border-sidebar-border">
           <SearchIcon />
           <input
             ref={inputRef}
+            autoFocus
             type="text"
-            className="command-palette-input"
+            className="flex-1 border-none text-base font-sans outline-none bg-transparent text-text-primary placeholder:text-text-muted"
             placeholder="Search commands, agents..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
           />
-          <kbd className="command-palette-kbd">ESC</kbd>
+          <kbd className="bg-sidebar-border border border-sidebar-hover rounded px-1.5 py-0.5 text-xs text-text-muted font-sans">
+            ESC
+          </kbd>
         </div>
 
-        <div className="command-palette-list" ref={listRef}>
+        <div className="flex-1 overflow-y-auto p-2" ref={listRef}>
           {flatCommands.length === 0 ? (
-            <div className="command-palette-empty">
+            <div className="py-8 text-center text-text-muted text-sm">
               No results for "{query}"
             </div>
           ) : (
-            Object.entries(groupedCommands).map(([category, cmds]) => {
-              if (!cmds.length) return null;
+            CATEGORY_ORDER.map((category) => {
+              const cmds = groupedCommands[category];
+              if (!cmds?.length) return null;
               return (
-                <div key={category} className="command-palette-group">
-                  <div className="command-palette-group-label">
+                <div key={category} className="mb-2">
+                  <div className="text-xs font-semibold text-text-muted uppercase tracking-wider py-2 px-3">
                     {categoryLabels[category] || category}
                   </div>
                   {cmds.map((cmd) => {
@@ -270,20 +276,25 @@ export function CommandPalette({
                     return (
                       <button
                         key={cmd.id}
-                        data-index={idx}
-                        className={`command-palette-item ${idx === selectedIndex ? 'selected' : ''}`}
+                        ref={el => { itemRefs.current[idx] = el; }}
+                        className={`
+                          flex items-center gap-3 w-full py-2.5 px-3 border-none rounded-lg cursor-pointer text-left font-sans transition-colors duration-100
+                          ${idx === selectedIndex ? 'bg-accent-light border border-accent/30' : 'bg-transparent hover:bg-sidebar-border'}
+                        `}
                         onClick={cmd.action}
                         onMouseEnter={() => setSelectedIndex(idx)}
                       >
-                        <span className="command-palette-item-icon">{cmd.icon}</span>
-                        <span className="command-palette-item-content">
-                          <span className="command-palette-item-label">{cmd.label}</span>
+                        <span className="flex items-center justify-center w-7 h-7 text-text-muted">{cmd.icon}</span>
+                        <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+                          <span className="text-sm font-medium text-text-primary">{cmd.label}</span>
                           {cmd.description && (
-                            <span className="command-palette-item-desc">{cmd.description}</span>
+                            <span className="text-xs text-text-muted truncate">{cmd.description}</span>
                           )}
                         </span>
                         {cmd.shortcut && (
-                          <kbd className="command-palette-item-shortcut">{cmd.shortcut}</kbd>
+                          <kbd className="bg-sidebar-border border border-sidebar-hover rounded px-1.5 py-0.5 text-xs text-text-muted font-sans">
+                            {cmd.shortcut}
+                          </kbd>
                         )}
                       </button>
                     );
@@ -298,12 +309,11 @@ export function CommandPalette({
   );
 }
 
-// Icon components
 function AgentIcon({ name }: { name: string }) {
   const colors = getAgentColor(name);
   return (
     <div
-      className="command-palette-agent-icon"
+      className="w-7 h-7 rounded-md flex items-center justify-center text-xs font-semibold"
       style={{ backgroundColor: colors.primary, color: colors.text }}
     >
       {getAgentInitials(name)}
@@ -313,7 +323,7 @@ function AgentIcon({ name }: { name: string }) {
 
 function SearchIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg className="text-text-muted shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </svg>
@@ -365,188 +375,3 @@ function FolderIcon() {
     </svg>
   );
 }
-
-/**
- * CSS styles for the command palette - Dark mode
- */
-export const commandPaletteStyles = `
-.command-palette-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 15vh;
-  z-index: 1000;
-  animation: fadeIn 0.15s ease;
-}
-
-.command-palette {
-  background: #1a1a2e;
-  border: 1px solid #2a2a3e;
-  border-radius: 12px;
-  width: 560px;
-  max-width: 90vw;
-  max-height: 60vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 16px 70px rgba(0, 0, 0, 0.5);
-  animation: slideDown 0.2s ease;
-}
-
-.command-palette-input-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  border-bottom: 1px solid #2a2a3e;
-}
-
-.command-palette-input-wrapper svg {
-  color: #888;
-  flex-shrink: 0;
-}
-
-.command-palette-input {
-  flex: 1;
-  border: none;
-  font-size: 16px;
-  font-family: inherit;
-  outline: none;
-  background: transparent;
-  color: #e8e8e8;
-}
-
-.command-palette-input::placeholder {
-  color: #666;
-}
-
-.command-palette-kbd {
-  background: #2a2a3e;
-  border: 1px solid #3a3a4e;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 11px;
-  color: #888;
-  font-family: inherit;
-}
-
-.command-palette-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.command-palette-empty {
-  padding: 32px;
-  text-align: center;
-  color: #888;
-  font-size: 14px;
-}
-
-.command-palette-group {
-  margin-bottom: 8px;
-}
-
-.command-palette-group-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 8px 12px 4px;
-}
-
-.command-palette-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 10px 12px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  transition: background 0.1s;
-}
-
-.command-palette-item:hover {
-  background: #2a2a3e;
-}
-
-.command-palette-item.selected {
-  background: rgba(74, 158, 255, 0.15);
-  border: 1px solid rgba(74, 158, 255, 0.3);
-}
-
-.command-palette-item-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: #888;
-}
-
-.command-palette-agent-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.command-palette-item-content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.command-palette-item-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #e8e8e8;
-}
-
-.command-palette-item-desc {
-  font-size: 12px;
-  color: #888;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.command-palette-item-shortcut {
-  background: #2a2a3e;
-  border: 1px solid #3a3a4e;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 11px;
-  color: #888;
-  font-family: inherit;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-`;

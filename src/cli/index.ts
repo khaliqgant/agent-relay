@@ -18,6 +18,7 @@ import { RelayClient } from '../wrapper/client.js';
 import { generateAgentName } from '../utils/name-generator.js';
 import { getTmuxPath } from '../utils/tmux-resolver.js';
 import { readWorkersMetadata, getWorkerLogsDir } from '../bridge/spawner.js';
+import { getShadowForAgent } from '../bridge/shadow-config.js';
 import { checkForUpdatesInBackground, checkForUpdates } from '../utils/update-checker.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,6 +63,8 @@ program
   .option('-n, --name <name>', 'Agent name (auto-generated if not set)')
   .option('-q, --quiet', 'Disable debug output', false)
   .option('--prefix <pattern>', 'Relay prefix pattern (default: ->relay:)')
+  .option('--shadow <name>', 'Spawn a shadow agent with this name that monitors the primary')
+  .option('--shadow-role <role>', 'Shadow role: reviewer, auditor, or triggers (comma-separated: SESSION_END,CODE_WRITTEN,REVIEW_REQUEST,EXPLICIT_ASK,ALL_MESSAGES)')
   .argument('[command...]', 'Command to wrap (e.g., claude)')
   .action(async (commandParts, options) => {
     // If no command provided, show help
@@ -141,6 +144,70 @@ program
     });
 
     await wrapper.start();
+
+    // Determine shadow configuration - CLI flags take precedence over config file
+    type SpeakOnTrigger = 'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES';
+    let shadowName: string | undefined;
+    let shadowRole: string | undefined;
+    let speakOn: SpeakOnTrigger[] | undefined;
+    let shadowCli: string | undefined;
+    let shadowPrompt: string | undefined;
+
+    const rolePresets: Record<string, SpeakOnTrigger[]> = {
+      reviewer: ['CODE_WRITTEN', 'REVIEW_REQUEST', 'EXPLICIT_ASK'],
+      auditor: ['SESSION_END', 'EXPLICIT_ASK'],
+      active: ['ALL_MESSAGES'],
+    };
+
+    if (options.shadow) {
+      // CLI flags provided
+      shadowName = options.shadow;
+      const role = options.shadowRole || 'EXPLICIT_ASK';
+      shadowRole = role;
+
+      if (rolePresets[role.toLowerCase()]) {
+        speakOn = rolePresets[role.toLowerCase()];
+      } else {
+        speakOn = role.split(',').map((s: string) => s.trim().toUpperCase()) as SpeakOnTrigger[];
+      }
+    } else {
+      // Check config file for shadow configuration
+      const shadowConfig = getShadowForAgent(paths.projectRoot, agentName);
+      if (shadowConfig) {
+        shadowName = shadowConfig.shadowName;
+        shadowRole = shadowConfig.roleName;
+        speakOn = shadowConfig.speakOn;
+        shadowCli = shadowConfig.cli;
+        shadowPrompt = shadowConfig.prompt;
+        console.error(`Shadow config: ${shadowName} (from .agent-relay.json)`);
+      }
+    }
+
+    // Spawn shadow if configured
+    if (shadowName && speakOn) {
+      console.error(`Shadow: ${shadowName} (shadowing ${agentName}, speakOn: ${speakOn.join(',')})`);
+
+      // Wait for primary to register before spawning shadow
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Build shadow task prompt
+      const defaultPrompt = `You are a shadow agent monitoring "${agentName}". You receive copies of their messages. Your role: ${shadowRole || 'observer'}. Stay passive unless your triggers activate.`;
+      const shadowTask = shadowPrompt || defaultPrompt;
+
+      const result = await spawner.spawn({
+        name: shadowName,
+        cli: shadowCli || mainCommand,
+        task: shadowTask,
+        shadowOf: agentName,
+        shadowSpeakOn: speakOn,
+      });
+
+      if (result.success) {
+        console.error(`Shadow ${shadowName} started [pid: ${result.pid}]`);
+      } else {
+        console.error(`Failed to spawn shadow ${shadowName}: ${result.error}`);
+      }
+    }
   });
 
 // up - Start daemon + dashboard
@@ -309,6 +376,14 @@ program
           projectRoot: paths.projectRoot,
         });
         console.log(`Dashboard: http://localhost:${dashboardPort}`);
+
+        // Hook daemon log output to dashboard WebSocket
+        daemon.onLogOutput = (agentName, data, _timestamp) => {
+          const broadcast = (global as any).__broadcastLogOutput;
+          if (broadcast) {
+            broadcast(agentName, data);
+          }
+        };
       }
 
       // Determine if we should auto-spawn agents
@@ -1243,6 +1318,41 @@ program
       } catch (err) {
         console.error('Failed to read logs:', (err as Error).message);
       }
+    }
+  });
+
+// release - Release a spawned agent via API (works from any context, no terminal required)
+program
+  .command('release')
+  .description('Release a spawned agent via API (no terminal required)')
+  .argument('<name>', 'Agent name to release')
+  .option('--port <port>', 'Dashboard port', DEFAULT_DASHBOARD_PORT)
+  .action(async (name: string, options: { port?: string }) => {
+    const port = options.port || DEFAULT_DASHBOARD_PORT;
+
+    try {
+      const response = await fetch(`http://localhost:${port}/api/spawned/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      });
+
+      const result = await response.json() as { success: boolean; error?: string };
+
+      if (result.success) {
+        console.log(`Released agent: ${name}`);
+        process.exit(0);
+      } else {
+        console.error(`Failed to release ${name}: ${result.error || 'Unknown error'}`);
+        process.exit(1);
+      }
+    } catch (err: any) {
+      // If API call fails, try to provide helpful error message
+      if (err.code === 'ECONNREFUSED') {
+        console.error(`Cannot connect to dashboard at port ${port}. Is the daemon running?`);
+        console.log(`Run 'agent-relay up' to start the daemon.`);
+      } else {
+        console.error(`Failed to release ${name}: ${err.message}`);
+      }
+      process.exit(1);
     }
   });
 

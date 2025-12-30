@@ -85,7 +85,7 @@ Your message here.>>>
 Broadcast to all agents.>>>
 ```
 
-**CRITICAL:** Always end with `>>>` at the end of the last line of content!
+**CRITICAL:** Always close multi-line messages with `>>>` on its own line!
 
 ## Receiving Messages
 
@@ -108,6 +108,20 @@ Spawn workers to delegate tasks:
 ->relay:release WorkerName
 ```
 
+## Threads
+
+Use threads to group related messages together:
+
+```
+->relay:AgentName [thread:topic-name] <<<
+Your message here.>>>
+```
+
+**When to use threads:**
+- Working on a specific issue (e.g., `[thread:agent-relay-299]`)
+- Back-and-forth discussions with another agent
+- Code review conversations
+
 ## Common Patterns
 
 ```
@@ -120,7 +134,7 @@ DONE: Auth module complete>>>
 ->relay:Developer <<<
 TASK: Implement /api/register>>>
 
-->relay:Reviewer <<<
+->relay:Reviewer [thread:code-review-auth] <<<
 REVIEW: Please check src/auth/*.ts>>>
 
 ->relay:Architect <<<

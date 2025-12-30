@@ -124,7 +124,7 @@ export function MentionAutocomplete({
   // Scroll selected item into view
   useEffect(() => {
     if (!listRef.current) return;
-    const selected = listRef.current.querySelector('.mention-item.selected');
+    const selected = listRef.current.querySelector('[data-selected="true"]');
     if (selected) {
       selected.scrollIntoView({ block: 'nearest' });
     }
@@ -184,27 +184,33 @@ export function MentionAutocomplete({
   }
 
   return (
-    <div className="mention-autocomplete" ref={listRef}>
+    <div
+      className="absolute bottom-full left-0 right-0 max-h-[200px] overflow-y-auto bg-[#1a1d21] border border-white/10 rounded-lg shadow-[0_-4px_20px_rgba(0,0,0,0.4)] z-[100] mb-1"
+      ref={listRef}
+    >
       {options.map((option, index) => (
         <div
           key={option.name}
-          className={`mention-item ${index === selectedIndex ? 'selected' : ''}`}
+          data-selected={index === selectedIndex}
+          className={`flex items-center gap-2.5 py-2 px-3 cursor-pointer transition-colors duration-150 ${
+            index === selectedIndex ? 'bg-white/[0.08]' : 'hover:bg-white/[0.08]'
+          }`}
           onClick={() => handleClick(option)}
           onMouseEnter={() => setSelectedIndex(index)}
         >
           <div
-            className="mention-avatar"
+            className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[11px] font-semibold"
             style={{
               background: option.isBroadcast
-                ? 'var(--accent-warning, #f59e0b)'
+                ? 'var(--color-warning, #f59e0b)'
                 : getAgentColor(option.name).primary,
             }}
           >
             {option.isBroadcast ? '*' : getAgentInitials(option.name)}
           </div>
-          <div className="mention-info">
-            <span className="mention-name">{option.displayName}</span>
-            <span className="mention-description">{option.description}</span>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium text-[#d1d2d3]">{option.displayName}</span>
+            <span className="text-xs text-[#8d8d8e]">{option.description}</span>
           </div>
         </div>
       ))}
@@ -248,87 +254,3 @@ export function useMentionAutocomplete(agents: Agent[]) {
     handleClose,
   };
 }
-
-/**
- * CSS styles for mention autocomplete
- */
-export const mentionAutocompleteStyles = `
-.mention-autocomplete {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  right: 0;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--bg-primary, #ffffff);
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 8px;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
-  z-index: 100;
-  margin-bottom: 4px;
-}
-
-.mention-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.mention-item:hover,
-.mention-item.selected {
-  background: var(--bg-hover, #f3f4f6);
-}
-
-.mention-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.mention-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.mention-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary, #1f2937);
-}
-
-.mention-description {
-  font-size: 12px;
-  color: var(--text-muted, #6b7280);
-}
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  .mention-autocomplete {
-    background: var(--bg-primary, #1f2937);
-    border-color: var(--border-color, #374151);
-  }
-
-  .mention-item:hover,
-  .mention-item.selected {
-    background: var(--bg-hover, #374151);
-  }
-
-  .mention-name {
-    color: var(--text-primary, #f9fafb);
-  }
-
-  .mention-description {
-    color: var(--text-muted, #9ca3af);
-  }
-}
-`;

@@ -76,7 +76,7 @@ export function AgentList({
 
   if (agents.length === 0) {
     return (
-      <div className="agent-list-empty">
+      <div className="flex flex-col items-center justify-center py-10 px-5 text-text-muted text-center">
         <EmptyIcon />
         <p>No agents connected</p>
       </div>
@@ -85,7 +85,7 @@ export function AgentList({
 
   if (filteredAgents.length === 0) {
     return (
-      <div className="agent-list-empty">
+      <div className="flex flex-col items-center justify-center py-10 px-5 text-text-muted text-center">
         <SearchIcon />
         <p>No agents match "{searchQuery}"</p>
       </div>
@@ -93,11 +93,14 @@ export function AgentList({
   }
 
   return (
-    <div className="agent-list">
+    <div className="flex flex-col gap-1">
       {groups.length > 1 && (
-        <div className="agent-list-header">
-          <span className="agent-count">{filteredAgents.length} agents</span>
-          <button className="toggle-all-btn" onClick={toggleAll}>
+        <div className="flex justify-between items-center py-2 px-3 text-xs text-text-muted">
+          <span>{filteredAgents.length} agents</span>
+          <button
+            className="bg-transparent border-none text-accent cursor-pointer text-xs hover:underline"
+            onClick={toggleAll}
+          >
             {allExpanded ? 'Collapse all' : 'Expand all'}
           </button>
         </div>
@@ -147,31 +150,34 @@ function AgentGroupComponent({
   const stats = showStats ? getGroupStats(group.agents) : null;
 
   return (
-    <div className="agent-group">
+    <div className="mb-1">
       <button
-        className="agent-group-header"
+        className="flex items-center gap-2 w-full py-2 px-3 bg-transparent border-none cursor-pointer text-sm text-left rounded transition-colors duration-200 relative hover:bg-[var(--group-light)]"
         onClick={onToggle}
         style={{
           '--group-color': group.color.primary,
           '--group-light': group.color.light,
         } as React.CSSProperties}
       >
-        <div className="group-color-bar" />
+        <div
+          className="absolute left-0 top-1 bottom-1 w-[3px] rounded-sm"
+          style={{ backgroundColor: group.color.primary }}
+        />
         <ChevronIcon expanded={isExpanded} />
-        <span className="group-name">{group.displayName}</span>
-        <span className="group-count">({group.agents.length})</span>
+        <span className="font-semibold text-text-primary">{group.displayName}</span>
+        <span className="text-text-muted font-normal">({group.agents.length})</span>
 
         {showStats && stats && (
-          <div className="group-stats">
+          <div className="ml-auto flex gap-2">
             {stats.online > 0 && (
-              <span className="stat online">
-                <span className="stat-dot" style={{ backgroundColor: STATUS_COLORS.online }} />
+              <span className="flex items-center gap-1 text-xs text-text-muted">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STATUS_COLORS.online }} />
                 {stats.online}
               </span>
             )}
             {stats.needsAttention > 0 && (
-              <span className="stat attention">
-                <span className="stat-dot" style={{ backgroundColor: STATUS_COLORS.attention }} />
+              <span className="flex items-center gap-1 text-xs text-text-muted">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STATUS_COLORS.attention }} />
                 {stats.needsAttention}
               </span>
             )}
@@ -180,7 +186,7 @@ function AgentGroupComponent({
       </button>
 
       {isExpanded && (
-        <div className="agent-group-content">
+        <div className="py-1 pl-4 flex flex-col gap-2">
           {group.agents.map((agent) => (
             <AgentCard
               key={agent.name}
@@ -202,7 +208,7 @@ function AgentGroupComponent({
 function ChevronIcon({ expanded }: { expanded: boolean }) {
   return (
     <svg
-      className={`chevron-icon ${expanded ? 'expanded' : ''}`}
+      className={`text-text-muted transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
       width="16"
       height="16"
       viewBox="0 0 24 24"
@@ -218,6 +224,7 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
 function EmptyIcon() {
   return (
     <svg
+      className="mb-3 opacity-50"
       width="48"
       height="48"
       viewBox="0 0 24 24"
@@ -234,6 +241,7 @@ function EmptyIcon() {
 function SearchIcon() {
   return (
     <svg
+      className="mb-3 opacity-50"
       width="48"
       height="48"
       viewBox="0 0 24 24"
@@ -246,130 +254,3 @@ function SearchIcon() {
     </svg>
   );
 }
-
-/**
- * CSS styles for the component
- */
-export const agentListStyles = `
-.agent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.agent-list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  font-size: 12px;
-  color: #666;
-}
-
-.toggle-all-btn {
-  background: none;
-  border: none;
-  color: #1264a3;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.toggle-all-btn:hover {
-  text-decoration: underline;
-}
-
-.agent-list-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 20px;
-  color: #888;
-  text-align: center;
-}
-
-.agent-list-empty svg {
-  margin-bottom: 12px;
-  opacity: 0.5;
-}
-
-.agent-group {
-  margin-bottom: 4px;
-}
-
-.agent-group-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 13px;
-  text-align: left;
-  border-radius: 4px;
-  transition: background 0.2s;
-  position: relative;
-}
-
-.agent-group-header:hover {
-  background: var(--group-light);
-}
-
-.group-color-bar {
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 3px;
-  background: var(--group-color);
-  border-radius: 2px;
-}
-
-.chevron-icon {
-  transition: transform 0.2s;
-  color: #888;
-}
-
-.chevron-icon.expanded {
-  transform: rotate(90deg);
-}
-
-.group-name {
-  font-weight: 600;
-  color: #e8e8e8;
-}
-
-.group-count {
-  color: #888;
-  font-weight: normal;
-}
-
-.group-stats {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-}
-
-.stat {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: #666;
-}
-
-.stat-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.agent-group-content {
-  padding: 4px 0 4px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-`;

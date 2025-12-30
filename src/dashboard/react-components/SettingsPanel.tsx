@@ -94,32 +94,53 @@ export function SettingsPanel({
   if (!isOpen) return null;
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-header">
-          <h2>Settings</h2>
-          <button className="settings-close" onClick={onClose}>
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[var(--color-bg-secondary)] rounded-xl w-[500px] max-w-[90vw] max-h-[80vh] flex flex-col shadow-[0_16px_70px_rgba(0,0,0,0.5)] animate-slide-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between py-5 px-6 border-b border-[var(--color-border)]">
+          <h2 className="m-0 text-lg font-semibold text-[var(--color-text-primary)]">Settings</h2>
+          <button
+            className="flex items-center justify-center w-8 h-8 bg-transparent border-none rounded-md text-[var(--color-text-secondary)] cursor-pointer transition-all duration-150 hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
+            onClick={onClose}
+          >
             <CloseIcon />
           </button>
         </div>
 
-        <div className="settings-tabs">
+        <div className="flex gap-1 py-3 px-6 border-b border-[var(--color-border)] bg-[var(--color-bg-tertiary)]">
           <button
-            className={`settings-tab ${activeTab === 'appearance' ? 'active' : ''}`}
+            className={`flex items-center gap-1.5 py-2 px-3.5 bg-transparent border-none rounded-md text-[13px] cursor-pointer font-[inherit] transition-all duration-150 ${
+              activeTab === 'appearance'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
+            }`}
             onClick={() => setActiveTab('appearance')}
           >
             <PaletteIcon />
             Appearance
           </button>
           <button
-            className={`settings-tab ${activeTab === 'notifications' ? 'active' : ''}`}
+            className={`flex items-center gap-1.5 py-2 px-3.5 bg-transparent border-none rounded-md text-[13px] cursor-pointer font-[inherit] transition-all duration-150 ${
+              activeTab === 'notifications'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
+            }`}
             onClick={() => setActiveTab('notifications')}
           >
             <BellIcon />
             Notifications
           </button>
           <button
-            className={`settings-tab ${activeTab === 'connection' ? 'active' : ''}`}
+            className={`flex items-center gap-1.5 py-2 px-3.5 bg-transparent border-none rounded-md text-[13px] cursor-pointer font-[inherit] transition-all duration-150 ${
+              activeTab === 'connection'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
+            }`}
             onClick={() => setActiveTab('connection')}
           >
             <WifiIcon />
@@ -127,16 +148,20 @@ export function SettingsPanel({
           </button>
         </div>
 
-        <div className="settings-content">
+        <div className="flex-1 overflow-y-auto p-6">
           {activeTab === 'appearance' && (
-            <div className="settings-section">
-              <div className="settings-group">
-                <label className="settings-label">Theme</label>
-                <div className="settings-theme-options">
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-3">
+                <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-[0.5px]">Theme</label>
+                <div className="flex gap-2">
                   {(['light', 'dark', 'system'] as const).map((theme) => (
                     <button
                       key={theme}
-                      className={`settings-theme-btn ${settings.theme === theme ? 'active' : ''}`}
+                      className={`flex flex-col items-center gap-1.5 py-4 px-5 border-2 rounded-lg text-xs cursor-pointer font-[inherit] transition-all duration-150 flex-1 ${
+                        settings.theme === theme
+                          ? 'bg-[var(--color-accent-light)] border-[var(--color-accent)] text-[var(--color-accent)]'
+                          : 'bg-[var(--color-bg-hover)] border-transparent text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-active)]'
+                      }`}
                       onClick={() => updateTheme(theme)}
                     >
                       {theme === 'light' && <SunIcon />}
@@ -148,8 +173,8 @@ export function SettingsPanel({
                 </div>
               </div>
 
-              <div className="settings-group">
-                <label className="settings-label">Display Options</label>
+              <div className="flex flex-col gap-3">
+                <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-[0.5px]">Display Options</label>
                 <ToggleOption
                   label="Compact mode"
                   description="Show more content in less space"
@@ -179,9 +204,9 @@ export function SettingsPanel({
           )}
 
           {activeTab === 'notifications' && (
-            <div className="settings-section">
-              <div className="settings-group">
-                <label className="settings-label">Notification Preferences</label>
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-3">
+                <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-[0.5px]">Notification Preferences</label>
                 <ToggleOption
                   label="Enable notifications"
                   description="Receive alerts for new messages"
@@ -214,9 +239,9 @@ export function SettingsPanel({
           )}
 
           {activeTab === 'connection' && (
-            <div className="settings-section">
-              <div className="settings-group">
-                <label className="settings-label">Connection Settings</label>
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-3">
+                <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-[0.5px]">Connection Settings</label>
                 <ToggleOption
                   label="Auto-reconnect"
                   description="Automatically reconnect on disconnect"
@@ -224,11 +249,11 @@ export function SettingsPanel({
                   onChange={(v) => updateSetting('connection', 'autoReconnect', v)}
                 />
 
-                <div className="settings-input-group">
-                  <label>Reconnect delay (ms)</label>
+                <div className="flex flex-col gap-1.5 p-3 bg-[var(--color-bg-hover)] rounded-lg">
+                  <label className="text-sm font-medium text-[var(--color-text-primary)]">Reconnect delay (ms)</label>
                   <input
                     type="number"
-                    className="settings-input"
+                    className="py-2 px-3 border border-[var(--color-border)] rounded-md text-sm font-[inherit] outline-none transition-colors duration-150 bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] disabled:bg-[var(--color-bg-hover)] disabled:text-[var(--color-text-muted)]"
                     value={settings.connection.reconnectDelay}
                     onChange={(e) =>
                       updateSetting('connection', 'reconnectDelay', parseInt(e.target.value) || 3000)
@@ -240,11 +265,11 @@ export function SettingsPanel({
                   />
                 </div>
 
-                <div className="settings-input-group">
-                  <label>Keep-alive interval (ms)</label>
+                <div className="flex flex-col gap-1.5 p-3 bg-[var(--color-bg-hover)] rounded-lg">
+                  <label className="text-sm font-medium text-[var(--color-text-primary)]">Keep-alive interval (ms)</label>
                   <input
                     type="number"
-                    className="settings-input"
+                    className="py-2 px-3 border border-[var(--color-border)] rounded-md text-sm font-[inherit] outline-none transition-colors duration-150 bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] disabled:bg-[var(--color-bg-hover)] disabled:text-[var(--color-text-muted)]"
                     value={settings.connection.keepAliveInterval}
                     onChange={(e) =>
                       updateSetting('connection', 'keepAliveInterval', parseInt(e.target.value) || 30000)
@@ -259,13 +284,19 @@ export function SettingsPanel({
           )}
         </div>
 
-        <div className="settings-footer">
+        <div className="flex items-center justify-between py-4 px-6 border-t border-[var(--color-border)]">
           {onResetSettings && (
-            <button className="settings-reset-btn" onClick={onResetSettings}>
+            <button
+              className="py-2 px-4 bg-transparent border border-[var(--color-border)] rounded-md text-[13px] text-[var(--color-text-secondary)] cursor-pointer font-[inherit] transition-all duration-150 hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
+              onClick={onResetSettings}
+            >
               Reset to defaults
             </button>
           )}
-          <button className="settings-done-btn" onClick={onClose}>
+          <button
+            className="py-2 px-5 bg-[var(--color-accent)] border-none rounded-md text-[13px] font-medium text-white cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--color-accent-hover)]"
+            onClick={onClose}
+          >
             Done
           </button>
         </div>
@@ -284,19 +315,25 @@ interface ToggleOptionProps {
 
 function ToggleOption({ label, description, checked, onChange, disabled }: ToggleOptionProps) {
   return (
-    <div className={`settings-toggle-option ${disabled ? 'disabled' : ''}`}>
-      <div className="settings-toggle-info">
-        <span className="settings-toggle-label">{label}</span>
-        <span className="settings-toggle-desc">{description}</span>
+    <div className={`flex items-center justify-between p-3 bg-[var(--color-bg-hover)] rounded-lg ${disabled ? 'opacity-50' : ''}`}>
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
+        <span className="text-xs text-[var(--color-text-muted)]">{description}</span>
       </div>
       <button
-        className={`settings-toggle ${checked ? 'on' : ''}`}
+        className={`w-11 h-6 border-none rounded-xl cursor-pointer relative transition-colors duration-200 ${
+          checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border-dark)]'
+        } ${disabled ? 'cursor-not-allowed' : ''}`}
         onClick={() => !disabled && onChange(!checked)}
         disabled={disabled}
         role="switch"
         aria-checked={checked}
       >
-        <span className="settings-toggle-thumb" />
+        <span
+          className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform duration-200 shadow-[0_1px_3px_rgba(0,0,0,0.2)] ${
+            checked ? 'translate-x-5' : ''
+          }`}
+        />
       </button>
     </div>
   );
@@ -377,312 +414,3 @@ function MonitorIcon() {
     </svg>
   );
 }
-
-/**
- * CSS styles for the settings panel
- */
-export const settingsPanelStyles = `
-.settings-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  animation: fadeIn 0.15s ease;
-}
-
-.settings-panel {
-  background: #ffffff;
-  border-radius: 12px;
-  width: 500px;
-  max-width: 90vw;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 16px 70px rgba(0, 0, 0, 0.2);
-  animation: slideUp 0.2s ease;
-}
-
-.settings-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid #e8e8e8;
-}
-
-.settings-header h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.settings-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  color: #666;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.settings-close:hover {
-  background: #f5f5f5;
-  color: #333;
-}
-
-.settings-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 12px 24px;
-  border-bottom: 1px solid #e8e8e8;
-  background: #fafafa;
-}
-
-.settings-tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #666;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s;
-}
-
-.settings-tab:hover {
-  background: #f0f0f0;
-  color: #333;
-}
-
-.settings-tab.active {
-  background: #1264a3;
-  color: #ffffff;
-}
-
-.settings-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
-}
-
-.settings-section {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.settings-group {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.settings-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.settings-theme-options {
-  display: flex;
-  gap: 8px;
-}
-
-.settings-theme-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 16px 20px;
-  background: #fafafa;
-  border: 2px solid transparent;
-  border-radius: 8px;
-  font-size: 12px;
-  color: #666;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s;
-  flex: 1;
-}
-
-.settings-theme-btn:hover {
-  background: #f0f0f0;
-}
-
-.settings-theme-btn.active {
-  background: #e8f4fd;
-  border-color: #1264a3;
-  color: #1264a3;
-}
-
-.settings-toggle-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  background: #fafafa;
-  border-radius: 8px;
-}
-
-.settings-toggle-option.disabled {
-  opacity: 0.5;
-}
-
-.settings-toggle-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.settings-toggle-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #333;
-}
-
-.settings-toggle-desc {
-  font-size: 12px;
-  color: #888;
-}
-
-.settings-toggle {
-  width: 44px;
-  height: 24px;
-  background: #d0d0d0;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  position: relative;
-  transition: background 0.2s;
-}
-
-.settings-toggle.on {
-  background: #1264a3;
-}
-
-.settings-toggle:disabled {
-  cursor: not-allowed;
-}
-
-.settings-toggle-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  background: #ffffff;
-  border-radius: 50%;
-  transition: transform 0.2s;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-
-.settings-toggle.on .settings-toggle-thumb {
-  transform: translateX(20px);
-}
-
-.settings-input-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  background: #fafafa;
-  border-radius: 8px;
-}
-
-.settings-input-group label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #333;
-}
-
-.settings-input {
-  padding: 8px 12px;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  font-size: 14px;
-  font-family: inherit;
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.settings-input:focus {
-  border-color: #1264a3;
-}
-
-.settings-input:disabled {
-  background: #f5f5f5;
-  color: #888;
-}
-
-.settings-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
-  border-top: 1px solid #e8e8e8;
-}
-
-.settings-reset-btn {
-  padding: 8px 16px;
-  background: transparent;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #666;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s;
-}
-
-.settings-reset-btn:hover {
-  background: #f5f5f5;
-  color: #333;
-}
-
-.settings-done-btn {
-  padding: 8px 20px;
-  background: #1264a3;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #ffffff;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s;
-}
-
-.settings-done-btn:hover {
-  background: #0d4f82;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-`;

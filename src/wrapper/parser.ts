@@ -24,6 +24,8 @@ export interface ParsedCommand {
   thread?: string;
   /** Optional project for cross-project messaging (e.g., ->relay:project:agent) */
   project?: string;
+  /** Optional thread project for cross-project threads (e.g., [thread:project:id]) */
+  threadProject?: string;
   raw: string;
   meta?: ParsedMessageMetadata;
 }
@@ -61,7 +63,9 @@ const FENCE_END_LINE = />>>\s*$/;
 const FENCE_END = new RegExp(`${FENCE_END_START.source}|${FENCE_END_LINE.source}`);
 
 // Maximum lines in a fenced block before assuming it's stuck
-const MAX_FENCED_LINES = 200;
+// Lower value (30) ensures messages get sent even if agent forgets >>>
+// Most relay messages are under 20 lines; 30 gives buffer for longer ones
+const MAX_FENCED_LINES = 30;
 
 // Continuation helpers
 const BULLET_OR_NUMBERED_LIST = /^[ \t]*([\-*•◦‣⏺◆◇○□■]|[0-9]+[.)])\s+/;
@@ -84,24 +88,27 @@ function escapeRegex(str: string): string {
  * Build inline pattern for a given prefix
  * Allow common input prefixes: >, $, %, #, →, ➜, bullets (●•◦‣⁃-*⏺◆◇○□■), box chars (│┃┆┇┊┋╎╏), and their variations
  *
- * Supports optional thread syntax: ->relay:Target [thread:id] message
+ * Supports optional thread syntax:
+ * - ->relay:Target [thread:id] message (local thread)
+ * - ->relay:Target [thread:project:id] message (cross-project thread)
  * Thread IDs can contain alphanumeric chars, hyphens, underscores
  */
 function buildInlinePattern(prefix: string): RegExp {
   const escaped = escapeRegex(prefix);
-  // Group 1: target, Group 2: optional thread ID (without brackets), Group 3: message body
+  // Group 1: target, Group 2: optional thread project, Group 3: thread ID, Group 4: message body
   // Includes box drawing characters (│┃┆┇┊┋╎╏) and sparkle (✦) for Gemini CLI output
-  return new RegExp(`^(?:\\s*(?:[>$%#→➜›»●•◦‣⁃\\-*⏺◆◇○□■│┃┆┇┊┋╎╏✦]\\s*)*)?${escaped}(\\S+)(?:\\s+\\[thread:([\\w-]+)\\])?\\s+(.+)$`);
+  return new RegExp(`^(?:\\s*(?:[>$%#→➜›»●•◦‣⁃\\-*⏺◆◇○□■│┃┆┇┊┋╎╏✦]\\s*)*)?${escaped}(\\S+)(?:\\s+\\[thread:(?:([\\w-]+):)?([\\w-]+)\\])?\\s+(.+)$`);
 }
 
 /**
  * Build fenced inline pattern for multi-line messages: ->relay:Target <<<
  * This opens a fenced block that continues until >>> is seen on its own line.
- * Group 1: target, Group 2: optional thread ID
+ * Supports cross-project thread syntax: [thread:project:id]
+ * Group 1: target, Group 2: optional thread project, Group 3: thread ID
  */
 function buildFencedInlinePattern(prefix: string): RegExp {
   const escaped = escapeRegex(prefix);
-  return new RegExp(`^(?:\\s*(?:[>$%#→➜›»●•◦‣⁃\\-*⏺◆◇○□■│┃┆┇┊┋╎╏✦]\\s*)*)?${escaped}(\\S+)(?:\\s+\\[thread:([\\w-]+)\\])?\\s+<<<\\s*$`);
+  return new RegExp(`^(?:\\s*(?:[>$%#→➜›»●•◦‣⁃\\-*⏺◆◇○□■│┃┆┇┊┋╎╏✦]\\s*)*)?${escaped}(\\S+)(?:\\s+\\[thread:(?:([\\w-]+):)?([\\w-]+)\\])?\\s+<<<\\s*$`);
 }
 
 /**
@@ -164,6 +171,7 @@ export class OutputParser {
   private fencedInlineBuffer = '';
   private fencedInlineTarget = '';
   private fencedInlineThread: string | undefined = undefined;
+  private fencedInlineThreadProject: string | undefined = undefined;
   private fencedInlineProject: string | undefined = undefined;
   private fencedInlineRaw: string[] = [];
   private fencedInlineKind: 'message' | 'thinking' = 'message';
@@ -357,19 +365,19 @@ export class OutputParser {
       return this.inlineRelayPattern.test(line) || this.inlineThinkingPattern.test(line);
     };
 
-    const isFencedInlineStart = (line: string): { target: string; thread?: string; project?: string; kind: 'message' | 'thinking' } | null => {
+    const isFencedInlineStart = (line: string): { target: string; thread?: string; threadProject?: string; project?: string; kind: 'message' | 'thinking' } | null => {
       const stripped = stripAnsi(line);
       const relayMatch = stripped.match(this.fencedRelayPattern);
       if (relayMatch) {
-        const [, target, threadId] = relayMatch;
+        const [, target, threadProject, threadId] = relayMatch;
         const { to, project } = parseTarget(target);
-        return { target: to, thread: threadId || undefined, project, kind: 'message' };
+        return { target: to, thread: threadId || undefined, threadProject: threadProject || undefined, project, kind: 'message' };
       }
       const thinkingMatch = stripped.match(this.fencedThinkingPattern);
       if (thinkingMatch) {
-        const [, target, threadId] = thinkingMatch;
+        const [, target, threadProject, threadId] = thinkingMatch;
         const { to, project } = parseTarget(target);
-        return { target: to, thread: threadId || undefined, project, kind: 'thinking' };
+        return { target: to, thread: threadId || undefined, threadProject: threadProject || undefined, project, kind: 'thinking' };
       }
       return null;
     };
@@ -474,6 +482,7 @@ export class OutputParser {
         this.inFencedInline = true;
         this.fencedInlineTarget = fencedStart.target;
         this.fencedInlineThread = fencedStart.thread;
+        this.fencedInlineThreadProject = fencedStart.threadProject;
         this.fencedInlineProject = fencedStart.project;
         this.fencedInlineKind = fencedStart.kind;
         this.fencedInlineBuffer = '';
@@ -653,7 +662,7 @@ export class OutputParser {
     if (this.options.enableInline) {
       const relayMatch = stripped.match(this.inlineRelayPattern);
       if (relayMatch) {
-        const [raw, target, threadId, body] = relayMatch;
+        const [raw, target, threadProject, threadId, body] = relayMatch;
         const { to, project } = parseTarget(target);
         return {
           command: {
@@ -661,6 +670,7 @@ export class OutputParser {
             kind: 'message',
             body,
             thread: threadId || undefined, // undefined if no thread specified
+            threadProject: threadProject || undefined, // undefined if local thread
             project, // undefined if local, set if cross-project
             raw,
           },
@@ -670,7 +680,7 @@ export class OutputParser {
 
       const thinkingMatch = stripped.match(this.inlineThinkingPattern);
       if (thinkingMatch) {
-        const [raw, target, threadId, body] = thinkingMatch;
+        const [raw, target, threadProject, threadId, body] = thinkingMatch;
         const { to, project } = parseTarget(target);
         return {
           command: {
@@ -678,6 +688,7 @@ export class OutputParser {
             kind: 'thinking',
             body,
             thread: threadId || undefined,
+            threadProject: threadProject || undefined,
             project,
             raw,
           },
@@ -794,6 +805,7 @@ export class OutputParser {
           kind: this.fencedInlineKind,
           body,
           thread: this.fencedInlineThread,
+          threadProject: this.fencedInlineThreadProject,
           project: this.fencedInlineProject,
           raw: this.fencedInlineRaw.join('\n'),
         };
@@ -804,6 +816,7 @@ export class OutputParser {
         this.fencedInlineBuffer = '';
         this.fencedInlineTarget = '';
         this.fencedInlineThread = undefined;
+        this.fencedInlineThreadProject = undefined;
         this.fencedInlineProject = undefined;
         this.fencedInlineRaw = [];
         this.fencedInlineKind = 'message';
@@ -828,6 +841,7 @@ export class OutputParser {
             kind: this.fencedInlineKind,
             body,
             thread: this.fencedInlineThread,
+            threadProject: this.fencedInlineThreadProject,
             project: this.fencedInlineProject,
             raw: this.fencedInlineRaw.join('\n'),
           };
@@ -839,6 +853,7 @@ export class OutputParser {
         this.fencedInlineBuffer = '';
         this.fencedInlineTarget = '';
         this.fencedInlineThread = undefined;
+        this.fencedInlineThreadProject = undefined;
         this.fencedInlineProject = undefined;
         this.fencedInlineRaw = [];
         this.fencedInlineKind = 'message';
@@ -875,6 +890,7 @@ export class OutputParser {
           kind: this.fencedInlineKind,
           body,
           thread: this.fencedInlineThread,
+          threadProject: this.fencedInlineThreadProject,
           project: this.fencedInlineProject,
           raw: this.fencedInlineRaw.join('\n'),
         };
@@ -885,6 +901,7 @@ export class OutputParser {
         this.fencedInlineBuffer = '';
         this.fencedInlineTarget = '';
         this.fencedInlineThread = undefined;
+        this.fencedInlineThreadProject = undefined;
         this.fencedInlineProject = undefined;
         this.fencedInlineRaw = [];
         this.fencedInlineKind = 'message';
@@ -925,6 +942,7 @@ export class OutputParser {
         this.fencedInlineBuffer = '';
         this.fencedInlineTarget = '';
         this.fencedInlineThread = undefined;
+        this.fencedInlineThreadProject = undefined;
         this.fencedInlineProject = undefined;
         this.fencedInlineRaw = [];
         this.fencedInlineKind = 'message';
@@ -938,6 +956,7 @@ export class OutputParser {
         this.fencedInlineBuffer = '';
         this.fencedInlineTarget = '';
         this.fencedInlineThread = undefined;
+        this.fencedInlineThreadProject = undefined;
         this.fencedInlineProject = undefined;
         this.fencedInlineRaw = [];
         this.fencedInlineKind = 'message';
@@ -964,6 +983,7 @@ export class OutputParser {
     this.fencedInlineBuffer = '';
     this.fencedInlineTarget = '';
     this.fencedInlineThread = undefined;
+    this.fencedInlineThreadProject = undefined;
     this.fencedInlineProject = undefined;
     this.fencedInlineRaw = [];
     this.fencedInlineKind = 'message';
@@ -984,6 +1004,7 @@ export class OutputParser {
     this.fencedInlineBuffer = '';
     this.fencedInlineTarget = '';
     this.fencedInlineThread = undefined;
+    this.fencedInlineThreadProject = undefined;
     this.fencedInlineProject = undefined;
     this.fencedInlineRaw = [];
     this.fencedInlineKind = 'message';

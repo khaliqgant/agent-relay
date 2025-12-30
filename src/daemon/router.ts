@@ -40,7 +40,7 @@ export interface DeliveryReliabilityOptions {
 }
 
 const DEFAULT_DELIVERY_OPTIONS: DeliveryReliabilityOptions = {
-  ackTimeoutMs: 2000,
+  ackTimeoutMs: 5000,
   maxAttempts: 5,
   deliveryTtlMs: 60_000,
 };

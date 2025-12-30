@@ -10,9 +10,12 @@ import type { Agent, Project } from '../types';
 import { Sidebar } from './layout/Sidebar';
 import { Header } from './layout/Header';
 import { MessageList } from './MessageList';
+import { ThreadPanel } from './ThreadPanel';
 import { CommandPalette } from './CommandPalette';
 import { SpawnModal, type SpawnConfig } from './SpawnModal';
+import { NewConversationModal } from './NewConversationModal';
 import { SettingsPanel, defaultSettings, type Settings } from './SettingsPanel';
+import { ConversationHistory } from './ConversationHistory';
 import { MentionAutocomplete, getMentionQuery, completeMentionInValue } from './MentionAutocomplete';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAgents } from './hooks/useAgents';
@@ -47,6 +50,12 @@ export function App({ wsUrl }: AppProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
 
+  // Conversation history panel state
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  // New conversation modal state
+  const [isNewConversationOpen, setIsNewConversationOpen] = useState(false);
+
   // Mobile sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -75,6 +84,7 @@ export function App({ wsUrl }: AppProps) {
   // Message state management
   const {
     messages,
+    threadMessages,
     currentChannel,
     setCurrentChannel,
     currentThread,
@@ -96,22 +106,19 @@ export function App({ wsUrl }: AppProps) {
     const fetchProjects = async () => {
       const result = await api.getBridgeData();
       if (result.success && result.data) {
-        // Destructure to avoid non-null assertion in closure
         const { servers, agents } = result.data;
-        // Convert fleet servers to projects
         const projectList: Project[] = servers.map((server) => ({
           id: server.id,
           path: server.url,
           name: server.name || server.url.split('/').pop(),
           agents: agents.filter((a) => a.server === server.id),
-          lead: undefined, // Could be enhanced to detect lead agent
+          lead: undefined,
         }));
         setProjects(projectList);
       }
     };
 
     fetchProjects();
-    // Refresh periodically
     const interval = setInterval(fetchProjects, 30000);
     return () => clearInterval(interval);
   }, [isFleetAvailable]);
@@ -119,7 +126,6 @@ export function App({ wsUrl }: AppProps) {
   // Handle project selection
   const handleProjectSelect = useCallback((project: Project) => {
     setCurrentProject(project.id);
-    // Optionally navigate to project's first agent or general channel
     if (project.agents.length > 0) {
       selectAgent(project.agents[0].name);
       setCurrentChannel(project.agents[0].name);
@@ -145,12 +151,49 @@ export function App({ wsUrl }: AppProps) {
     setIsSettingsOpen(true);
   }, []);
 
+  // Handle history click
+  const handleHistoryClick = useCallback(() => {
+    setIsHistoryOpen(true);
+  }, []);
+
+  // Handle new conversation click
+  const handleNewConversationClick = useCallback(() => {
+    setIsNewConversationOpen(true);
+  }, []);
+
+  // Handle send from new conversation modal - select the channel after sending
+  const handleNewConversationSend = useCallback(async (to: string, content: string): Promise<boolean> => {
+    const success = await sendMessage(to, content);
+    if (success) {
+      // Switch to the channel we just messaged
+      if (to === '*') {
+        selectAgent(null);
+        setCurrentChannel('general');
+      } else {
+        const targetAgent = agents.find((a) => a.name === to);
+        if (targetAgent) {
+          selectAgent(targetAgent.name);
+          setCurrentChannel(targetAgent.name);
+        } else {
+          setCurrentChannel(to);
+        }
+      }
+    }
+    return success;
+  }, [sendMessage, selectAgent, setCurrentChannel, agents]);
+
   // Handle spawn agent
   const handleSpawn = useCallback(async (config: SpawnConfig): Promise<boolean> => {
     setIsSpawning(true);
     setSpawnError(null);
     try {
-      const result = await api.spawnAgent({ name: config.name, cli: config.command, team: config.team });
+      const result = await api.spawnAgent({
+        name: config.name,
+        cli: config.command,
+        team: config.team,
+        shadowOf: config.shadowOf,
+        shadowSpeakOn: config.shadowSpeakOn,
+      });
       if (!result.success) {
         setSpawnError(result.error || 'Failed to spawn agent');
         return false;
@@ -186,26 +229,27 @@ export function App({ wsUrl }: AppProps) {
     setIsCommandPaletteOpen(true);
   }, []);
 
+  const handleCommandPaletteClose = useCallback(() => {
+    setIsCommandPaletteOpen(false);
+  }, []);
+
   // Apply theme to document
   React.useEffect(() => {
     const applyTheme = (theme: 'light' | 'dark' | 'system') => {
       let effectiveTheme: 'light' | 'dark';
 
       if (theme === 'system') {
-        // Check system preference
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         effectiveTheme = prefersDark ? 'dark' : 'light';
       } else {
         effectiveTheme = theme;
       }
 
-      // Apply theme to document root
       document.documentElement.setAttribute('data-theme', effectiveTheme);
     };
 
     applyTheme(settings.theme);
 
-    // Listen for system theme changes when in 'system' mode
     if (settings.theme === 'system') {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       const handleChange = () => applyTheme('system');
@@ -217,34 +261,41 @@ export function App({ wsUrl }: AppProps) {
   // Keyboard shortcuts
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd/Ctrl + K for command palette
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setIsCommandPaletteOpen(true);
       }
 
-      // Cmd/Ctrl + Shift + S for spawn agent
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 's') {
         e.preventDefault();
         handleSpawnClick();
       }
 
-      // Escape to close modals
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        handleNewConversationClick();
+      }
+
       if (e.key === 'Escape') {
         setIsCommandPaletteOpen(false);
         setIsSpawnModalOpen(false);
+        setIsNewConversationOpen(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleSpawnClick]);
+  }, [handleSpawnClick, handleNewConversationClick]);
 
   return (
-    <div className="dashboard-app">
+    <div className="flex h-screen bg-bg-primary">
       {/* Mobile Sidebar Overlay */}
       <div
-        className={`sidebar-overlay ${isSidebarOpen ? 'visible' : ''}`}
+        className={`
+          fixed inset-0 bg-black/50 z-[999] transition-opacity duration-200
+          md:hidden
+          ${isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
+        `}
         onClick={() => setIsSidebarOpen(false)}
       />
 
@@ -267,46 +318,72 @@ export function App({ wsUrl }: AppProps) {
       />
 
       {/* Main Content */}
-      <main className="dashboard-main">
+      <main className="flex-1 flex flex-col min-w-0 bg-bg-secondary">
         {/* Header */}
         <Header
           currentChannel={currentChannel}
           selectedAgent={selectedAgent}
           onCommandPaletteOpen={handleCommandPaletteOpen}
           onSettingsClick={handleSettingsClick}
+          onHistoryClick={handleHistoryClick}
+          onNewConversationClick={handleNewConversationClick}
           onMenuClick={() => setIsSidebarOpen(true)}
         />
 
         {/* Content Area */}
-        <div className="dashboard-content">
-          {wsError ? (
-            <div className="error-state">
-              <ErrorIcon />
-              <h2>Connection Error</h2>
-              <p>{wsError.message}</p>
-              <button onClick={() => window.location.reload()}>
-                Retry Connection
-              </button>
-            </div>
-          ) : !data ? (
-            <div className="loading-state">
-              <LoadingSpinner />
-              <p>Connecting to dashboard...</p>
-            </div>
-          ) : (
-            <div className="messages-container">
-              <MessageList
-                messages={messages}
-                currentChannel={currentChannel}
-                onThreadClick={(messageId) => setCurrentThread(messageId)}
-                highlightedMessageId={currentThread ?? undefined}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Message List */}
+          <div className={`flex-1 overflow-y-auto ${currentThread ? 'hidden md:block md:flex-[2]' : ''}`}>
+            {wsError ? (
+              <div className="flex flex-col items-center justify-center h-full text-text-muted text-center">
+                <ErrorIcon />
+                <h2 className="m-0 mb-2 text-text-primary">Connection Error</h2>
+                <p className="text-text-muted">{wsError.message}</p>
+                <button
+                  className="mt-4 py-2 px-4 bg-accent text-white border-none rounded cursor-pointer transition-colors duration-200 hover:bg-accent-hover"
+                  onClick={() => window.location.reload()}
+                >
+                  Retry Connection
+                </button>
+              </div>
+            ) : !data ? (
+              <div className="flex flex-col items-center justify-center h-full text-text-muted text-center">
+                <LoadingSpinner />
+                <p>Connecting to dashboard...</p>
+              </div>
+            ) : (
+              <div className="h-full">
+                <MessageList
+                  messages={messages}
+                  currentChannel={currentChannel}
+                  onThreadClick={(messageId) => setCurrentThread(messageId)}
+                  highlightedMessageId={currentThread ?? undefined}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Thread Panel */}
+          {currentThread && (
+            <div className="w-full md:w-[400px] md:min-w-[320px] md:max-w-[500px] flex-shrink-0">
+              <ThreadPanel
+                originalMessage={messages.find((m) => m.id === currentThread) ?? null}
+                replies={threadMessages(currentThread)}
+                onClose={() => setCurrentThread(null)}
+                onReply={async (content) => {
+                  // Send reply with thread ID
+                  const originalMessage = messages.find((m) => m.id === currentThread);
+                  if (!originalMessage) return false;
+                  return sendMessage(originalMessage.from, content, currentThread);
+                }}
+                isSending={isSending}
               />
             </div>
           )}
         </div>
 
         {/* Message Composer */}
-        <div className="message-composer">
+        <div className="p-4 bg-bg-secondary border-t border-border-light">
           <MessageComposer
             recipient={currentChannel === 'general' ? '*' : currentChannel}
             agents={agents}
@@ -320,7 +397,7 @@ export function App({ wsUrl }: AppProps) {
       {/* Command Palette */}
       <CommandPalette
         isOpen={isCommandPaletteOpen}
-        onClose={() => setIsCommandPaletteOpen(false)}
+        onClose={handleCommandPaletteClose}
         agents={agents}
         projects={projects}
         currentProject={currentProject}
@@ -351,6 +428,22 @@ export function App({ wsUrl }: AppProps) {
         onSettingsChange={setSettings}
         onResetSettings={() => setSettings(defaultSettings)}
       />
+
+      {/* Conversation History */}
+      <ConversationHistory
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+      />
+
+      {/* New Conversation Modal */}
+      <NewConversationModal
+        isOpen={isNewConversationOpen}
+        onClose={() => setIsNewConversationOpen(false)}
+        onSend={handleNewConversationSend}
+        agents={agents}
+        isSending={isSending}
+        error={sendError}
+      />
     </div>
   );
 }
@@ -372,19 +465,16 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
   const [showMentions, setShowMentions] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Check for @mention on input change
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     const cursorPos = e.target.selectionStart || 0;
     setMessage(value);
     setCursorPosition(cursorPos);
 
-    // Show autocomplete if typing @mention at start
     const query = getMentionQuery(value, cursorPos);
     setShowMentions(query !== null);
   };
 
-  // Handle keyboard events - Enter to send, Shift+Enter for new line
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -394,11 +484,9 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
     }
   };
 
-  // Handle mention selection
   const handleMentionSelect = (mention: string, newValue: string) => {
     setMessage(newValue);
     setShowMentions(false);
-    // Focus textarea and set cursor after the mention
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus();
@@ -412,27 +500,20 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
     e.preventDefault();
     if (!message.trim() || isSending) return;
 
-    // Parse message to determine target
-    // If message starts with @AgentName, extract the target and message content
     const mentionMatch = message.match(/^@(\S+)\s*([\s\S]*)/);
     let target: string;
     let content: string;
 
     if (mentionMatch) {
-      // User explicitly mentioned someone - route to that agent
       const mentionedName = mentionMatch[1];
       content = mentionMatch[2] || '';
 
-      // Check if it's a broadcast mention (@everyone, @*, @all)
       if (mentionedName === '*' || mentionedName.toLowerCase() === 'everyone' || mentionedName.toLowerCase() === 'all') {
         target = '*';
       } else {
         target = mentionedName;
       }
     } else {
-      // No @mention - use context-aware routing
-      // If in general channel, broadcast to everyone
-      // If in a DM, stay in that DM
       target = recipient;
       content = message;
     }
@@ -445,8 +526,8 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
   };
 
   return (
-    <form className="composer-form" onSubmit={handleSubmit}>
-      <div className="composer-input-wrapper">
+    <form className="flex items-center gap-2" onSubmit={handleSubmit}>
+      <div className="flex-1 relative">
         <MentionAutocomplete
           agents={agents}
           inputValue={message}
@@ -457,7 +538,7 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
         />
         <textarea
           ref={textareaRef}
-          className="composer-input"
+          className="w-full py-2.5 px-3.5 bg-bg-secondary border border-border rounded-md text-sm font-sans text-text-primary outline-none transition-colors duration-200 resize-none min-h-[40px] max-h-[120px] overflow-y-auto focus:border-accent placeholder:text-text-muted"
           placeholder={`Message ${recipient === '*' ? 'everyone' : '@' + recipient}... (Shift+Enter for new line)`}
           value={message}
           onChange={handleInputChange}
@@ -469,30 +550,30 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
       </div>
       <button
         type="submit"
-        className="composer-send"
+        className="py-2.5 px-5 bg-accent text-white border-none rounded-md text-sm cursor-pointer transition-colors duration-200 hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
         disabled={!message.trim() || isSending}
         title={isSending ? 'Sending...' : 'Send message'}
       >
         {isSending ? (
-          <span className="composer-send-text">Sending...</span>
+          <span>Sending...</span>
         ) : (
-          <>
-            <span className="composer-send-text">Send</span>
-            <svg className="composer-send-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <span className="flex items-center gap-1.5">
+            Send
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
-          </>
+          </span>
         )}
       </button>
-      {error && <span className="composer-error">{error}</span>}
+      {error && <span className="text-error text-xs ml-2">{error}</span>}
     </form>
   );
 }
 
 function LoadingSpinner() {
   return (
-    <svg className="spinner" width="24" height="24" viewBox="0 0 24 24">
+    <svg className="animate-spin mb-4 text-success" width="24" height="24" viewBox="0 0 24 24">
       <circle
         cx="12"
         cy="12"
@@ -509,285 +590,10 @@ function LoadingSpinner() {
 
 function ErrorIcon() {
   return (
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg className="text-error mb-4" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
       <circle cx="12" cy="12" r="10" />
       <line x1="12" y1="8" x2="12" y2="12" />
       <line x1="12" y1="16" x2="12.01" y2="16" />
     </svg>
   );
 }
-
-/**
- * CSS styles for the main app - Dark mode styling matching v1 dashboard
- */
-export const appStyles = `
-.dashboard-app {
-  display: flex;
-  height: 100vh;
-  background: #1a1d21;
-}
-
-.dashboard-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: #222529;
-}
-
-.dashboard-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
-}
-
-.messages-container {
-  height: 100%;
-}
-
-.loading-state,
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #8d8d8e;
-  text-align: center;
-}
-
-.loading-state .spinner {
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
-  color: #00ffc8;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.error-state svg {
-  color: #e01e5a;
-  margin-bottom: 16px;
-}
-
-.error-state h2 {
-  margin: 0 0 8px;
-  color: #d1d2d3;
-}
-
-.error-state p {
-  color: #8d8d8e;
-}
-
-.error-state button {
-  margin-top: 16px;
-  padding: 8px 16px;
-  background: #1264a3;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.error-state button:hover {
-  background: #0d4f82;
-}
-
-.messages-placeholder {
-  background: #1a1d21;
-  border-radius: 8px;
-  padding: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.agent-summary {
-  margin-top: 16px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 4px;
-}
-
-.agent-summary p {
-  margin: 4px 0;
-  font-size: 13px;
-  color: #ababad;
-}
-
-.message-composer {
-  padding: 16px 20px;
-  background: #222529;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.composer-form {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.composer-input-wrapper {
-  flex: 1;
-  position: relative;
-}
-
-.composer-input {
-  width: 100%;
-  padding: 10px 14px;
-  background: #222529;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  font-size: 14px;
-  font-family: inherit;
-  color: #d1d2d3;
-  outline: none;
-  box-sizing: border-box;
-  transition: border-color 0.2s;
-  resize: none;
-  min-height: 40px;
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-.composer-input::placeholder {
-  color: #8d8d8e;
-}
-
-.composer-input:focus {
-  border-color: #1264a3;
-}
-
-/* Mention Autocomplete Styles - Dark mode */
-.mention-autocomplete {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  right: 0;
-  max-height: 200px;
-  overflow-y: auto;
-  background: #1a1d21;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
-  z-index: 100;
-  margin-bottom: 4px;
-}
-
-.mention-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.mention-item:hover,
-.mention-item.selected {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.mention-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.mention-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.mention-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #d1d2d3;
-}
-
-.mention-description {
-  font-size: 12px;
-  color: #8d8d8e;
-}
-
-.composer-send {
-  padding: 10px 20px;
-  background: #1264a3;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.composer-send:hover:not(:disabled) {
-  background: #0d4f82;
-}
-
-.composer-send:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.composer-error {
-  color: #e01e5a;
-  font-size: 12px;
-}
-
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: #1a1d21;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 24px;
-  min-width: 400px;
-  max-width: 90vw;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
-}
-
-.modal h2 {
-  margin: 0 0 16px;
-  color: #d1d2d3;
-}
-
-.command-palette {
-  background: #1a1d21;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 8px;
-  width: 500px;
-  max-width: 90vw;
-}
-
-.command-palette input {
-  width: 100%;
-  padding: 12px 16px;
-  background: transparent;
-  border: none;
-  font-size: 16px;
-  color: #d1d2d3;
-  outline: none;
-}
-
-.command-palette input::placeholder {
-  color: #8d8d8e;
-}
-`;

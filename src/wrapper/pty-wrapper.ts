@@ -12,7 +12,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { RelayClient } from './client.js';
 import type { ParsedCommand } from './parser.js';
-import type { SendPayload } from '../protocol/types.js';
+import type { SendPayload, SpeakOnTrigger } from '../protocol/types.js';
 
 /** Maximum lines to keep in output buffer */
 const MAX_BUFFER_LINES = 10000;
@@ -36,6 +36,12 @@ export interface PtyWrapperConfig {
   onRelease?: (name: string) => Promise<void>;
   /** Callback when agent exits */
   onExit?: (code: number) => void;
+  /** Primary agent to shadow (if this agent is a shadow) */
+  shadowOf?: string;
+  /** When the shadow should speak (default: ['EXPLICIT_ASK']) */
+  shadowSpeakOn?: SpeakOnTrigger[];
+  /** Stream output to daemon for dashboard log viewing (default: true) */
+  streamLogs?: boolean;
 }
 
 export interface PtyWrapperEvents {
@@ -57,6 +63,7 @@ export class PtyWrapper extends EventEmitter {
   private processedReleaseCommands: Set<string> = new Set();
   private messageQueue: Array<{ from: string; body: string; messageId: string }> = [];
   private isInjecting = false;
+  private readyForMessages = false;
   private logFilePath?: string;
   private logStream?: fs.WriteStream;
   private hasAcceptedPrompt = false;
@@ -101,6 +108,17 @@ export class PtyWrapper extends EventEmitter {
     // Connect to relay daemon
     try {
       await this.client.connect();
+
+      // If this is a shadow agent, bind to the primary after connecting
+      if (this.config.shadowOf) {
+        const speakOn = this.config.shadowSpeakOn ?? ['EXPLICIT_ASK'];
+        const bound = this.client.bindAsShadow(this.config.shadowOf, { speakOn });
+        if (bound) {
+          console.log(`[pty:${this.config.name}] Bound as shadow of ${this.config.shadowOf} (speakOn: ${speakOn.join(', ')})`);
+        } else {
+          console.error(`[pty:${this.config.name}] Failed to bind as shadow of ${this.config.shadowOf}`);
+        }
+      }
     } catch (err: any) {
       console.error(`[pty:${this.config.name}] Relay connect failed: ${err.message}`);
     }
@@ -149,8 +167,13 @@ export class PtyWrapper extends EventEmitter {
       this.client.destroy();
     });
 
-    // Inject initial instructions after a delay
-    setTimeout(() => this.injectInstructions(), 2000);
+    // Inject initial instructions after a delay, then mark ready for messages
+    setTimeout(() => {
+      this.injectInstructions();
+      this.readyForMessages = true;
+      // Process any messages that arrived while waiting
+      this.processMessageQueue();
+    }, 2000);
   }
 
   /**
@@ -167,6 +190,11 @@ export class PtyWrapper extends EventEmitter {
 
     // Emit for external listeners
     this.emit('output', data);
+
+    // Stream to daemon for dashboard log viewing (if connected)
+    if (this.config.streamLogs !== false && this.client.state === 'READY') {
+      this.client.sendLog(data);
+    }
 
     // Auto-accept Claude's first-run prompt for --dangerously-skip-permissions
     // The prompt shows: "2. Yes, I accept" - we send "2" to accept
@@ -381,19 +409,22 @@ export class PtyWrapper extends EventEmitter {
       const spawnIdx = line.indexOf(spawnPrefix);
       if (spawnIdx !== -1 && canSpawn) {
         const afterSpawn = line.substring(spawnIdx + spawnPrefix.length).trim();
-        // Parse: WorkerName cli "task" or WorkerName cli 'task'
+        // Parse: WorkerName cli OR WorkerName cli "task" (task is optional)
         const parts = afterSpawn.split(/\s+/);
-        if (parts.length >= 3) {
+        if (parts.length >= 2) {
           const name = parts[0];
           const cli = parts[1];
-          // Task is everything after cli, potentially in quotes
-          const taskPart = parts.slice(2).join(' ');
-          // Remove surrounding quotes if present
-          const quoteMatch = taskPart.match(/^["'](.*)["']$/);
-          const task = quoteMatch ? quoteMatch[1] : taskPart;
+          // Task is everything after cli, potentially in quotes (optional)
+          let task = '';
+          if (parts.length >= 3) {
+            const taskPart = parts.slice(2).join(' ');
+            // Remove surrounding quotes if present
+            const quoteMatch = taskPart.match(/^["'](.*)["']$/);
+            task = quoteMatch ? quoteMatch[1] : taskPart;
+          }
 
-          if (name && cli && task) {
-            const spawnKey = `${name}:${cli}:${task}`;
+          if (name && cli) {
+            const spawnKey = `${name}:${cli}`;
             if (!this.processedSpawnCommands.has(spawnKey)) {
               this.processedSpawnCommands.add(spawnKey);
               this.executeSpawn(name, cli, task);
@@ -489,6 +520,8 @@ export class PtyWrapper extends EventEmitter {
    * Process queued messages
    */
   private async processMessageQueue(): Promise<void> {
+    // Wait until instructions have been injected and agent is ready
+    if (!this.readyForMessages) return;
     if (this.isInjecting || this.messageQueue.length === 0) return;
     if (!this.ptyProcess || !this.running) return;
 

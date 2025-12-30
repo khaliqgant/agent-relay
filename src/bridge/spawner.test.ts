@@ -16,6 +16,7 @@ const mockPtyWrapper = {
   write: vi.fn(),
   getOutput: vi.fn(() => []),
   getRawOutput: vi.fn(() => ''),
+  on: vi.fn(), // EventEmitter method used by spawner for output events
   isRunning: true,
   pid: 12345,
   logPath: '/team/worker-logs/test.log',

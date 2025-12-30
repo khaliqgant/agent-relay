@@ -25,7 +25,8 @@ export type MessageType =
   | 'SUBSCRIBE'
   | 'UNSUBSCRIBE'
   | 'SHADOW_BIND'
-  | 'SHADOW_UNBIND';
+  | 'SHADOW_UNBIND'
+  | 'LOG'; // Agent output for dashboard streaming
 
 export type PayloadKind = 'message' | 'action' | 'state' | 'thinking';
 
@@ -147,6 +148,14 @@ export interface SyncPayload {
   streams: SyncStream[];
 }
 
+// Log payload for agent output streaming
+export interface LogPayload {
+  /** The log/output data */
+  data: string;
+  /** Optional timestamp (defaults to envelope ts if not provided) */
+  timestamp?: number;
+}
+
 // Typed envelope helpers
 export type HelloEnvelope = Envelope<HelloPayload>;
 export type WelcomeEnvelope = Envelope<WelcomePayload>;
@@ -159,6 +168,7 @@ export type PongEnvelope = Envelope<PongPayload>;
 export type ErrorEnvelope = Envelope<ErrorPayload>;
 export type BusyEnvelope = Envelope<BusyPayload>;
 export type SyncEnvelope = Envelope<SyncPayload>;
+export type LogEnvelope = Envelope<LogPayload>;
 
 // Shadow agent types
 export type SpeakOnTrigger =

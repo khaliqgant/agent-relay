@@ -16,7 +16,25 @@ Your message here.>>>
 Broadcast to all agents.>>>
 ```
 
-**CRITICAL:** Always end with `>>>` at the end of the last line of content!
+**CRITICAL:** Always close multi-line messages with `>>>` on its own line!
+
+## Communication Protocol
+
+**ACK immediately** - When you receive a task, acknowledge it before starting work:
+
+```
+->relay:Sender <<<
+ACK: Brief description of task received>>>
+```
+
+Then proceed with your work. This confirms message delivery and lets the sender know you're on it.
+
+**Report completion** - When done, send a completion message:
+
+```
+->relay:Sender <<<
+DONE: Brief summary of what was completed>>>
+```
 
 ## Receiving Messages
 
@@ -39,19 +57,55 @@ Spawn workers to delegate tasks:
 ->relay:release WorkerName
 ```
 
+## Threads
+
+Use threads to group related messages together. Thread syntax:
+
+```
+->relay:AgentName [thread:topic-name] <<<
+Your message here.>>>
+```
+
+**When to use threads:**
+- Working on a specific issue (e.g., `[thread:agent-relay-299]`)
+- Back-and-forth discussions with another agent
+- Code review conversations
+- Any multi-message topic you want grouped
+
+**Examples:**
+
+```
+->relay:Protocol [thread:auth-feature] <<<
+How should we handle token refresh?>>>
+
+->relay:Frontend [thread:auth-feature] <<<
+Use a 401 interceptor that auto-refreshes.>>>
+
+->relay:Reviewer [thread:pr-123] <<<
+Please review src/auth/*.ts>>>
+
+->relay:Developer [thread:pr-123] <<<
+LGTM, approved!>>>
+```
+
+Thread messages appear grouped in the dashboard with reply counts.
+
 ## Common Patterns
 
 ```
-->relay:* <<<
-STATUS: Starting work on auth module>>>
+->relay:Lead <<<
+ACK: Starting /api/register implementation>>>
 
 ->relay:* <<<
+STATUS: Working on auth module>>>
+
+->relay:Lead <<<
 DONE: Auth module complete>>>
 
 ->relay:Developer <<<
 TASK: Implement /api/register>>>
 
-->relay:Reviewer <<<
+->relay:Reviewer [thread:code-review-auth] <<<
 REVIEW: Please check src/auth/*.ts>>>
 
 ->relay:Architect <<<

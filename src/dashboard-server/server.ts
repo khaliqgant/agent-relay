@@ -135,6 +135,15 @@ export async function startDashboard(
     skipUTF8Validation: true,
     maxPayload: 100 * 1024 * 1024
   });
+  const wssLogs = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: false,
+    skipUTF8Validation: true,
+    maxPayload: 100 * 1024 * 1024
+  });
+
+  // Track log subscriptions: agentName -> Set of WebSocket clients
+  const logSubscriptions = new Map<string, Set<WebSocket>>();
 
   // Manually handle upgrade requests and route to correct WebSocketServer
   server.on('upgrade', (request, socket, head) => {
@@ -147,6 +156,10 @@ export async function startDashboard(
     } else if (pathname === '/ws/bridge') {
       wssBridge.handleUpgrade(request, socket, head, (ws) => {
         wssBridge.emit('connection', ws, request);
+      });
+    } else if (pathname === '/ws/logs' || pathname.startsWith('/ws/logs/')) {
+      wssLogs.handleUpgrade(request, socket, head, (ws) => {
+        wssLogs.emit('connection', ws, request);
       });
     } else {
       // Unknown path - destroy socket
@@ -444,6 +457,7 @@ export async function startDashboard(
       id: row.id,
       thread: row.thread,
       isBroadcast: row.is_broadcast,
+      replyCount: row.replyCount,
     }));
 
   const getMessages = async (agents: any[]): Promise<Message[]> => {
@@ -822,6 +836,118 @@ export async function startDashboard(
     });
   });
 
+  // Handle logs WebSocket connections for live log streaming
+  wssLogs.on('connection', (ws, req) => {
+    console.log('[dashboard] Logs WebSocket client connected');
+    const clientSubscriptions = new Set<string>();
+
+    // Helper to subscribe to an agent
+    const subscribeToAgent = (agentName: string) => {
+      // Check if agent exists
+      if (!spawner?.hasWorker(agentName)) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          agent: agentName,
+          error: `Agent ${agentName} not found`,
+        }));
+        return false;
+      }
+
+      // Add to subscriptions
+      clientSubscriptions.add(agentName);
+      if (!logSubscriptions.has(agentName)) {
+        logSubscriptions.set(agentName, new Set());
+      }
+      logSubscriptions.get(agentName)!.add(ws);
+
+      console.log(`[dashboard] Client subscribed to logs for: ${agentName}`);
+
+      // Send initial log history
+      const lines = spawner.getWorkerOutput(agentName, 200);
+      ws.send(JSON.stringify({
+        type: 'history',
+        agent: agentName,
+        lines: lines || [],
+      }));
+
+      ws.send(JSON.stringify({
+        type: 'subscribed',
+        agent: agentName,
+      }));
+
+      return true;
+    };
+
+    // Check if agent name is in URL path: /ws/logs/:agentName
+    const pathname = new URL(req.url || '', `http://${req.headers.host}`).pathname;
+    const pathMatch = pathname.match(/^\/ws\/logs\/(.+)$/);
+    if (pathMatch) {
+      const agentName = decodeURIComponent(pathMatch[1]);
+      subscribeToAgent(agentName);
+    }
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+
+        // Subscribe to agent logs
+        if (msg.subscribe && typeof msg.subscribe === 'string') {
+          subscribeToAgent(msg.subscribe);
+        }
+
+        // Unsubscribe from agent logs
+        if (msg.unsubscribe && typeof msg.unsubscribe === 'string') {
+          const agentName = msg.unsubscribe;
+          clientSubscriptions.delete(agentName);
+          logSubscriptions.get(agentName)?.delete(ws);
+
+          console.log(`[dashboard] Client unsubscribed from logs for: ${agentName}`);
+
+          ws.send(JSON.stringify({
+            type: 'unsubscribed',
+            agent: agentName,
+          }));
+        }
+      } catch (err) {
+        console.error('[dashboard] Invalid logs WebSocket message:', err);
+      }
+    });
+
+    ws.on('error', (err) => {
+      console.error('[dashboard] Logs WebSocket client error:', err);
+    });
+
+    ws.on('close', () => {
+      // Clean up subscriptions on disconnect
+      for (const agentName of clientSubscriptions) {
+        logSubscriptions.get(agentName)?.delete(ws);
+      }
+      console.log('[dashboard] Logs WebSocket client disconnected');
+    });
+  });
+
+  // Function to broadcast log output to subscribed clients
+  const broadcastLogOutput = (agentName: string, output: string) => {
+    const clients = logSubscriptions.get(agentName);
+    if (!clients || clients.size === 0) return;
+
+    const payload = JSON.stringify({
+      type: 'output',
+      agent: agentName,
+      data: output,
+      timestamp: new Date().toISOString(),
+    });
+
+    for (const client of clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    }
+  };
+
+  // Expose broadcastLogOutput for PTY wrappers to call
+  (global as any).__broadcastLogOutput = broadcastLogOutput;
+
   app.get('/api/data', (req, res) => {
     getAllData().then((data) => res.json(data)).catch((err) => {
       console.error('Failed to fetch dashboard data', err);
@@ -1000,6 +1126,335 @@ export async function startDashboard(
     } catch (err) {
       console.error('Failed to fetch bridge data', err);
       res.status(500).json({ error: 'Failed to load bridge data' });
+    }
+  });
+
+  // ===== Conversation History API =====
+
+  /**
+   * GET /api/history/sessions - List all sessions with filters
+   * Query params:
+   *   - agent: Filter by agent name
+   *   - since: Filter sessions started after this timestamp (ms)
+   *   - limit: Max number of sessions (default 50)
+   */
+  app.get('/api/history/sessions', async (req, res) => {
+    if (!storage) {
+      return res.status(503).json({ error: 'Storage not configured' });
+    }
+
+    try {
+      const query: {
+        agentName?: string;
+        since?: number;
+        limit?: number;
+      } = {};
+
+      if (req.query.agent && typeof req.query.agent === 'string') {
+        query.agentName = req.query.agent;
+      }
+      if (req.query.since) {
+        query.since = parseInt(req.query.since as string, 10);
+      }
+      query.limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+
+      const sessions = storage.getSessions
+        ? await storage.getSessions(query)
+        : [];
+
+      const result = sessions.map(s => ({
+        id: s.id,
+        agentName: s.agentName,
+        cli: s.cli,
+        startedAt: new Date(s.startedAt).toISOString(),
+        endedAt: s.endedAt ? new Date(s.endedAt).toISOString() : undefined,
+        duration: formatDuration(s.startedAt, s.endedAt),
+        messageCount: s.messageCount,
+        summary: s.summary,
+        isActive: !s.endedAt,
+        closedBy: s.closedBy,
+      }));
+
+      res.json({ sessions: result });
+    } catch (err) {
+      console.error('Failed to fetch sessions', err);
+      res.status(500).json({ error: 'Failed to fetch sessions' });
+    }
+  });
+
+  /**
+   * GET /api/history/messages - Get messages with filters
+   * Query params:
+   *   - from: Filter by sender
+   *   - to: Filter by recipient
+   *   - thread: Filter by thread ID
+   *   - since: Filter messages after this timestamp (ms)
+   *   - limit: Max number of messages (default 100)
+   *   - order: 'asc' or 'desc' (default 'desc')
+   *   - search: Search in message body (basic substring match)
+   */
+  app.get('/api/history/messages', async (req, res) => {
+    if (!storage) {
+      return res.status(503).json({ error: 'Storage not configured' });
+    }
+
+    try {
+      const query: {
+        from?: string;
+        to?: string;
+        thread?: string;
+        sinceTs?: number;
+        limit?: number;
+        order?: 'asc' | 'desc';
+      } = {};
+
+      if (req.query.from && typeof req.query.from === 'string') {
+        query.from = req.query.from;
+      }
+      if (req.query.to && typeof req.query.to === 'string') {
+        query.to = req.query.to;
+      }
+      if (req.query.thread && typeof req.query.thread === 'string') {
+        query.thread = req.query.thread;
+      }
+      if (req.query.since) {
+        query.sinceTs = parseInt(req.query.since as string, 10);
+      }
+      query.limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+      query.order = (req.query.order as 'asc' | 'desc') || 'desc';
+
+      let messages = await storage.getMessages(query);
+
+      // Client-side search filter (basic substring match)
+      const searchTerm = req.query.search as string | undefined;
+      if (searchTerm && searchTerm.trim()) {
+        const lowerSearch = searchTerm.toLowerCase();
+        messages = messages.filter(m =>
+          m.body.toLowerCase().includes(lowerSearch) ||
+          m.from.toLowerCase().includes(lowerSearch) ||
+          m.to.toLowerCase().includes(lowerSearch)
+        );
+      }
+
+      const result = messages.map(m => ({
+        id: m.id,
+        from: m.from,
+        to: m.to,
+        content: m.body,
+        timestamp: new Date(m.ts).toISOString(),
+        thread: m.thread,
+        isBroadcast: m.is_broadcast,
+        isUrgent: m.is_urgent,
+        status: m.status,
+      }));
+
+      res.json({ messages: result });
+    } catch (err) {
+      console.error('Failed to fetch messages', err);
+      res.status(500).json({ error: 'Failed to fetch messages' });
+    }
+  });
+
+  /**
+   * GET /api/history/conversations - Get unique conversations (agent pairs)
+   * Returns list of agent pairs that have exchanged messages
+   */
+  app.get('/api/history/conversations', async (req, res) => {
+    if (!storage) {
+      return res.status(503).json({ error: 'Storage not configured' });
+    }
+
+    try {
+      // Get all messages to build conversation list
+      const messages = await storage.getMessages({ limit: 1000, order: 'desc' });
+
+      // Build unique conversation pairs
+      const conversationMap = new Map<string, {
+        participants: string[];
+        lastMessage: string;
+        lastTimestamp: string;
+        messageCount: number;
+      }>();
+
+      for (const msg of messages) {
+        // Skip broadcasts for conversation pairing
+        if (msg.to === '*' || msg.is_broadcast) continue;
+
+        // Create normalized key (sorted participants)
+        const participants = [msg.from, msg.to].sort();
+        const key = participants.join(':');
+
+        const existing = conversationMap.get(key);
+        if (existing) {
+          existing.messageCount++;
+        } else {
+          conversationMap.set(key, {
+            participants,
+            lastMessage: msg.body.substring(0, 100),
+            lastTimestamp: new Date(msg.ts).toISOString(),
+            messageCount: 1,
+          });
+        }
+      }
+
+      // Convert to array sorted by last timestamp
+      const conversations = Array.from(conversationMap.values())
+        .sort((a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime());
+
+      res.json({ conversations });
+    } catch (err) {
+      console.error('Failed to fetch conversations', err);
+      res.status(500).json({ error: 'Failed to fetch conversations' });
+    }
+  });
+
+  /**
+   * GET /api/history/message/:id - Get a single message by ID
+   */
+  app.get('/api/history/message/:id', async (req, res) => {
+    if (!storage) {
+      return res.status(503).json({ error: 'Storage not configured' });
+    }
+
+    try {
+      const { id } = req.params;
+      const message = storage.getMessageById
+        ? await storage.getMessageById(id)
+        : null;
+
+      if (!message) {
+        return res.status(404).json({ error: 'Message not found' });
+      }
+
+      res.json({
+        id: message.id,
+        from: message.from,
+        to: message.to,
+        content: message.body,
+        timestamp: new Date(message.ts).toISOString(),
+        thread: message.thread,
+        isBroadcast: message.is_broadcast,
+        isUrgent: message.is_urgent,
+        status: message.status,
+        data: message.data,
+      });
+    } catch (err) {
+      console.error('Failed to fetch message', err);
+      res.status(500).json({ error: 'Failed to fetch message' });
+    }
+  });
+
+  /**
+   * GET /api/history/stats - Get storage statistics
+   */
+  app.get('/api/history/stats', async (req, res) => {
+    if (!storage) {
+      return res.status(503).json({ error: 'Storage not configured' });
+    }
+
+    try {
+      // Get stats from SQLite adapter if available
+      if (storage instanceof SqliteStorageAdapter) {
+        const stats = await storage.getStats();
+        const sessions = await storage.getSessions({ limit: 1000 });
+
+        // Calculate additional stats
+        const activeSessions = sessions.filter(s => !s.endedAt).length;
+        const uniqueAgents = new Set(sessions.map(s => s.agentName)).size;
+
+        res.json({
+          messageCount: stats.messageCount,
+          sessionCount: stats.sessionCount,
+          activeSessions,
+          uniqueAgents,
+          oldestMessageDate: stats.oldestMessageTs
+            ? new Date(stats.oldestMessageTs).toISOString()
+            : null,
+        });
+      } else {
+        // Basic stats for other adapters
+        const messages = await storage.getMessages({ limit: 1 });
+        res.json({
+          messageCount: messages.length > 0 ? 'unknown' : 0,
+          sessionCount: 'unknown',
+          activeSessions: 'unknown',
+          uniqueAgents: 'unknown',
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch stats', err);
+      res.status(500).json({ error: 'Failed to fetch stats' });
+    }
+  });
+
+  // ===== Agent Logs API =====
+
+  /**
+   * GET /api/logs/:name - Get historical logs for a spawned agent
+   * Query params:
+   *   - limit: Max lines to return (default 500)
+   *   - raw: If 'true', return raw output instead of cleaned lines
+   */
+  app.get('/api/logs/:name', (req, res) => {
+    if (!spawner) {
+      return res.status(503).json({ error: 'Spawner not enabled' });
+    }
+
+    const { name } = req.params;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 500;
+    const raw = req.query.raw === 'true';
+
+    // Check if worker exists
+    if (!spawner.hasWorker(name)) {
+      return res.status(404).json({ error: `Agent ${name} not found` });
+    }
+
+    try {
+      if (raw) {
+        const output = spawner.getWorkerRawOutput(name);
+        res.json({
+          name,
+          raw: true,
+          output: output || '',
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        const lines = spawner.getWorkerOutput(name, limit);
+        res.json({
+          name,
+          raw: false,
+          lines: lines || [],
+          lineCount: lines?.length || 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      console.error(`Failed to get logs for ${name}:`, err);
+      res.status(500).json({ error: 'Failed to get logs' });
+    }
+  });
+
+  /**
+   * GET /api/logs - List all agents with available logs
+   */
+  app.get('/api/logs', (req, res) => {
+    if (!spawner) {
+      return res.status(503).json({ error: 'Spawner not enabled' });
+    }
+
+    try {
+      const workers = spawner.getActiveWorkers();
+      const agents = workers.map(w => ({
+        name: w.name,
+        cli: w.cli,
+        pid: w.pid,
+        spawnedAt: new Date(w.spawnedAt).toISOString(),
+        hasLogs: true,
+      }));
+      res.json({ agents });
+    } catch (err) {
+      console.error('Failed to list agents with logs:', err);
+      res.status(500).json({ error: 'Failed to list agents' });
     }
   });
 

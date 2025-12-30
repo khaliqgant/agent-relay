@@ -85,6 +85,8 @@ export interface TmuxWrapperConfig {
   outputStabilityTimeoutMs?: number;
   /** Poll interval when checking pane stability before injection (ms) */
   outputStabilityPollMs?: number;
+  /** Stream output to daemon for dashboard log viewing (default: true) */
+  streamLogs?: boolean;
 }
 
 /**
@@ -117,6 +119,7 @@ export class TmuxWrapper {
   private isInjecting = false;
   // Track processed output to avoid re-parsing
   private processedOutputLength = 0;
+  private lastLoggedLength = 0; // Track length for incremental log streaming
   private lastDebugLog = 0;
   private cliType: 'claude' | 'codex' | 'gemini' | 'droid' | 'other';
   private relayPrefix: string;
@@ -146,6 +149,7 @@ export class TmuxWrapper {
       activityIdleThresholdMs: 30_000, // Consider idle after 30s with no output
       outputStabilityTimeoutMs: 2000,
       outputStabilityPollMs: 200,
+      streamLogs: true, // Stream output to daemon for dashboard
       ...config,
     };
 
@@ -550,6 +554,16 @@ export class TmuxWrapper {
         this.lastOutputTime = Date.now();
         this.markActivity();
         this.processedOutputLength = stdout.length;
+
+        // Stream new output to daemon for dashboard log viewing
+        if (this.config.streamLogs && this.client.state === 'READY') {
+          // Send incremental output since last log
+          const newContent = cleanContent.substring(this.lastLoggedLength);
+          if (newContent.length > 0) {
+            this.client.sendLog(newContent);
+            this.lastLoggedLength = cleanContent.length;
+          }
+        }
       }
 
       // Send any commands found (deduplication handles repeats)
@@ -856,19 +870,25 @@ export class TmuxWrapper {
     for (const line of lines) {
       const trimmed = line.trim();
 
-      // Match ->relay:spawn WorkerName cli "task"
-      // Pattern: ->relay:spawn <name> <cli> "<task>" or ->relay:spawn <name> <cli> '<task>'
+      // Match ->relay:spawn WorkerName cli OR ->relay:spawn WorkerName cli "task"
+      // Task is now optional - agents can be spawned without immediate task injection
+      // Pattern: ->relay:spawn <name> <cli> [optional: "<task>" or '<task>']
       // Allow trailing whitespace and optional bullet prefixes that TUIs might add
-      const spawnMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:spawn\s+(\S+)\s+(\S+)\s+["'](.+?)["']\s*$/);
+      const spawnMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:spawn\s+(\S+)\s+(\S+)(?:\s+["'](.+?)["'])?\s*$/);
       if (spawnMatch && this.config.onSpawn) {
         const [, name, cli, task] = spawnMatch;
-        const spawnKey = `${name}:${cli}:${task}`;
+        const taskStr = task || ''; // Task is optional, default to empty string
+        const spawnKey = `${name}:${cli}`;
 
-        // Dedup - only process each spawn once
+        // Dedup - only process each spawn once (keyed by name:cli, not including task)
         if (!this.processedSpawnCommands.has(spawnKey)) {
           this.processedSpawnCommands.add(spawnKey);
-          this.logStderr(`Spawn command: ${name} (${cli}) - "${task.substring(0, 50)}..."`);
-          this.config.onSpawn(name, cli, task).catch(err => {
+          if (taskStr) {
+            this.logStderr(`Spawn command: ${name} (${cli}) - "${taskStr.substring(0, 50)}..."`);
+          } else {
+            this.logStderr(`Spawn command: ${name} (${cli}) - no task`);
+          }
+          this.config.onSpawn(name, cli, taskStr).catch(err => {
             this.logStderr(`Spawn failed: ${err.message}`, true);
           });
         }

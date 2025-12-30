@@ -15,6 +15,8 @@ export interface HeaderProps {
   selectedAgent?: Agent | null;
   onCommandPaletteOpen?: () => void;
   onSettingsClick?: () => void;
+  onHistoryClick?: () => void;
+  onNewConversationClick?: () => void;
   /** Mobile: open sidebar handler */
   onMenuClick?: () => void;
 }
@@ -24,78 +26,105 @@ export function Header({
   selectedAgent,
   onCommandPaletteOpen,
   onSettingsClick,
+  onHistoryClick,
+  onNewConversationClick,
   onMenuClick,
 }: HeaderProps) {
   const isGeneral = currentChannel === 'general';
   const colors = selectedAgent ? getAgentColor(selectedAgent.name) : null;
 
   return (
-    <header className="header">
+    <header className="h-[52px] bg-bg-secondary border-b border-border flex items-center justify-between px-4">
       {/* Mobile hamburger menu button */}
       <button
-        className="mobile-menu-btn"
+        className="hidden max-md:flex items-center justify-center w-11 h-11 bg-transparent border-none text-text-primary cursor-pointer rounded-md transition-colors hover:bg-bg-hover"
         onClick={onMenuClick}
         aria-label="Open menu"
       >
         <MenuIcon />
       </button>
 
-      <div className="header-left">
+      <div className="flex items-center gap-2 flex-1 min-w-0">
         {isGeneral ? (
           <>
-            <span className="channel-prefix">#</span>
-            <span className="channel-name">general</span>
-            <span className="channel-topic">All agent communications</span>
+            <span className="text-text-muted text-base">#</span>
+            <span className="font-semibold text-[15px] text-text-primary max-md:max-w-[150px] max-md:truncate">general</span>
+            <span className="text-text-muted text-sm ml-2 pl-2 border-l border-border max-md:hidden">
+              All agent communications
+            </span>
           </>
         ) : selectedAgent ? (
           <>
             <div
-              className="agent-avatar-small"
+              className="w-7 h-7 rounded-md flex items-center justify-center font-semibold text-xs"
               style={{ backgroundColor: colors?.primary }}
             >
               <span style={{ color: colors?.text }}>
                 {getAgentInitials(selectedAgent.name)}
               </span>
             </div>
-            <div className="channel-info">
-              <span className="channel-name">{selectedAgent.name}</span>
-              <span className="channel-breadcrumb">
+            <div className="flex flex-col">
+              <span className="font-semibold text-[15px] text-text-primary max-md:max-w-[150px] max-md:truncate">
+                {selectedAgent.name}
+              </span>
+              <span className="text-text-muted text-xs max-md:hidden">
                 {getAgentBreadcrumb(selectedAgent.name)}
               </span>
             </div>
             {selectedAgent.status && (
-              <span className="agent-status-badge">{selectedAgent.status}</span>
+              <span className="bg-bg-hover text-text-secondary text-xs py-0.5 px-2 rounded ml-2">
+                {selectedAgent.status}
+              </span>
             )}
           </>
         ) : (
           <>
-            <span className="channel-prefix">@</span>
-            <span className="channel-name">{currentChannel}</span>
+            <span className="text-text-muted text-base">@</span>
+            <span className="font-semibold text-[15px] text-text-primary">{currentChannel}</span>
           </>
         )}
       </div>
 
-      <div className="header-right">
+      <div className="flex items-center gap-2">
         <button
-          className="header-btn command-palette-btn"
+          className="flex items-center gap-1.5 py-1.5 px-3 bg-accent text-white border-none rounded-md text-sm cursor-pointer transition-all duration-200 hover:bg-accent-hover"
+          onClick={onNewConversationClick}
+          title="Start new conversation (⌘N)"
+        >
+          <NewMessageIcon />
+          <span className="max-md:hidden">New Message</span>
+        </button>
+
+        <button
+          className="flex items-center gap-1.5 py-1.5 px-3 bg-bg-hover border border-border rounded-md text-text-secondary text-sm cursor-pointer transition-all duration-200 hover:bg-bg-active hover:text-text-primary"
           onClick={onCommandPaletteOpen}
           title="Command Palette (⌘K)"
         >
           <SearchIcon />
-          <span>Search</span>
-          <kbd>⌘K</kbd>
+          <span className="max-md:hidden">Search</span>
+          <kbd className="bg-bg-tertiary border border-border rounded px-1 py-0.5 text-xs text-text-muted max-md:hidden">
+            ⌘K
+          </kbd>
+        </button>
+
+        <button
+          className="flex items-center justify-center p-1.5 bg-bg-hover border border-border rounded-md text-text-secondary cursor-pointer transition-all duration-200 hover:bg-bg-active hover:text-text-primary"
+          onClick={onHistoryClick}
+          title="Message History - View past conversations"
+        >
+          <HistoryIcon />
         </button>
 
         <a
           href="/metrics"
-          className="header-btn icon-btn"
-          title="Metrics"
+          className="flex items-center justify-center p-1.5 bg-bg-hover border border-border rounded-md text-text-secondary cursor-pointer transition-all duration-200 hover:bg-bg-active hover:text-text-primary no-underline"
+          title="Fleet Metrics - View agent activity and statistics"
         >
           <MetricsIcon />
         </a>
 
         <button
-          className="header-btn icon-btn"
+          className="flex items-center justify-center p-1.5 bg-bg-hover border border-border rounded-md text-text-secondary cursor-pointer transition-all duration-200 hover:bg-bg-active hover:text-text-primary"
           onClick={onSettingsClick}
           title="Settings"
         >
@@ -106,11 +135,29 @@ export function Header({
   );
 }
 
+function NewMessageIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
 function SearchIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }
@@ -144,118 +191,3 @@ function MenuIcon() {
     </svg>
   );
 }
-
-/**
- * CSS styles for the header
- */
-export const headerStyles = `
-.header {
-  height: 52px;
-  background: #ffffff;
-  border-bottom: 1px solid #e8e8e8;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.channel-prefix {
-  color: #888;
-  font-size: 16px;
-}
-
-.channel-name {
-  font-weight: 600;
-  font-size: 15px;
-  color: #1a1a1a;
-}
-
-.channel-topic,
-.channel-breadcrumb {
-  color: #888;
-  font-size: 13px;
-  margin-left: 8px;
-  padding-left: 8px;
-  border-left: 1px solid #e8e8e8;
-}
-
-.channel-info {
-  display: flex;
-  flex-direction: column;
-}
-
-.channel-info .channel-breadcrumb {
-  margin-left: 0;
-  padding-left: 0;
-  border-left: none;
-  font-size: 11px;
-}
-
-.agent-avatar-small {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 11px;
-}
-
-.agent-status-badge {
-  background: #f0f0f0;
-  color: #666;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin-left: 8px;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.header-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: #f5f5f5;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  color: #666;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.header-btn:hover {
-  background: #ebebeb;
-  color: #333;
-}
-
-.header-btn kbd {
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  padding: 1px 4px;
-  font-size: 11px;
-  color: #888;
-}
-
-.icon-btn {
-  padding: 6px;
-}
-
-.icon-btn svg {
-  display: block;
-}
-`;
