@@ -12,6 +12,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { randomBytes } from 'crypto';
 
 export interface CloudSyncConfig {
   apiKey?: string;
@@ -77,7 +78,6 @@ export class CloudSyncService extends EventEmitter {
       }
 
       // Generate new machine ID
-      const { randomBytes } = require('crypto');
       const machineId = `${os.hostname()}-${randomBytes(8).toString('hex')}`;
 
       fs.mkdirSync(dataDir, { recursive: true });

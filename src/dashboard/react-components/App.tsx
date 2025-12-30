@@ -502,7 +502,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         {/* Content Area */}
         <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Message List */}
-          <div className={`flex-1 min-h-0 overflow-hidden ${currentThread ? 'hidden md:block md:flex-[2]' : ''}`}>
+          <div className={`flex-1 min-h-0 overflow-y-auto ${currentThread ? 'hidden md:block md:flex-[2]' : ''}`}>
             {wsError ? (
               <div className="flex flex-col items-center justify-center h-full text-text-muted text-center px-4">
                 <ErrorIcon />
