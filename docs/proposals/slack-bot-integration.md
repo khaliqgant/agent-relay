@@ -3,19 +3,21 @@
 **Author:** Claude
 **Date:** 2025-12-30
 **Status:** Draft
-**Estimated Effort:** 3-5 days
+**Estimated Effort:** 5-7 days
 
 ---
 
 ## Executive Summary
 
-This proposal outlines a plan to integrate agent-relay messaging with Slack, enabling:
+This proposal outlines a plan to integrate agent-relay messaging with Slack, following the **cloud-first architecture** established in PR #35. The integration enables:
+
 - AI agents to communicate in Slack channels alongside humans
 - Humans to interact with agents via @mentions and slash commands
 - Real-time bidirectional sync between relay daemon and Slack
 - Thread preservation across both systems
-
-The integration leverages agent-relay's existing architecture (pluggable storage, event-driven routing, session management) to create a **Slack Bridge** component that acts as a first-class agent in the relay network.
+- **Cloud-managed OAuth and credentials** via the encrypted vault
+- **Multi-workspace support** through the daemon orchestrator
+- **Plan-based access** (Pro/Team/Enterprise tiers)
 
 ---
 
@@ -23,16 +25,15 @@ The integration leverages agent-relay's existing architecture (pluggable storage
 
 1. [Goals & Non-Goals](#1-goals--non-goals)
 2. [Architecture Overview](#2-architecture-overview)
-3. [Component Design](#3-component-design)
-4. [Protocol Mapping](#4-protocol-mapping)
-5. [Implementation Phases](#5-implementation-phases)
-6. [API Specifications](#6-api-specifications)
-7. [Security Considerations](#7-security-considerations)
-8. [Configuration](#8-configuration)
-9. [User Experience](#9-user-experience)
+3. [Cloud Components](#3-cloud-components)
+4. [Daemon Components](#4-daemon-components)
+5. [Database Schema](#5-database-schema)
+6. [Dashboard UI](#6-dashboard-ui)
+7. [Implementation Phases](#7-implementation-phases)
+8. [API Specifications](#8-api-specifications)
+9. [Security & Plan Limits](#9-security--plan-limits)
 10. [Testing Strategy](#10-testing-strategy)
 11. [Open Questions](#11-open-questions)
-12. [Appendix](#appendix)
 
 ---
 
@@ -42,196 +43,572 @@ The integration leverages agent-relay's existing architecture (pluggable storage
 
 | Goal | Description |
 |------|-------------|
+| **Cloud-managed credentials** | Slack OAuth tokens stored in encrypted vault, not local files |
+| **Multi-workspace support** | Each workspace can have its own Slack integration |
 | **Bidirectional messaging** | Messages flow Slack ↔ Relay in real-time |
-| **Agent identity in Slack** | Each agent appears as a distinct bot user or uses display name |
 | **Thread preservation** | Relay threads map to Slack threads and vice versa |
-| **Human-agent interaction** | Humans can @mention agents and receive responses |
-| **Channel organization** | Broadcasts go to configured channels, DMs to relay direct messages |
-| **Message history** | Slack serves as additional persistence layer with search |
-| **Minimal latency** | Sub-second message delivery in both directions |
-| **Graceful degradation** | Relay continues working if Slack is unavailable |
+| **Plan-gated access** | Slack integration available on Pro+ plans |
+| **Dashboard configuration** | Connect/disconnect Slack via UI |
+| **Self-hosted parity** | Works in cloud-hosted, self-hosted, and hybrid modes |
 
 ### Non-Goals (v1)
 
 | Non-Goal | Rationale |
 |----------|-----------|
-| Multi-workspace support | Complexity; can add in v2 |
+| Multi-Slack-workspace per relay workspace | Complexity; one Slack workspace per relay workspace |
 | Slack-only agents | Agents should exist in relay first |
-| Rich message formatting | Plain text first; Block Kit later |
-| File/image transfer | Focus on text messaging |
-| Reactions as signals | Nice-to-have for v2 |
-| Voice/Huddles | Out of scope |
+| Rich Block Kit formatting | Plain text first; enhance later |
+| Slack Enterprise Grid | Requires org-level OAuth; v2 |
 
 ---
 
 ## 2. Architecture Overview
 
-### High-Level Design
+### High-Level Design (Cloud Paradigm)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              SLACK WORKSPACE                                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │ #agents     │  │ #alerts     │  │ @Alice-bot  │  │ @Bob-bot    │        │
-│  │ (broadcast) │  │ (topic)     │  │ (DM)        │  │ (DM)        │        │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘        │
-│         │                │                │                │                │
-│         └────────────────┴────────────────┴────────────────┘                │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                         │
+│  │ #agents     │  │ #alerts     │  │ @agent-bot  │                         │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘                         │
+│         └────────────────┴────────────────┘                                 │
+│                          │                                                  │
+│                    Slack Events API (Socket Mode)                           │
+└──────────────────────────┼──────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         AGENT RELAY CLOUD                                    │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                        src/cloud/                                      │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐    │ │
+│  │  │ api/integrations │  │ services/slack   │  │ vault/           │    │ │
+│  │  │ /slack.ts        │  │ SlackService     │  │ (encrypted)      │    │ │
+│  │  │                  │  │                  │  │                  │    │ │
+│  │  │ • OAuth callback │  │ • Token refresh  │  │ • bot_token      │    │ │
+│  │  │ • Disconnect     │  │ • Workspace sync │  │ • app_token      │    │ │
+│  │  │ • Status         │  │ • Health check   │  │ • signing_secret │    │ │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘    │ │
+│  │                                                                        │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐                           │ │
+│  │  │ db/schema.ts     │  │ api/middleware/  │                           │ │
+│  │  │                  │  │ planLimits.ts    │                           │ │
+│  │  │ • slack_integrations│ • requirePro()  │                           │ │
+│  │  │ • slack_channels │  │ • checkSlackLimit│                           │ │
+│  │  └──────────────────┘  └──────────────────┘                           │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
 │                                    │                                        │
-│                              Slack Events API                               │
-│                              (Socket Mode)                                  │
+│                              Cloud Sync API                                 │
+│                                    │                                        │
 └────────────────────────────────────┼────────────────────────────────────────┘
                                      │
                                      ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│                           SLACK BRIDGE SERVICE                              │
-│                                                                             │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐     │
-│  │  Slack Listener  │    │  Message Router  │    │  Agent Registry  │     │
-│  │                  │    │                  │    │                  │     │
-│  │  • app_mention   │───▶│  • Slack→Relay   │    │  • name→botId    │     │
-│  │  • message       │    │  • Relay→Slack   │    │  • botId→name    │     │
-│  │  • thread_reply  │    │  • Thread map    │    │  • channel config│     │
-│  └──────────────────┘    └────────┬─────────┘    └──────────────────┘     │
-│                                   │                                        │
-│  ┌──────────────────┐    ┌────────▼─────────┐    ┌──────────────────┐     │
-│  │  Slack Sender    │    │  Relay Client    │    │  Thread Store    │     │
-│  │                  │◀───│                  │    │                  │     │
-│  │  • chat.post     │    │  • HELLO/WELCOME │    │  • relay↔slack   │     │
-│  │  • chat.update   │    │  • SEND/DELIVER  │    │  • ts mapping    │     │
-│  │  • threads       │    │  • Subscribe '*' │    │  • expiration    │     │
-│  └──────────────────┘    └──────────────────┘    └──────────────────┘     │
-│                                                                             │
-└─────────────────────────────────────────┬───────────────────────────────────┘
-                                          │
-                                   Unix Domain Socket
-                                          │
-                                          ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            RELAY DAEMON                                      │
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         LOCAL DAEMON                                         │
 │                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                        src/daemon/                                     │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐    │ │
+│  │  │ orchestrator.ts  │  │ slack-bridge.ts  │  │ cloud-sync.ts    │    │ │
+│  │  │                  │  │ (NEW)            │  │                  │    │ │
+│  │  │ • Manages        │  │                  │  │ • Pulls Slack    │    │ │
+│  │  │   workspaces     │  │ • Slack ↔ Relay  │  │   credentials    │    │ │
+│  │  │ • Starts bridge  │  │ • Thread mapping │  │ • Syncs config   │    │ │
+│  │  │   per workspace  │  │ • Event handling │  │ • Token refresh  │    │ │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘    │ │
+│  │                                                                        │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐                           │ │
+│  │  │ router.ts        │  │ agent-manager.ts │                           │ │
+│  │  │                  │  │                  │                           │ │
+│  │  │ • Routes msgs    │  │ • Agent lifecycle│                           │ │
+│  │  │ • SlackBridge    │  │ • Health monitor │                           │ │
+│  │  │   as agent       │  │                  │                           │ │
+│  │  └──────────────────┘  └──────────────────┘                           │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                    │                                        │
+│                            Unix Domain Socket                               │
+│                                    │                                        │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │   Alice     │  │    Bob      │  │  SlackBridge│  │  Dashboard  │        │
-│  │  (Claude)   │  │  (Claude)   │  │  (special)  │  │  (observer) │        │
+│  │   Alice     │  │    Bob      │  │ SlackBridge │  │  Dashboard  │        │
+│  │  (Claude)   │  │  (Claude)   │  │  (daemon)   │  │  (observer) │        │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘        │
-│                                                                              │
-│  Router: routes messages, tracks subscriptions, manages shadows              │
-│  Storage: SQLite persistence for all messages                                │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Data Flow Examples
+### Deployment Model Alignment
 
-#### Flow 1: Agent → Slack Channel (Broadcast)
+| Mode | How Slack Integration Works |
+|------|----------------------------|
+| **Cloud Hosted** | OAuth via cloud, credentials in vault, daemon bridge runs in cloud workspace |
+| **Self-Hosted** | OAuth via cloud servers, credentials synced to local daemon |
+| **Hybrid/Local** | OAuth via cloud, daemon runs locally with synced credentials |
 
+This follows the same pattern as provider credentials (Claude API keys, etc.) established in PR #35.
+
+---
+
+## 3. Cloud Components
+
+### 3.1 API Routes (`src/cloud/api/integrations/slack.ts`)
+
+```typescript
+// src/cloud/api/integrations/slack.ts
+
+import { Router } from 'express';
+import { requireAuth } from '../middleware/auth';
+import { requirePlan } from '../middleware/planLimits';
+import { SlackService } from '../../services/slack';
+import { vault } from '../../vault';
+import { db } from '../../db';
+
+const router = Router();
+
+// All Slack routes require Pro+ plan
+router.use(requireAuth, requirePlan('pro'));
+
+/**
+ * GET /api/integrations/slack/status
+ * Get Slack integration status for current workspace
+ */
+router.get('/status', async (req, res) => {
+  const { workspaceId } = req.query;
+
+  const integration = await db.query.slackIntegrations.findFirst({
+    where: eq(slackIntegrations.workspaceId, workspaceId),
+  });
+
+  if (!integration) {
+    return res.json({ connected: false });
+  }
+
+  // Check token validity without exposing it
+  const isValid = await SlackService.validateToken(integration.id);
+
+  res.json({
+    connected: true,
+    valid: isValid,
+    slackWorkspace: integration.slackWorkspaceName,
+    slackTeamId: integration.slackTeamId,
+    channels: {
+      broadcast: integration.broadcastChannel,
+      alerts: integration.alertsChannel,
+    },
+    connectedAt: integration.createdAt,
+    connectedBy: integration.connectedByUserId,
+  });
+});
+
+/**
+ * GET /api/integrations/slack/oauth/start
+ * Initiate Slack OAuth flow
+ */
+router.get('/oauth/start', async (req, res) => {
+  const { workspaceId, redirectUri } = req.query;
+
+  // Generate state token for CSRF protection
+  const state = await SlackService.generateOAuthState({
+    workspaceId,
+    userId: req.user.id,
+    redirectUri,
+  });
+
+  const slackAuthUrl = SlackService.buildOAuthUrl(state);
+
+  res.json({ authUrl: slackAuthUrl, state });
+});
+
+/**
+ * GET /api/integrations/slack/oauth/callback
+ * Handle Slack OAuth callback
+ */
+router.get('/oauth/callback', async (req, res) => {
+  const { code, state } = req.query;
+
+  try {
+    // Validate state and exchange code for tokens
+    const { workspaceId, userId } = await SlackService.validateOAuthState(state);
+    const tokens = await SlackService.exchangeCodeForTokens(code);
+
+    // Store tokens in encrypted vault
+    const vaultKey = `slack:${workspaceId}`;
+    await vault.store(vaultKey, {
+      botToken: tokens.access_token,
+      appToken: tokens.app_token,  // For Socket Mode
+      teamId: tokens.team.id,
+      teamName: tokens.team.name,
+    });
+
+    // Create integration record
+    await db.insert(slackIntegrations).values({
+      id: generateId(),
+      workspaceId,
+      slackTeamId: tokens.team.id,
+      slackWorkspaceName: tokens.team.name,
+      vaultKeyId: vaultKey,
+      connectedByUserId: userId,
+      broadcastChannel: null,  // Configured later
+      alertsChannel: null,
+    });
+
+    // Notify daemon to connect
+    await SlackService.notifyDaemonConnect(workspaceId);
+
+    res.redirect(`/app/workspace/${workspaceId}/integrations?slack=connected`);
+  } catch (error) {
+    res.redirect(`/app/workspace/${workspaceId}/integrations?slack=error&message=${error.message}`);
+  }
+});
+
+/**
+ * POST /api/integrations/slack/disconnect
+ * Disconnect Slack integration
+ */
+router.post('/disconnect', async (req, res) => {
+  const { workspaceId } = req.body;
+
+  const integration = await db.query.slackIntegrations.findFirst({
+    where: eq(slackIntegrations.workspaceId, workspaceId),
+  });
+
+  if (!integration) {
+    return res.status(404).json({ error: 'No Slack integration found' });
+  }
+
+  // Revoke Slack token
+  await SlackService.revokeToken(integration.id);
+
+  // Remove from vault
+  await vault.delete(integration.vaultKeyId);
+
+  // Delete integration record
+  await db.delete(slackIntegrations)
+    .where(eq(slackIntegrations.id, integration.id));
+
+  // Notify daemon to disconnect
+  await SlackService.notifyDaemonDisconnect(workspaceId);
+
+  res.json({ success: true });
+});
+
+/**
+ * PUT /api/integrations/slack/config
+ * Update Slack integration configuration
+ */
+router.put('/config', async (req, res) => {
+  const { workspaceId, broadcastChannel, alertsChannel, showAgentToAgent, showThinking } = req.body;
+
+  await db.update(slackIntegrations)
+    .set({
+      broadcastChannel,
+      alertsChannel,
+      config: { showAgentToAgent, showThinking },
+      updatedAt: new Date(),
+    })
+    .where(eq(slackIntegrations.workspaceId, workspaceId));
+
+  // Notify daemon to reload config
+  await SlackService.notifyDaemonConfigUpdate(workspaceId);
+
+  res.json({ success: true });
+});
+
+/**
+ * GET /api/integrations/slack/channels
+ * List available Slack channels for configuration
+ */
+router.get('/channels', async (req, res) => {
+  const { workspaceId } = req.query;
+
+  const channels = await SlackService.listChannels(workspaceId);
+
+  res.json({ channels });
+});
+
+export default router;
 ```
-1. Alice outputs: ->relay:* <<<STATUS: Starting auth refactor>>>
-2. Relay daemon receives SEND envelope, routes to all agents
-3. SlackBridge receives DELIVER envelope (subscribed to '*')
-4. SlackBridge.onRelayMessage() triggered
-5. Maps broadcast → configured #agents channel
-6. Calls slack.chat.postMessage({ channel: '#agents', text: '...' })
-7. Slack displays: "[Alice] STATUS: Starting auth refactor"
-```
 
-#### Flow 2: Human → Agent (Slack Mention)
+### 3.2 Slack Service (`src/cloud/services/slack.ts`)
 
-```
-1. Human types in Slack: "@Alice-bot can you review PR #42?"
-2. Slack Events API sends app_mention event to SlackBridge
-3. SlackBridge.onSlackMention() triggered
-4. Maps @Alice-bot → agent name "Alice"
-5. Creates SEND envelope: { to: 'Alice', body: 'can you review PR #42?' }
-6. Sends via RelayClient to daemon
-7. Daemon routes DELIVER to Alice's terminal
-8. Alice sees: "Relay message from slack:@human [abc123]: can you review PR #42?"
-9. Alice responds: ->relay:slack:@human <<<I'll review PR #42 now>>>
-10. SlackBridge receives, posts reply in same thread
-```
+```typescript
+// src/cloud/services/slack.ts
 
-#### Flow 3: Agent → Agent (Visible in Slack)
+import { WebClient } from '@slack/web-api';
+import { vault } from '../vault';
+import { db, eq } from '../db';
+import { slackIntegrations } from '../db/schema';
 
-```
-1. Alice: ->relay:Bob <<<Can you handle the API tests?>>>
-2. Daemon routes to Bob AND SlackBridge (shadow mode)
-3. SlackBridge posts to #agents: "[Alice → Bob] Can you handle the API tests?"
-4. Bob responds: ->relay:Alice <<<On it>>>
-5. SlackBridge posts: "[Bob → Alice] On it"
-6. Humans can follow agent coordination in real-time
+const SLACK_CLIENT_ID = process.env.SLACK_CLIENT_ID;
+const SLACK_CLIENT_SECRET = process.env.SLACK_CLIENT_SECRET;
+const SLACK_REDIRECT_URI = process.env.SLACK_REDIRECT_URI;
+
+export class SlackService {
+  /**
+   * Build OAuth authorization URL
+   */
+  static buildOAuthUrl(state: string): string {
+    const scopes = [
+      'app_mentions:read',
+      'channels:history',
+      'channels:read',
+      'chat:write',
+      'groups:history',
+      'groups:read',
+      'im:history',
+      'im:read',
+      'im:write',
+      'users:read',
+    ].join(',');
+
+    return `https://slack.com/oauth/v2/authorize?` +
+      `client_id=${SLACK_CLIENT_ID}&` +
+      `scope=${scopes}&` +
+      `redirect_uri=${encodeURIComponent(SLACK_REDIRECT_URI)}&` +
+      `state=${state}`;
+  }
+
+  /**
+   * Exchange OAuth code for tokens
+   */
+  static async exchangeCodeForTokens(code: string): Promise<SlackOAuthResponse> {
+    const client = new WebClient();
+
+    const response = await client.oauth.v2.access({
+      client_id: SLACK_CLIENT_ID,
+      client_secret: SLACK_CLIENT_SECRET,
+      code,
+      redirect_uri: SLACK_REDIRECT_URI,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Slack OAuth failed: ${response.error}`);
+    }
+
+    return response as SlackOAuthResponse;
+  }
+
+  /**
+   * Validate stored token is still valid
+   */
+  static async validateToken(integrationId: string): Promise<boolean> {
+    const integration = await db.query.slackIntegrations.findFirst({
+      where: eq(slackIntegrations.id, integrationId),
+    });
+
+    if (!integration) return false;
+
+    const credentials = await vault.retrieve(integration.vaultKeyId);
+    if (!credentials) return false;
+
+    try {
+      const client = new WebClient(credentials.botToken);
+      await client.auth.test();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Revoke Slack token
+   */
+  static async revokeToken(integrationId: string): Promise<void> {
+    const integration = await db.query.slackIntegrations.findFirst({
+      where: eq(slackIntegrations.id, integrationId),
+    });
+
+    if (!integration) return;
+
+    const credentials = await vault.retrieve(integration.vaultKeyId);
+    if (!credentials) return;
+
+    try {
+      const client = new WebClient(credentials.botToken);
+      await client.auth.revoke();
+    } catch (error) {
+      console.error('Failed to revoke Slack token:', error);
+    }
+  }
+
+  /**
+   * List channels the bot can access
+   */
+  static async listChannels(workspaceId: string): Promise<SlackChannel[]> {
+    const integration = await db.query.slackIntegrations.findFirst({
+      where: eq(slackIntegrations.workspaceId, workspaceId),
+    });
+
+    if (!integration) {
+      throw new Error('No Slack integration found');
+    }
+
+    const credentials = await vault.retrieve(integration.vaultKeyId);
+    const client = new WebClient(credentials.botToken);
+
+    const result = await client.conversations.list({
+      types: 'public_channel,private_channel',
+      exclude_archived: true,
+    });
+
+    return result.channels?.map(ch => ({
+      id: ch.id,
+      name: ch.name,
+      isPrivate: ch.is_private,
+      isMember: ch.is_member,
+    })) || [];
+  }
+
+  /**
+   * Get credentials for daemon sync
+   * Called by daemon cloud-sync to retrieve Slack config
+   */
+  static async getCredentialsForDaemon(workspaceId: string): Promise<SlackDaemonConfig | null> {
+    const integration = await db.query.slackIntegrations.findFirst({
+      where: eq(slackIntegrations.workspaceId, workspaceId),
+    });
+
+    if (!integration) return null;
+
+    const credentials = await vault.retrieve(integration.vaultKeyId);
+    if (!credentials) return null;
+
+    return {
+      botToken: credentials.botToken,
+      appToken: credentials.appToken,
+      teamId: integration.slackTeamId,
+      teamName: integration.slackWorkspaceName,
+      broadcastChannel: integration.broadcastChannel,
+      alertsChannel: integration.alertsChannel,
+      config: integration.config,
+    };
+  }
+
+  /**
+   * Notify daemon of Slack connection change
+   */
+  static async notifyDaemonConnect(workspaceId: string): Promise<void> {
+    // Send via WebSocket to connected daemon orchestrator
+    // or queue for next sync
+    await this.sendDaemonNotification(workspaceId, 'slack:connect');
+  }
+
+  static async notifyDaemonDisconnect(workspaceId: string): Promise<void> {
+    await this.sendDaemonNotification(workspaceId, 'slack:disconnect');
+  }
+
+  static async notifyDaemonConfigUpdate(workspaceId: string): Promise<void> {
+    await this.sendDaemonNotification(workspaceId, 'slack:config-update');
+  }
+
+  private static async sendDaemonNotification(workspaceId: string, event: string): Promise<void> {
+    // Implementation depends on daemon connection method
+    // Could be WebSocket push, Redis pub/sub, or polling
+  }
+}
+
+interface SlackOAuthResponse {
+  ok: boolean;
+  access_token: string;
+  app_token?: string;
+  token_type: string;
+  scope: string;
+  bot_user_id: string;
+  team: {
+    id: string;
+    name: string;
+  };
+}
+
+interface SlackChannel {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  isMember: boolean;
+}
+
+interface SlackDaemonConfig {
+  botToken: string;
+  appToken: string;
+  teamId: string;
+  teamName: string;
+  broadcastChannel: string | null;
+  alertsChannel: string | null;
+  config: {
+    showAgentToAgent?: boolean;
+    showThinking?: boolean;
+  };
+}
 ```
 
 ---
 
-## 3. Component Design
+## 4. Daemon Components
 
-### 3.1 SlackBridgeService
-
-Main orchestration class that coordinates all Slack integration.
+### 4.1 Slack Bridge (`src/daemon/slack-bridge.ts`)
 
 ```typescript
-// src/slack/slack-bridge-service.ts
+// src/daemon/slack-bridge.ts
 
 import { App, LogLevel } from '@slack/bolt';
 import { RelayClient } from '../wrapper/client';
-import { SlackAgentRegistry } from './agent-registry';
-import { SlackThreadStore } from './thread-store';
-import { SlackMessageFormatter } from './formatter';
+import { SlackThreadStore } from './slack-thread-store';
+import { SlackMessageFormatter } from './slack-formatter';
+import { logger } from '../resiliency/logger';
 
 export interface SlackBridgeConfig {
-  // Slack credentials
-  slackBotToken: string;
-  slackAppToken: string;      // For Socket Mode
-  slackSigningSecret: string;
-
+  botToken: string;
+  appToken: string;
+  teamId: string;
+  teamName: string;
+  broadcastChannel: string | null;
+  alertsChannel: string | null;
+  config: {
+    showAgentToAgent?: boolean;
+    showThinking?: boolean;
+  };
   // Relay connection
-  relaySocketPath?: string;   // Default: /tmp/agent-relay.sock
-  bridgeAgentName?: string;   // Default: 'SlackBridge'
-
-  // Channel configuration
-  broadcastChannel: string;   // Channel for ->relay:* messages
-  alertsChannel?: string;     // Channel for high-importance messages
-
-  // Agent mapping
-  agentBotMapping?: Record<string, string>;  // agentName → Slack bot user ID
-  defaultBotId?: string;      // Fallback bot for unknown agents
-
-  // Behavior
-  showAgentToAgent?: boolean; // Show agent↔agent messages in Slack (default: true)
-  threadTTLMs?: number;       // Thread mapping expiration (default: 24h)
-  messagePrefix?: string;     // Prefix for relay messages (default: '')
+  socketPath: string;
+  workspaceId: string;
 }
 
-export class SlackBridgeService {
-  private slackApp: App;
-  private relayClient: RelayClient;
-  private agentRegistry: SlackAgentRegistry;
+export class SlackBridge {
+  private slackApp: App | null = null;
+  private relayClient: RelayClient | null = null;
   private threadStore: SlackThreadStore;
   private formatter: SlackMessageFormatter;
   private config: SlackBridgeConfig;
+  private running = false;
 
   constructor(config: SlackBridgeConfig) {
     this.config = config;
-    this.agentRegistry = new SlackAgentRegistry(config.agentBotMapping);
-    this.threadStore = new SlackThreadStore(config.threadTTLMs);
-    this.formatter = new SlackMessageFormatter(config.messagePrefix);
+    this.threadStore = new SlackThreadStore();
+    this.formatter = new SlackMessageFormatter();
   }
 
   async start(): Promise<void> {
-    // 1. Initialize Slack App (Socket Mode for real-time events)
-    this.slackApp = new App({
-      token: this.config.slackBotToken,
-      appToken: this.config.slackAppToken,
-      socketMode: true,
-      logLevel: LogLevel.INFO,
+    if (this.running) return;
+
+    logger.info('Starting Slack bridge', {
+      workspaceId: this.config.workspaceId,
+      slackTeam: this.config.teamName,
     });
 
-    // 2. Register Slack event handlers
+    // 1. Initialize Slack App (Socket Mode)
+    this.slackApp = new App({
+      token: this.config.botToken,
+      appToken: this.config.appToken,
+      socketMode: true,
+      logLevel: LogLevel.WARN,
+    });
+
+    // 2. Register event handlers
     this.registerSlackHandlers();
 
-    // 3. Connect to relay daemon
+    // 3. Connect to local relay daemon
     this.relayClient = new RelayClient({
-      socketPath: this.config.relaySocketPath,
-      agentName: this.config.bridgeAgentName || 'SlackBridge',
+      socketPath: this.config.socketPath,
+      agentName: 'SlackBridge',
       cli: 'slack',
       reconnect: true,
     });
@@ -241,72 +618,96 @@ export class SlackBridgeService {
 
     await this.relayClient.connect();
 
-    // 4. Subscribe to all messages (broadcast listener)
+    // 4. Subscribe to all messages
     this.relayClient.subscribe('*');
 
     // 5. Start Slack app
     await this.slackApp.start();
 
-    console.log('SlackBridge started successfully');
+    this.running = true;
+    logger.info('Slack bridge started successfully');
   }
 
   async stop(): Promise<void> {
-    await this.slackApp.stop();
-    await this.relayClient.disconnect();
+    if (!this.running) return;
+
+    logger.info('Stopping Slack bridge');
+
+    if (this.slackApp) {
+      await this.slackApp.stop();
+      this.slackApp = null;
+    }
+
+    if (this.relayClient) {
+      await this.relayClient.disconnect();
+      this.relayClient = null;
+    }
+
+    this.running = false;
+  }
+
+  async updateConfig(newConfig: Partial<SlackBridgeConfig>): Promise<void> {
+    // Update config without full restart for channel changes
+    this.config = { ...this.config, ...newConfig };
+    logger.info('Slack bridge config updated', { workspaceId: this.config.workspaceId });
+  }
+
+  isRunning(): boolean {
+    return this.running;
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Slack → Relay
+  // Slack → Relay handlers
   // ─────────────────────────────────────────────────────────────
 
   private registerSlackHandlers(): void {
-    // Handle @mentions of agent bots
+    if (!this.slackApp) return;
+
+    // Handle @mentions
     this.slackApp.event('app_mention', async ({ event, say }) => {
-      await this.handleSlackMention(event, say);
+      await this.handleMention(event, say);
     });
 
-    // Handle direct messages to bot
+    // Handle DMs
     this.slackApp.event('message', async ({ event, say }) => {
-      if (event.channel_type === 'im') {
-        await this.handleSlackDM(event, say);
+      if (event.channel_type === 'im' && !event.bot_id) {
+        await this.handleDirectMessage(event, say);
       }
     });
 
-    // Handle slash command: /relay @agent message
+    // Handle thread replies
+    this.slackApp.event('message', async ({ event }) => {
+      if (event.thread_ts && event.thread_ts !== event.ts && !event.bot_id) {
+        await this.handleThreadReply(event);
+      }
+    });
+
+    // Slash command
     this.slackApp.command('/relay', async ({ command, ack, respond }) => {
       await ack();
       await this.handleSlashCommand(command, respond);
     });
-
-    // Handle thread replies (for conversation continuity)
-    this.slackApp.event('message', async ({ event }) => {
-      if (event.thread_ts && event.thread_ts !== event.ts) {
-        await this.handleThreadReply(event);
-      }
-    });
   }
 
-  private async handleSlackMention(event: any, say: Function): Promise<void> {
-    // Extract target agent from the bot that was mentioned
-    const mentionedBotId = this.extractBotMention(event.text);
-    const agentName = this.agentRegistry.getAgentName(mentionedBotId);
+  private async handleMention(event: any, say: Function): Promise<void> {
+    // Extract agent name from message (e.g., "@relay Alice please help")
+    const agentMatch = event.text.match(/<@[A-Z0-9]+>\s*@?(\w+)\s*(.*)/s);
 
-    if (!agentName) {
-      await say({ text: `Unknown agent. Available: ${this.agentRegistry.listAgents().join(', ')}`, thread_ts: event.ts });
+    if (!agentMatch) {
+      await say({
+        text: 'Usage: @AgentRelay AgentName your message',
+        thread_ts: event.ts,
+      });
       return;
     }
 
-    // Clean message text (remove bot mention)
-    const cleanText = this.cleanMentionText(event.text, mentionedBotId);
+    const [, agentName, messageBody] = agentMatch;
+    const slackUser = await this.resolveUser(event.user);
+    const thread = this.threadStore.getOrCreate(event.thread_ts || event.ts, event.channel);
 
-    // Create relay message
-    const slackUser = await this.resolveSlackUser(event.user);
-    const thread = this.threadStore.getOrCreateThread(event.thread_ts || event.ts, event.channel);
-
-    // Send to relay
-    this.relayClient.sendMessage(
+    this.relayClient?.sendMessage(
       agentName,
-      cleanText,
+      messageBody.trim(),
       'message',
       {
         slack_user: slackUser,
@@ -316,24 +717,21 @@ export class SlackBridgeService {
       },
       thread
     );
+
+    logger.debug('Forwarded Slack mention to relay', { agentName, slackUser });
   }
 
-  private async handleSlackDM(event: any, say: Function): Promise<void> {
-    // DMs go to a default agent or specified via config
-    const targetAgent = this.config.defaultBotId
-      ? this.agentRegistry.getAgentName(this.config.defaultBotId)
-      : this.agentRegistry.listAgents()[0];
+  private async handleDirectMessage(event: any, say: Function): Promise<void> {
+    // Parse agent target from DM: "Alice: help me" or just broadcast
+    const match = event.text.match(/^@?(\w+):\s*(.+)$/s);
 
-    if (!targetAgent) {
-      await say('No agents available');
-      return;
-    }
+    const agentName = match ? match[1] : '*';
+    const messageBody = match ? match[2] : event.text;
+    const slackUser = await this.resolveUser(event.user);
 
-    const slackUser = await this.resolveSlackUser(event.user);
-
-    this.relayClient.sendMessage(
-      targetAgent,
-      event.text,
+    this.relayClient?.sendMessage(
+      agentName,
+      messageBody.trim(),
       'message',
       {
         slack_user: slackUser,
@@ -344,47 +742,14 @@ export class SlackBridgeService {
     );
   }
 
-  private async handleSlashCommand(command: any, respond: Function): Promise<void> {
-    // Parse: /relay @AgentName message body
-    const match = command.text.match(/^@?(\w+)\s+(.+)$/s);
-
-    if (!match) {
-      await respond('Usage: /relay @AgentName your message here');
-      return;
-    }
-
-    const [, agentName, messageBody] = match;
-    const slackUser = await this.resolveSlackUser(command.user_id);
-
-    this.relayClient.sendMessage(
-      agentName,
-      messageBody,
-      'message',
-      {
-        slack_user: slackUser,
-        slack_channel: command.channel_id,
-        slack_command: true,
-      }
-    );
-
-    await respond(`Message sent to ${agentName}`);
-  }
-
   private async handleThreadReply(event: any): Promise<void> {
-    // Check if this thread is mapped to a relay thread
     const relayThread = this.threadStore.getRelayThread(event.thread_ts, event.channel);
+    if (!relayThread) return;  // Not a relay thread
 
-    if (!relayThread) {
-      return; // Not a relay-related thread
-    }
+    const slackUser = await this.resolveUser(event.user);
+    const threadMeta = this.threadStore.getMeta(event.thread_ts, event.channel);
 
-    // Forward reply to the relay thread
-    const slackUser = await this.resolveSlackUser(event.user);
-
-    // Determine target (original recipient of thread)
-    const threadMeta = this.threadStore.getThreadMeta(event.thread_ts, event.channel);
-
-    this.relayClient.sendMessage(
+    this.relayClient?.sendMessage(
       threadMeta?.targetAgent || '*',
       event.text,
       'message',
@@ -396,8 +761,33 @@ export class SlackBridgeService {
     );
   }
 
+  private async handleSlashCommand(command: any, respond: Function): Promise<void> {
+    const match = command.text.match(/^@?(\w+)\s+(.+)$/s);
+
+    if (!match) {
+      await respond('Usage: /relay @AgentName your message');
+      return;
+    }
+
+    const [, agentName, messageBody] = match;
+    const slackUser = await this.resolveUser(command.user_id);
+
+    this.relayClient?.sendMessage(
+      agentName,
+      messageBody.trim(),
+      'message',
+      {
+        slack_user: slackUser,
+        slack_channel: command.channel_id,
+        slack_command: true,
+      }
+    );
+
+    await respond(`Message sent to ${agentName}`);
+  }
+
   // ─────────────────────────────────────────────────────────────
-  // Relay → Slack
+  // Relay → Slack handlers
   // ─────────────────────────────────────────────────────────────
 
   private async onRelayMessage(
@@ -406,90 +796,74 @@ export class SlackBridgeService {
     messageId: string,
     meta?: { importance?: number }
   ): Promise<void> {
-    // Skip messages from SlackBridge itself (prevent echo)
-    if (from === this.config.bridgeAgentName) {
-      return;
-    }
+    // Skip self-messages
+    if (from === 'SlackBridge') return;
 
-    // Skip if this originated from Slack (prevent loop)
-    if (payload.data?.slack_ts) {
-      return;
-    }
+    // Skip messages originating from Slack (prevent loop)
+    if (payload.data?.slack_ts) return;
 
-    const formatted = this.formatter.formatRelayMessage(from, payload);
+    // Skip thinking unless configured
+    if (payload.kind === 'thinking' && !this.config.config.showThinking) return;
 
-    // Determine target channel
-    let channel: string;
+    // Determine channel
+    let channel = this.config.broadcastChannel;
     let threadTs: string | undefined;
 
-    if (payload.data?.to === '*') {
-      // Broadcast → broadcast channel
-      channel = this.config.broadcastChannel;
-    } else if (payload.data?.slack_channel) {
-      // Reply to Slack message → same channel/thread
+    // Reply to Slack conversation
+    if (payload.data?.slack_channel) {
       channel = payload.data.slack_channel as string;
       threadTs = payload.data.slack_thread_ts as string;
-    } else if (meta?.importance && meta.importance >= 80 && this.config.alertsChannel) {
-      // High importance → alerts channel
-      channel = this.config.alertsChannel;
-    } else {
-      // Default → broadcast channel
-      channel = this.config.broadcastChannel;
     }
-
-    // Handle relay thread → Slack thread mapping
-    if (payload.thread) {
+    // High importance → alerts channel
+    else if (meta?.importance && meta.importance >= 80 && this.config.alertsChannel) {
+      channel = this.config.alertsChannel;
+    }
+    // Map relay thread to Slack thread
+    else if (payload.thread) {
       const slackThread = this.threadStore.getSlackThread(payload.thread);
       if (slackThread) {
-        threadTs = slackThread.ts;
         channel = slackThread.channel;
+        threadTs = slackThread.ts;
       }
     }
 
-    // Post to Slack
-    const result = await this.slackApp.client.chat.postMessage({
-      channel,
-      text: formatted.text,
-      thread_ts: threadTs,
-      unfurl_links: false,
-      unfurl_media: false,
-    });
+    if (!channel) {
+      logger.warn('No channel configured for Slack message');
+      return;
+    }
 
-    // Store thread mapping for replies
-    if (result.ts && payload.thread) {
-      this.threadStore.mapThread(payload.thread, {
-        ts: result.ts,
+    const formatted = this.formatter.format(from, payload);
+
+    try {
+      const result = await this.slackApp?.client.chat.postMessage({
         channel,
-        targetAgent: from,
+        text: formatted,
+        thread_ts: threadTs,
+        unfurl_links: false,
+        unfurl_media: false,
       });
+
+      // Track thread mapping
+      if (result?.ts && payload.thread) {
+        this.threadStore.map(payload.thread, {
+          ts: result.ts,
+          channel,
+          targetAgent: from,
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to post to Slack', { error, channel });
     }
   }
 
   private onRelayStateChange(state: string): void {
-    console.log(`SlackBridge relay connection: ${state}`);
-
-    if (state === 'DISCONNECTED') {
-      // Could post to alertsChannel about disconnection
-    }
+    logger.info('Slack bridge relay connection state', { state });
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────
-
-  private extractBotMention(text: string): string | null {
-    const match = text.match(/<@([A-Z0-9]+)>/);
-    return match ? match[1] : null;
-  }
-
-  private cleanMentionText(text: string, botId: string): string {
-    return text.replace(new RegExp(`<@${botId}>\\s*`, 'g'), '').trim();
-  }
-
-  private async resolveSlackUser(userId: string): Promise<string> {
+  private async resolveUser(userId: string): Promise<string> {
     try {
-      const result = await this.slackApp.client.users.info({ user: userId });
-      return result.user?.real_name || result.user?.name || userId;
+      const result = await this.slackApp?.client.users.info({ user: userId });
+      return result?.user?.real_name || result?.user?.name || userId;
     } catch {
       return userId;
     }
@@ -497,627 +871,526 @@ export class SlackBridgeService {
 }
 ```
 
-### 3.2 SlackAgentRegistry
-
-Maps agent names to Slack bot identities.
+### 4.2 Integration with Orchestrator (`src/daemon/orchestrator.ts`)
 
 ```typescript
-// src/slack/agent-registry.ts
+// Addition to src/daemon/orchestrator.ts
 
-export interface AgentMapping {
-  agentName: string;
-  slackBotId: string;
-  slackBotName?: string;
-  channels?: string[];  // Channels this agent posts to
-}
+import { SlackBridge, SlackBridgeConfig } from './slack-bridge';
 
-export class SlackAgentRegistry {
-  private agentToBot: Map<string, string> = new Map();
-  private botToAgent: Map<string, string> = new Map();
+export class DaemonOrchestrator {
+  private slackBridges: Map<string, SlackBridge> = new Map();
 
-  constructor(initialMapping?: Record<string, string>) {
-    if (initialMapping) {
-      for (const [agent, botId] of Object.entries(initialMapping)) {
-        this.register(agent, botId);
-      }
+  // Called during workspace initialization or when Slack is connected
+  async initializeSlackBridge(workspaceId: string): Promise<void> {
+    // Check if already running
+    if (this.slackBridges.has(workspaceId)) {
+      return;
+    }
+
+    // Get Slack config from cloud sync
+    const slackConfig = await this.cloudSync.getSlackConfig(workspaceId);
+    if (!slackConfig) {
+      logger.debug('No Slack integration for workspace', { workspaceId });
+      return;
+    }
+
+    const bridge = new SlackBridge({
+      ...slackConfig,
+      socketPath: this.getSocketPath(workspaceId),
+      workspaceId,
+    });
+
+    try {
+      await bridge.start();
+      this.slackBridges.set(workspaceId, bridge);
+      logger.info('Slack bridge initialized', { workspaceId });
+    } catch (error) {
+      logger.error('Failed to initialize Slack bridge', { workspaceId, error });
     }
   }
 
-  register(agentName: string, slackBotId: string): void {
-    this.agentToBot.set(agentName, slackBotId);
-    this.botToAgent.set(slackBotId, agentName);
-  }
-
-  unregister(agentName: string): void {
-    const botId = this.agentToBot.get(agentName);
-    if (botId) {
-      this.botToAgent.delete(botId);
-    }
-    this.agentToBot.delete(agentName);
-  }
-
-  getSlackBotId(agentName: string): string | undefined {
-    return this.agentToBot.get(agentName);
-  }
-
-  getAgentName(slackBotId: string): string | undefined {
-    return this.botToAgent.get(slackBotId);
-  }
-
-  listAgents(): string[] {
-    return Array.from(this.agentToBot.keys());
-  }
-
-  listBots(): string[] {
-    return Array.from(this.botToAgent.keys());
-  }
-}
-```
-
-### 3.3 SlackThreadStore
-
-Manages bidirectional thread mapping between Relay and Slack.
-
-```typescript
-// src/slack/thread-store.ts
-
-export interface SlackThreadRef {
-  ts: string;           // Slack thread_ts
-  channel: string;      // Slack channel ID
-  targetAgent?: string; // Agent this thread is primarily with
-  createdAt: number;
-}
-
-export interface RelayThreadRef {
-  threadId: string;     // Relay thread ID
-  createdAt: number;
-}
-
-export class SlackThreadStore {
-  private relayToSlack: Map<string, SlackThreadRef> = new Map();
-  private slackToRelay: Map<string, RelayThreadRef> = new Map();
-  private ttlMs: number;
-
-  constructor(ttlMs: number = 24 * 60 * 60 * 1000) {  // 24 hours default
-    this.ttlMs = ttlMs;
-
-    // Periodic cleanup
-    setInterval(() => this.cleanup(), 60 * 60 * 1000);  // Every hour
-  }
-
-  mapThread(relayThreadId: string, slackRef: Omit<SlackThreadRef, 'createdAt'>): void {
-    const now = Date.now();
-    const slackKey = this.slackKey(slackRef.ts, slackRef.channel);
-
-    this.relayToSlack.set(relayThreadId, { ...slackRef, createdAt: now });
-    this.slackToRelay.set(slackKey, { threadId: relayThreadId, createdAt: now });
-  }
-
-  getSlackThread(relayThreadId: string): SlackThreadRef | undefined {
-    return this.relayToSlack.get(relayThreadId);
-  }
-
-  getRelayThread(slackTs: string, channel: string): string | undefined {
-    const ref = this.slackToRelay.get(this.slackKey(slackTs, channel));
-    return ref?.threadId;
-  }
-
-  getOrCreateThread(slackTs: string, channel: string): string {
-    const existing = this.getRelayThread(slackTs, channel);
-    if (existing) return existing;
-
-    // Create new relay thread ID
-    const relayThreadId = `slack-${channel}-${slackTs}`;
-    this.mapThread(relayThreadId, { ts: slackTs, channel });
-    return relayThreadId;
-  }
-
-  getThreadMeta(slackTs: string, channel: string): SlackThreadRef | undefined {
-    const relayId = this.getRelayThread(slackTs, channel);
-    if (!relayId) return undefined;
-    return this.relayToSlack.get(relayId);
-  }
-
-  private slackKey(ts: string, channel: string): string {
-    return `${channel}:${ts}`;
-  }
-
-  private cleanup(): void {
-    const cutoff = Date.now() - this.ttlMs;
-
-    for (const [key, ref] of this.relayToSlack) {
-      if (ref.createdAt < cutoff) {
-        this.relayToSlack.delete(key);
-      }
-    }
-
-    for (const [key, ref] of this.slackToRelay) {
-      if (ref.createdAt < cutoff) {
-        this.slackToRelay.delete(key);
-      }
+  async stopSlackBridge(workspaceId: string): Promise<void> {
+    const bridge = this.slackBridges.get(workspaceId);
+    if (bridge) {
+      await bridge.stop();
+      this.slackBridges.delete(workspaceId);
+      logger.info('Slack bridge stopped', { workspaceId });
     }
   }
-}
-```
 
-### 3.4 SlackMessageFormatter
-
-Formats messages for display in Slack.
-
-```typescript
-// src/slack/formatter.ts
-
-export interface FormattedSlackMessage {
-  text: string;
-  blocks?: any[];  // Slack Block Kit (future)
-}
-
-export class SlackMessageFormatter {
-  private prefix: string;
-
-  constructor(prefix: string = '') {
-    this.prefix = prefix;
+  // Called when cloud sync receives Slack notification
+  async handleSlackNotification(workspaceId: string, event: string): Promise<void> {
+    switch (event) {
+      case 'slack:connect':
+        await this.initializeSlackBridge(workspaceId);
+        break;
+      case 'slack:disconnect':
+        await this.stopSlackBridge(workspaceId);
+        break;
+      case 'slack:config-update':
+        const bridge = this.slackBridges.get(workspaceId);
+        if (bridge) {
+          const newConfig = await this.cloudSync.getSlackConfig(workspaceId);
+          if (newConfig) {
+            await bridge.updateConfig(newConfig);
+          }
+        }
+        break;
+    }
   }
 
-  formatRelayMessage(
-    from: string,
-    payload: { kind: string; body: string; data?: Record<string, unknown> }
-  ): FormattedSlackMessage {
-    const to = payload.data?.to as string;
-
-    let header: string;
-    if (to === '*') {
-      header = `*[${from}]*`;  // Broadcast
-    } else if (to) {
-      header = `*[${from} → ${to}]*`;  // Direct message (visible)
-    } else {
-      header = `*[${from}]*`;
-    }
-
-    // Handle different message kinds
-    let body = payload.body;
-    if (payload.kind === 'thinking') {
-      body = `_💭 ${body}_`;  // Italicize thinking
-    } else if (payload.kind === 'action') {
-      body = `\`${body}\``;  // Code format for actions
-    }
-
+  // Health check includes Slack bridges
+  getHealth(): DaemonHealth {
     return {
-      text: `${this.prefix}${header} ${body}`.trim(),
+      ...this.baseHealth(),
+      slackBridges: Array.from(this.slackBridges.entries()).map(([id, bridge]) => ({
+        workspaceId: id,
+        running: bridge.isRunning(),
+      })),
     };
   }
+}
+```
 
-  formatSlackToRelay(
-    slackUser: string,
-    text: string,
-    isDM: boolean = false
-  ): string {
-    if (isDM) {
-      return `[DM from ${slackUser}]: ${text}`;
+### 4.3 Cloud Sync Extension (`src/daemon/cloud-sync.ts`)
+
+```typescript
+// Addition to src/daemon/cloud-sync.ts
+
+export class CloudSync {
+  /**
+   * Get Slack configuration for a workspace
+   * Called by orchestrator when initializing Slack bridge
+   */
+  async getSlackConfig(workspaceId: string): Promise<SlackBridgeConfig | null> {
+    try {
+      const response = await this.apiClient.get(
+        `/api/integrations/slack/daemon-config?workspaceId=${workspaceId}`
+      );
+
+      if (!response.data.connected) {
+        return null;
+      }
+
+      return response.data.config;
+    } catch (error) {
+      logger.error('Failed to fetch Slack config', { workspaceId, error });
+      return null;
     }
-    return `[${slackUser}]: ${text}`;
+  }
+
+  /**
+   * Subscribe to Slack notifications
+   */
+  subscribeToSlackNotifications(callback: (workspaceId: string, event: string) => void): void {
+    // WebSocket subscription or polling
+    this.on('slack:notification', callback);
   }
 }
 ```
 
 ---
 
-## 4. Protocol Mapping
+## 5. Database Schema
 
-### 4.1 Message Type Mapping
+### 5.1 Drizzle Schema (`src/cloud/db/schema.ts`)
 
-| Relay Concept | Slack Equivalent | Notes |
-|---------------|------------------|-------|
-| `->relay:*` (broadcast) | Channel message to #agents | Configurable channel |
-| `->relay:AgentName` | Not posted (unless shadowing) | Agent-to-agent stays internal |
-| `->relay:slack:@user` | Reply in thread or DM | Special routing |
-| Thread ID | `thread_ts` | Bidirectional mapping |
-| `kind: 'message'` | Plain text | Standard |
-| `kind: 'thinking'` | Italicized text | Optional visibility |
-| `kind: 'action'` | Code-formatted text | Distinguishes actions |
-| `importance: 80+` | Posts to #alerts | High-priority routing |
-| ACK | Emoji reaction ✅ (optional) | Delivery confirmation |
+```typescript
+// Addition to src/cloud/db/schema.ts
 
-### 4.2 Identity Mapping Options
+import { pgTable, text, timestamp, jsonb, boolean } from 'drizzle-orm/pg-core';
 
-**Option A: Single Bot, Multiple Display Names**
-- One Slack app/bot
-- Use `username` override in `chat.postMessage`
-- Simpler setup, less realistic
+export const slackIntegrations = pgTable('slack_integrations', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 
-**Option B: Multiple Bots (Recommended)**
-- One Slack bot user per agent
-- Requires multiple bot tokens or Enterprise Grid
-- More realistic appearance
+  // Slack workspace info
+  slackTeamId: text('slack_team_id').notNull(),
+  slackWorkspaceName: text('slack_workspace_name').notNull(),
 
-**Option C: Hybrid**
-- Core agents get dedicated bots
-- Spawned workers share a generic bot
-- Balanced approach
+  // Credentials stored in vault
+  vaultKeyId: text('vault_key_id').notNull(),
 
-### 4.3 Thread Synchronization
+  // Channel configuration
+  broadcastChannel: text('broadcast_channel'),
+  alertsChannel: text('alerts_channel'),
 
+  // Behavior configuration
+  config: jsonb('config').$type<{
+    showAgentToAgent?: boolean;
+    showThinking?: boolean;
+    threadTTLHours?: number;
+  }>().default({}),
+
+  // Metadata
+  connectedByUserId: text('connected_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const slackChannelMappings = pgTable('slack_channel_mappings', {
+  id: text('id').primaryKey(),
+  integrationId: text('integration_id').notNull().references(() => slackIntegrations.id, { onDelete: 'cascade' }),
+
+  // Relay topic → Slack channel mapping
+  relayTopic: text('relay_topic').notNull(),
+  slackChannelId: text('slack_channel_id').notNull(),
+  slackChannelName: text('slack_channel_name'),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Index for fast lookup
+export const slackIntegrationsWorkspaceIdx = index('slack_integrations_workspace_idx')
+  .on(slackIntegrations.workspaceId);
 ```
-Relay Thread ID: "task-auth-review"
-        │
-        │  Thread Store
-        ▼
-Slack Thread: { channel: "C0123ABC", ts: "1234567890.123456" }
 
-Mapping Rules:
-1. First message creates mapping
-2. Replies use existing thread_ts
-3. Mapping expires after TTL (24h default)
-4. Manual thread creation via /relay-thread command
+### 5.2 SQL Migration
+
+```sql
+-- deploy/migrations/004_slack_integrations.sql
+
+CREATE TABLE slack_integrations (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  slack_team_id TEXT NOT NULL,
+  slack_workspace_name TEXT NOT NULL,
+  vault_key_id TEXT NOT NULL,
+  broadcast_channel TEXT,
+  alerts_channel TEXT,
+  config JSONB DEFAULT '{}',
+  connected_by_user_id TEXT REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX slack_integrations_workspace_idx ON slack_integrations(workspace_id);
+
+CREATE TABLE slack_channel_mappings (
+  id TEXT PRIMARY KEY,
+  integration_id TEXT NOT NULL REFERENCES slack_integrations(id) ON DELETE CASCADE,
+  relay_topic TEXT NOT NULL,
+  slack_channel_id TEXT NOT NULL,
+  slack_channel_name TEXT,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX slack_channel_mappings_integration_idx ON slack_channel_mappings(integration_id);
 ```
 
 ---
 
-## 5. Implementation Phases
+## 6. Dashboard UI
 
-### Phase 1: Core Bridge (Day 1-2)
-
-**Deliverables:**
-- [ ] `SlackBridgeService` with basic Slack connection
-- [ ] `RelayClient` integration
-- [ ] Relay → Slack broadcast posting
-- [ ] Basic configuration loading
-
-**Files:**
-```
-src/slack/
-├── index.ts                  # Exports
-├── slack-bridge-service.ts   # Main service
-├── agent-registry.ts         # Agent mapping
-└── formatter.ts              # Message formatting
-```
-
-**Test:**
-```bash
-# Start relay daemon
-agent-relay up
-
-# Start Slack bridge
-agent-relay slack-bridge --config slack.config.json
-
-# Send broadcast from agent
-->relay:* <<<Hello from agent!>>>
-
-# Verify appears in Slack #agents channel
-```
-
-### Phase 2: Slack → Relay (Day 2-3)
-
-**Deliverables:**
-- [ ] `app_mention` event handling
-- [ ] `/relay` slash command
-- [ ] DM handling
-- [ ] User name resolution
-
-**Test:**
-```
-# In Slack, mention an agent
-@Alice-bot please review the auth code
-
-# Verify Alice receives in terminal:
-Relay message from slack:@JohnDoe [abc123]: please review the auth code
-```
-
-### Phase 3: Thread Synchronization (Day 3-4)
-
-**Deliverables:**
-- [ ] `SlackThreadStore` implementation
-- [ ] Bidirectional thread mapping
-- [ ] Thread reply handling
-- [ ] Thread cleanup/expiration
-
-**Test:**
-```
-# Agent starts a thread
-->relay:Bob [thread:auth-review] <<<Starting auth review>>>
-
-# Message appears in Slack with thread
-# Human replies in Slack thread
-# Reply reaches Bob with same thread context
-```
-
-### Phase 4: Polish & Configuration (Day 4-5)
-
-**Deliverables:**
-- [ ] Configuration file support
-- [ ] CLI commands (`agent-relay slack-bridge`)
-- [ ] Dashboard integration (show Slack bridge status)
-- [ ] Error handling & reconnection
-- [ ] Documentation
-
-**Test:**
-```bash
-# Full integration test
-agent-relay up --slack-bridge
-
-# Multi-agent conversation visible in Slack
-# Human interaction with agents
-# Thread continuity
-# Graceful disconnect/reconnect
-```
-
----
-
-## 6. API Specifications
-
-### 6.1 Slack Bot Scopes Required
-
-```yaml
-OAuth Scopes:
-  Bot Token Scopes:
-    - app_mentions:read      # Receive @mentions
-    - channels:history       # Read channel messages
-    - channels:read          # List channels
-    - chat:write             # Post messages
-    - groups:history         # Read private channel messages (optional)
-    - groups:read            # List private channels (optional)
-    - im:history             # Read DMs
-    - im:read                # List DMs
-    - im:write               # Send DMs
-    - users:read             # Get user info for display names
-
-  Socket Mode: Enabled       # For real-time events
-```
-
-### 6.2 Configuration File Schema
+### 6.1 Slack Integration Panel (`src/dashboard/react-components/SlackIntegrationPanel.tsx`)
 
 ```typescript
-// slack.config.json
-interface SlackBridgeConfigFile {
-  slack: {
-    botToken: string;        // xoxb-...
-    appToken: string;        // xapp-...
-    signingSecret: string;   // From Slack app settings
-  };
+// src/dashboard/react-components/SlackIntegrationPanel.tsx
 
-  relay: {
-    socketPath?: string;     // Default: /tmp/agent-relay.sock
-    bridgeName?: string;     // Default: SlackBridge
-  };
+import React, { useState, useEffect } from 'react';
+import { useSession } from './hooks/useSession';
+import { api } from '../lib/api';
 
-  channels: {
-    broadcast: string;       // #agents
-    alerts?: string;         // #agent-alerts
-    directMessages?: boolean; // Allow DMs (default: true)
-  };
-
-  agents: {
-    // Map agent names to Slack bot user IDs
-    mapping: Record<string, string>;
-    // Or use single bot with display name overrides
-    singleBot?: boolean;
-  };
-
-  behavior: {
-    showAgentToAgent?: boolean;  // Show inter-agent messages (default: true)
-    showThinking?: boolean;      // Show thinking messages (default: false)
-    threadTTLHours?: number;     // Thread mapping lifetime (default: 24)
-    messagePrefix?: string;      // Prefix for all messages
-  };
-}
-```
-
-### 6.3 CLI Commands
-
-```bash
-# Start bridge with config file
-agent-relay slack-bridge --config slack.config.json
-
-# Start bridge with inline options
-agent-relay slack-bridge \
-  --slack-token xoxb-... \
-  --app-token xapp-... \
-  --channel agents
-
-# Status check
-agent-relay slack-bridge status
-
-# Test connection
-agent-relay slack-bridge test
-
-# List agent mappings
-agent-relay slack-bridge agents
-```
-
-### 6.4 REST API Additions (Dashboard)
-
-```typescript
-// GET /api/slack/status
-interface SlackBridgeStatus {
+interface SlackStatus {
   connected: boolean;
-  workspace: string;
-  channels: string[];
-  agentMappings: Record<string, string>;
-  messageStats: {
-    relayToSlack: number;
-    slackToRelay: number;
+  valid?: boolean;
+  slackWorkspace?: string;
+  channels?: {
+    broadcast: string | null;
+    alerts: string | null;
   };
-  lastActivity?: string;
+  connectedAt?: string;
 }
 
-// POST /api/slack/send
-interface SlackSendRequest {
-  channel: string;
-  text: string;
-  thread_ts?: string;
-}
+export function SlackIntegrationPanel({ workspaceId }: { workspaceId: string }) {
+  const { plan } = useSession();
+  const [status, setStatus] = useState<SlackStatus | null>(null);
+  const [channels, setChannels] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [configuring, setConfiguring] = useState(false);
 
-// GET /api/slack/threads
-interface SlackThreadList {
-  threads: Array<{
-    relayThread: string;
-    slackChannel: string;
-    slackTs: string;
-    messageCount: number;
-    lastActivity: string;
-  }>;
-}
-```
+  // Config form state
+  const [broadcastChannel, setBroadcastChannel] = useState('');
+  const [alertsChannel, setAlertsChannel] = useState('');
+  const [showAgentToAgent, setShowAgentToAgent] = useState(true);
 
----
+  useEffect(() => {
+    loadStatus();
+  }, [workspaceId]);
 
-## 7. Security Considerations
-
-### 7.1 Authentication
-
-| Risk | Mitigation |
-|------|------------|
-| Slack token exposure | Store in env vars or secrets manager, never in config files |
-| Unauthorized relay access | Bridge uses same Unix socket permissions as other agents |
-| Message spoofing | Validate Slack request signatures; use `slack_ts` deduplication |
-| Bot impersonation | Each agent maps to exactly one bot ID |
-
-### 7.2 Authorization
-
-```typescript
-// Optional: Restrict which Slack users can interact with agents
-interface SlackAuthConfig {
-  allowedUsers?: string[];      // Slack user IDs
-  allowedChannels?: string[];   // Channel IDs
-  adminUsers?: string[];        // Can use /relay-admin commands
-}
-```
-
-### 7.3 Rate Limiting
-
-```typescript
-// Slack API limits
-const SLACK_RATE_LIMITS = {
-  chatPostMessage: 1,           // 1 per second per channel
-  chatPostMessageBurst: 100,    // Burst allowance
-  apiCallsPerMinute: 50,        // General tier 2 limit
-};
-
-// Implementation
-class SlackRateLimiter {
-  private channelTimestamps: Map<string, number[]> = new Map();
-
-  async waitForSlot(channel: string): Promise<void> {
-    // Implement token bucket or sliding window
+  async function loadStatus() {
+    setLoading(true);
+    try {
+      const res = await api.get(`/api/integrations/slack/status?workspaceId=${workspaceId}`);
+      setStatus(res.data);
+      if (res.data.connected) {
+        setBroadcastChannel(res.data.channels?.broadcast || '');
+        setAlertsChannel(res.data.channels?.alerts || '');
+        loadChannels();
+      }
+    } catch (error) {
+      console.error('Failed to load Slack status', error);
+    }
+    setLoading(false);
   }
+
+  async function loadChannels() {
+    try {
+      const res = await api.get(`/api/integrations/slack/channels?workspaceId=${workspaceId}`);
+      setChannels(res.data.channels);
+    } catch (error) {
+      console.error('Failed to load channels', error);
+    }
+  }
+
+  async function handleConnect() {
+    try {
+      const res = await api.get(`/api/integrations/slack/oauth/start?workspaceId=${workspaceId}`);
+      window.location.href = res.data.authUrl;
+    } catch (error) {
+      console.error('Failed to start OAuth', error);
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!confirm('Disconnect Slack integration?')) return;
+
+    try {
+      await api.post('/api/integrations/slack/disconnect', { workspaceId });
+      setStatus({ connected: false });
+    } catch (error) {
+      console.error('Failed to disconnect', error);
+    }
+  }
+
+  async function handleSaveConfig() {
+    setConfiguring(true);
+    try {
+      await api.put('/api/integrations/slack/config', {
+        workspaceId,
+        broadcastChannel,
+        alertsChannel,
+        showAgentToAgent,
+      });
+      await loadStatus();
+    } catch (error) {
+      console.error('Failed to save config', error);
+    }
+    setConfiguring(false);
+  }
+
+  // Plan check
+  if (plan === 'free') {
+    return (
+      <div className="slack-panel disabled">
+        <h3>Slack Integration</h3>
+        <p>Slack integration is available on Pro plans and above.</p>
+        <a href="/pricing" className="upgrade-btn">Upgrade to Pro</a>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <div className="slack-panel loading">Loading...</div>;
+  }
+
+  return (
+    <div className="slack-panel">
+      <h3>Slack Integration</h3>
+
+      {!status?.connected ? (
+        <div className="slack-connect">
+          <p>Connect Slack to see agent messages in your workspace.</p>
+          <button onClick={handleConnect} className="connect-btn">
+            <SlackLogo /> Connect to Slack
+          </button>
+        </div>
+      ) : (
+        <div className="slack-connected">
+          <div className="status-row">
+            <span className={`status-dot ${status.valid ? 'green' : 'red'}`} />
+            <span>Connected to <strong>{status.slackWorkspace}</strong></span>
+            <button onClick={handleDisconnect} className="disconnect-btn">Disconnect</button>
+          </div>
+
+          <div className="config-section">
+            <h4>Channel Configuration</h4>
+
+            <label>
+              Broadcast Channel
+              <select value={broadcastChannel} onChange={e => setBroadcastChannel(e.target.value)}>
+                <option value="">Select channel...</option>
+                {channels.map(ch => (
+                  <option key={ch.id} value={ch.id}>#{ch.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Alerts Channel (optional)
+              <select value={alertsChannel} onChange={e => setAlertsChannel(e.target.value)}>
+                <option value="">None</option>
+                {channels.map(ch => (
+                  <option key={ch.id} value={ch.id}>#{ch.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={showAgentToAgent}
+                onChange={e => setShowAgentToAgent(e.target.checked)}
+              />
+              Show agent-to-agent messages
+            </label>
+
+            <button onClick={handleSaveConfig} disabled={configuring}>
+              {configuring ? 'Saving...' : 'Save Configuration'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 ```
 
-### 7.4 Data Privacy
+### 6.2 Integration into Settings Page
 
-- Messages are stored in both Relay SQLite and Slack (Slack retention policies apply)
-- Consider: Should agent thinking messages be visible in Slack?
-- Consider: PII in messages (user names, emails, etc.)
+```typescript
+// In src/dashboard/app/workspace/[id]/settings/page.tsx
+
+import { SlackIntegrationPanel } from '@/react-components/SlackIntegrationPanel';
+
+export default function WorkspaceSettings({ params }) {
+  return (
+    <div className="settings-page">
+      <h2>Workspace Settings</h2>
+
+      {/* Other settings... */}
+
+      <section className="integrations-section">
+        <h3>Integrations</h3>
+        <SlackIntegrationPanel workspaceId={params.id} />
+        {/* Future: Discord, Teams, etc. */}
+      </section>
+    </div>
+  );
+}
+```
 
 ---
 
-## 8. Configuration
+## 7. Implementation Phases
 
-### 8.1 Environment Variables
+### Phase 1: Cloud Infrastructure (Days 1-2)
 
-```bash
-# Required
-SLACK_BOT_TOKEN=xoxb-your-bot-token
-SLACK_APP_TOKEN=xapp-your-app-token
-SLACK_SIGNING_SECRET=your-signing-secret
+- [ ] Database schema and migration
+- [ ] Slack OAuth API routes
+- [ ] SlackService for token management
+- [ ] Vault integration for credentials
+- [ ] Plan limit middleware
 
-# Optional
-SLACK_BROADCAST_CHANNEL=agents
-SLACK_ALERTS_CHANNEL=agent-alerts
-RELAY_SOCKET_PATH=/tmp/agent-relay.sock
-SLACK_BRIDGE_NAME=SlackBridge
-```
+### Phase 2: Daemon Bridge (Days 2-4)
 
-### 8.2 Full Configuration Example
+- [ ] SlackBridge class (Slack ↔ Relay)
+- [ ] Thread store for mapping
+- [ ] Message formatter
+- [ ] Orchestrator integration
+- [ ] Cloud sync for credentials
 
-```json
+### Phase 3: Dashboard UI (Days 4-5)
+
+- [ ] SlackIntegrationPanel component
+- [ ] OAuth flow UI
+- [ ] Channel configuration
+- [ ] Status display
+
+### Phase 4: Testing & Polish (Days 5-7)
+
+- [ ] Unit tests for services
+- [ ] Integration tests
+- [ ] E2E flow testing
+- [ ] Documentation
+- [ ] Error handling & edge cases
+
+---
+
+## 8. API Specifications
+
+### 8.1 Cloud API Endpoints
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | `/api/integrations/slack/status` | Get integration status | Pro+ |
+| GET | `/api/integrations/slack/oauth/start` | Start OAuth flow | Pro+ |
+| GET | `/api/integrations/slack/oauth/callback` | OAuth callback | Pro+ |
+| POST | `/api/integrations/slack/disconnect` | Remove integration | Pro+ |
+| PUT | `/api/integrations/slack/config` | Update config | Pro+ |
+| GET | `/api/integrations/slack/channels` | List Slack channels | Pro+ |
+| GET | `/api/integrations/slack/daemon-config` | Get config for daemon | Internal |
+
+### 8.2 Daemon Sync API
+
+```typescript
+// Called by daemon cloud-sync
+GET /api/integrations/slack/daemon-config?workspaceId=xxx
+Authorization: Bearer <daemon-token>
+
+Response:
 {
-  "slack": {
-    "botToken": "${SLACK_BOT_TOKEN}",
-    "appToken": "${SLACK_APP_TOKEN}",
-    "signingSecret": "${SLACK_SIGNING_SECRET}"
-  },
-  "relay": {
-    "socketPath": "/tmp/agent-relay.sock",
-    "bridgeName": "SlackBridge"
-  },
-  "channels": {
-    "broadcast": "C0123AGENTS",
-    "alerts": "C0123ALERTS",
-    "directMessages": true
-  },
-  "agents": {
-    "mapping": {
-      "Alice": "U0123ALICE",
-      "Bob": "U0123BOB",
-      "Coordinator": "U0123COORD"
-    },
-    "singleBot": false
-  },
-  "behavior": {
-    "showAgentToAgent": true,
-    "showThinking": false,
-    "threadTTLHours": 24,
-    "messagePrefix": ""
+  "connected": true,
+  "config": {
+    "botToken": "xoxb-...",
+    "appToken": "xapp-...",
+    "teamId": "T123",
+    "teamName": "My Workspace",
+    "broadcastChannel": "C456",
+    "alertsChannel": null,
+    "config": { "showAgentToAgent": true }
   }
 }
 ```
 
 ---
 
-## 9. User Experience
+## 9. Security & Plan Limits
 
-### 9.1 Slack Channel Setup
+### 9.1 Plan-Based Access
 
-```
-#agents (public)
-├── All agent broadcasts
-├── Agent-to-agent messages (if configured)
-└── Thread conversations
+| Plan | Slack Integration |
+|------|-------------------|
+| Free | ❌ Not available |
+| Pro | ✅ 1 Slack workspace |
+| Team | ✅ 1 Slack workspace per relay workspace |
+| Enterprise | ✅ Multiple + Enterprise Grid |
 
-#agent-alerts (private, optional)
-├── High-importance messages
-└── Error notifications
+### 9.2 Credential Security
 
-DMs
-├── @Alice-bot → Direct conversation with Alice
-└── @Coordinator-bot → Direct conversation with Coordinator
-```
+- **Vault encryption**: AES-256-GCM for all Slack tokens
+- **Token refresh**: Automatic refresh before expiry
+- **Revocation**: Tokens revoked on disconnect
+- **No local storage**: Credentials never written to disk in plain text
 
-### 9.2 Message Appearance in Slack
+### 9.3 Plan Limit Middleware
 
-```
-#agents
-─────────────────────────────────────────────────
-[Alice] STATUS: Starting authentication refactor
-    └── [Bob] I can help with the API tests
-        └── [Alice] Thanks! Focus on /api/auth/*
-─────────────────────────────────────────────────
-[Coordinator] TASK COMPLETE: Auth refactor done
-    ✅ Reviewed by: Bob, Alice
-─────────────────────────────────────────────────
-```
+```typescript
+// src/cloud/api/middleware/planLimits.ts
 
-### 9.3 Human Interaction Patterns
+export function requireSlackAccess(req, res, next) {
+  const plan = req.user.plan;
 
-**Pattern 1: Ask an Agent**
-```
-Human: @Alice-bot can you explain the auth flow?
-Alice: [replies in thread with explanation]
-```
+  if (plan === 'free') {
+    return res.status(403).json({
+      error: 'Slack integration requires Pro plan or above',
+      upgrade: '/pricing',
+    });
+  }
 
-**Pattern 2: Slash Command**
-```
-Human: /relay @Bob please run the test suite
-Bot: Message sent to Bob
-[Bob's response appears in #agents or thread]
-```
-
-**Pattern 3: Join a Conversation**
-```
-[Agent thread in progress]
-Human: [replies in thread] I think we should use JWT instead
-[Agents see human's message and can respond]
+  next();
+}
 ```
 
 ---
@@ -1127,265 +1400,72 @@ Human: [replies in thread] I think we should use JWT instead
 ### 10.1 Unit Tests
 
 ```typescript
-// src/slack/__tests__/formatter.test.ts
-describe('SlackMessageFormatter', () => {
-  it('formats broadcast messages', () => {
-    const formatter = new SlackMessageFormatter();
-    const result = formatter.formatRelayMessage('Alice', {
-      kind: 'message',
-      body: 'Hello world',
-      data: { to: '*' }
-    });
-    expect(result.text).toBe('*[Alice]* Hello world');
-  });
-
-  it('formats thinking messages with italics', () => {
-    // ...
-  });
+// src/cloud/services/__tests__/slack.test.ts
+describe('SlackService', () => {
+  it('builds correct OAuth URL', () => { ... });
+  it('validates tokens correctly', () => { ... });
+  it('handles token revocation', () => { ... });
 });
 
-// src/slack/__tests__/thread-store.test.ts
-describe('SlackThreadStore', () => {
-  it('maps relay threads to Slack threads', () => {
-    // ...
-  });
-
-  it('expires old mappings', () => {
-    // ...
-  });
+// src/daemon/__tests__/slack-bridge.test.ts
+describe('SlackBridge', () => {
+  it('forwards relay broadcasts to Slack', () => { ... });
+  it('forwards Slack mentions to relay', () => { ... });
+  it('maps threads bidirectionally', () => { ... });
+  it('prevents message loops', () => { ... });
 });
 ```
 
 ### 10.2 Integration Tests
 
 ```typescript
-// src/slack/__tests__/integration.test.ts
-describe('SlackBridgeService Integration', () => {
-  let mockSlackApp: MockSlackApp;
-  let mockRelayClient: MockRelayClient;
-  let bridge: SlackBridgeService;
-
-  beforeEach(async () => {
-    mockSlackApp = new MockSlackApp();
-    mockRelayClient = new MockRelayClient();
-    bridge = new SlackBridgeService({ /* config */ });
-  });
-
-  it('forwards relay broadcasts to Slack', async () => {
-    // Simulate relay message
-    mockRelayClient.simulateMessage('Alice', { kind: 'message', body: 'Hello', data: { to: '*' } });
-
-    // Verify Slack API called
-    expect(mockSlackApp.postMessage).toHaveBeenCalledWith({
-      channel: 'C0123AGENTS',
-      text: '*[Alice]* Hello',
-    });
-  });
-
-  it('forwards Slack mentions to relay', async () => {
-    // Simulate Slack event
-    mockSlackApp.simulateMention({ user: 'U123', text: '<@UALICE> help me', channel: 'C0123' });
-
-    // Verify relay message sent
-    expect(mockRelayClient.sendMessage).toHaveBeenCalledWith(
-      'Alice',
-      'help me',
-      'message',
-      expect.objectContaining({ slack_user: expect.any(String) })
-    );
-  });
+describe('Slack Integration E2E', () => {
+  it('completes OAuth flow and stores credentials', async () => { ... });
+  it('daemon receives credentials via cloud sync', async () => { ... });
+  it('messages flow relay → slack → relay', async () => { ... });
 });
-```
-
-### 10.3 End-to-End Test Script
-
-```bash
-#!/bin/bash
-# scripts/test-slack-integration.sh
-
-echo "Starting Slack integration test..."
-
-# 1. Start daemon
-agent-relay up &
-DAEMON_PID=$!
-sleep 2
-
-# 2. Start Slack bridge
-agent-relay slack-bridge --config test-slack.config.json &
-BRIDGE_PID=$!
-sleep 2
-
-# 3. Start test agent
-agent-relay -n TestAgent -- echo "Ready" &
-AGENT_PID=$!
-sleep 1
-
-# 4. Send test broadcast
-agent-relay send TestAgent --broadcast "Integration test message"
-
-# 5. Wait for Slack delivery (check via API or webhook)
-sleep 3
-
-# 6. Verify in Slack (manual or via test webhook)
-echo "Check Slack channel for test message"
-
-# Cleanup
-kill $AGENT_PID $BRIDGE_PID $DAEMON_PID
 ```
 
 ---
 
 ## 11. Open Questions
 
-### Q1: Single Bot vs Multiple Bots?
-
-**Option A: Single Bot**
-- Pros: Simpler setup, one OAuth flow
-- Cons: All agents appear as same user, less immersive
-- Implementation: Use `username` parameter in chat.postMessage
-
-**Option B: Multiple Bots (Recommended)**
-- Pros: Each agent has distinct identity, more realistic
-- Cons: Requires creating multiple Slack apps or Enterprise Grid
-- Implementation: Manage multiple bot tokens, route based on agent
-
-**Recommendation:** Start with single bot, add multi-bot support in v2.
-
-### Q2: Which Messages to Show?
-
-| Message Type | Default | Configurable |
-|--------------|---------|--------------|
-| Broadcasts | ✅ Show | Yes |
-| Agent → Agent | ✅ Show | Yes |
-| Thinking | ❌ Hide | Yes |
-| Actions | ✅ Show | Yes |
-| Errors | ✅ Show | Yes |
-
-### Q3: Thread Creation Policy?
+### Q1: Slack App Distribution?
 
 **Options:**
-1. **Always thread:** Every agent message starts/continues a thread
-2. **Never thread:** All messages are top-level
-3. **Smart threading:** Thread based on context (conversation, task, etc.)
-4. **Explicit only:** Only thread when relay specifies `[thread:id]`
+1. **Single Anthropic-owned app**: Users install our app
+2. **Per-customer apps**: Customers create their own Slack apps
+3. **Both**: Managed app for cloud, bring-your-own for self-hosted
 
-**Recommendation:** Option 4 (explicit) - matches existing relay behavior.
+**Recommendation:** Single managed app for cloud, instructions for self-hosted.
 
-### Q4: How to Handle Agent Disconnects?
+### Q2: Enterprise Grid Support?
 
-When an agent disconnects:
-1. Post status to channel? ("Alice went offline")
-2. Queue messages for later delivery?
-3. Return error to Slack user?
+Enterprise Grid requires org-level OAuth and cross-workspace routing.
 
-**Recommendation:** Queue for reasonable TTL, then error.
+**Recommendation:** Defer to v2, design schema to support it.
 
-### Q5: Slack Enterprise Grid Support?
+### Q3: Rate Limit Handling?
 
-For organizations with multiple workspaces:
-- Org-level app installation
-- Cross-workspace messaging
-- Unified agent identity
+Slack has strict rate limits (1 msg/sec/channel).
 
-**Recommendation:** Out of scope for v1, design for it in v2.
-
----
-
-## Appendix
-
-### A. Slack App Manifest
-
-```yaml
-# manifest.yml - for Slack app creation
-display_information:
-  name: Agent Relay Bridge
-  description: Connects AI agents to Slack
-  background_color: "#4A154B"
-
-features:
-  bot_user:
-    display_name: AgentRelay
-    always_online: true
-  slash_commands:
-    - command: /relay
-      description: Send a message to an agent
-      usage_hint: "@AgentName your message"
-      should_escape: false
-
-oauth_config:
-  scopes:
-    bot:
-      - app_mentions:read
-      - channels:history
-      - channels:read
-      - chat:write
-      - groups:history
-      - groups:read
-      - im:history
-      - im:read
-      - im:write
-      - users:read
-
-settings:
-  event_subscriptions:
-    bot_events:
-      - app_mention
-      - message.channels
-      - message.groups
-      - message.im
-  interactivity:
-    is_enabled: false
-  org_deploy_enabled: false
-  socket_mode_enabled: true
-  token_rotation_enabled: false
-```
-
-### B. Dependencies
-
-```json
-{
-  "dependencies": {
-    "@slack/bolt": "^3.17.0",
-    "@slack/web-api": "^6.11.0"
-  }
-}
-```
-
-### C. File Structure
-
-```
-src/slack/
-├── index.ts                    # Public exports
-├── slack-bridge-service.ts     # Main orchestration
-├── agent-registry.ts           # Agent ↔ Bot mapping
-├── thread-store.ts             # Thread synchronization
-├── formatter.ts                # Message formatting
-├── rate-limiter.ts             # Slack API rate limiting
-├── config.ts                   # Configuration loading
-└── __tests__/
-    ├── formatter.test.ts
-    ├── thread-store.test.ts
-    ├── agent-registry.test.ts
-    └── integration.test.ts
-```
-
-### D. Related Work
-
-- [Slack Bolt JS](https://slack.dev/bolt-js/concepts) - Slack app framework
-- [agent-relay Protocol](./PROTOCOL.md) - Messaging protocol spec
-- [Dashboard Server](../src/dashboard-server/server.ts) - Reference integration
-- [Multi-Project Bridge](../src/bridge/multi-project-client.ts) - Bridge pattern
+**Recommendation:** Implement queue with backoff in SlackBridge.
 
 ---
 
 ## Summary
 
-This proposal outlines a **Slack Bridge** integration for agent-relay that:
+This revised proposal aligns Slack integration with the **cloud-first architecture** from PR #35:
 
-1. **Enables bidirectional messaging** between AI agents and Slack
-2. **Preserves thread context** across both systems
-3. **Leverages existing architecture** (RelayClient, Storage, Router)
-4. **Provides flexible configuration** for different use cases
-5. **Can be implemented in 3-5 days** with the phased approach
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| OAuth & API | `src/cloud/api/integrations/slack.ts` | Cloud endpoints |
+| Slack Service | `src/cloud/services/slack.ts` | Token management |
+| Credentials | `src/cloud/vault/` | Encrypted storage |
+| Database | `src/cloud/db/schema.ts` | Integration records |
+| Daemon Bridge | `src/daemon/slack-bridge.ts` | Message routing |
+| Orchestrator | `src/daemon/orchestrator.ts` | Lifecycle management |
+| Cloud Sync | `src/daemon/cloud-sync.ts` | Credential retrieval |
+| Dashboard | `src/dashboard/react-components/` | Configuration UI |
 
-The integration positions agent-relay as a more complete solution for human-AI team collaboration, where humans can observe and participate in agent conversations through familiar Slack interfaces.
+The integration follows the same patterns as provider credentials, ensuring consistency across the codebase.
