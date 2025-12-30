@@ -1,13 +1,8 @@
-/**
- * Dashboard V2 - Main Page
- *
- * Entry point for the dashboard application.
- */
-
 'use client';
 
-import { App } from '../react-components/App';
+import { LandingPage } from '../landing';
+import '../landing/styles.css';
 
-export default function DashboardPage() {
-  return <App />;
+export default function HomePage() {
+  return <LandingPage />;
 }
