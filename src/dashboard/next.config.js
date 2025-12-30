@@ -10,16 +10,16 @@ const nextConfig = {
   // V2 is now the default dashboard at root path
   // Legacy v1 dashboard is available at /v1
 
-  // Proxy API requests to the main dashboard server
+  // Proxy API requests to the dashboard server (port 3889 in dev)
   async rewrites() {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:3888/api/:path*',
+        destination: 'http://localhost:3889/api/:path*',
       },
       {
         source: '/ws',
-        destination: 'http://localhost:3888/ws',
+        destination: 'http://localhost:3889/ws',
       },
     ];
   },

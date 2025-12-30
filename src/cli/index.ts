@@ -19,6 +19,7 @@ import { generateAgentName } from '../utils/name-generator.js';
 import { getTmuxPath } from '../utils/tmux-resolver.js';
 import { readWorkersMetadata, getWorkerLogsDir } from '../bridge/spawner.js';
 import { getShadowForAgent } from '../bridge/shadow-config.js';
+import { selectShadowCli } from '../bridge/shadow-cli.js';
 import { checkForUpdatesInBackground, checkForUpdates } from '../utils/update-checker.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -185,6 +186,25 @@ program
 
     // Spawn shadow if configured
     if (shadowName && speakOn) {
+      // Decide how to run the shadow (subagent for Claude/OpenCode primaries)
+      let shadowSelection: Awaited<ReturnType<typeof selectShadowCli>> | null = null;
+      try {
+        shadowSelection = await selectShadowCli(mainCommand, { preferredShadowCli: shadowCli });
+        console.error(
+          `[shadow] Mode: ${shadowSelection.mode} via ${shadowSelection.command || shadowSelection.cli} (primary: ${mainCommand})`
+        );
+      } catch (err: any) {
+        console.error(`[shadow] Shadow CLI selection failed: ${err.message}`);
+      }
+
+      // Subagent mode: do not spawn a separate shadow process
+      if (shadowSelection?.mode === 'subagent') {
+        console.error(
+          `[shadow] ${shadowName} will run as ${shadowSelection.cli} subagent inside ${agentName}; no separate process spawned`
+        );
+        return;
+      }
+
       console.error(`Shadow: ${shadowName} (shadowing ${agentName}, speakOn: ${speakOn.join(',')})`);
 
       // Wait for primary to register before spawning shadow
@@ -196,7 +216,7 @@ program
 
       const result = await spawner.spawn({
         name: shadowName,
-        cli: shadowCli || mainCommand,
+        cli: shadowSelection?.command || shadowCli || mainCommand,
         task: shadowTask,
         shadowOf: agentName,
         shadowSpeakOn: speakOn,

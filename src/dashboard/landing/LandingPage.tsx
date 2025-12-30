@@ -228,7 +228,7 @@ function DataPacket({ fromX, fromY, toX, toY, delay }: { fromX: number; fromY: n
 function LiveDemoSection() {
   const [messages, setMessages] = useState<typeof DEMO_MESSAGES>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (currentIndex >= DEMO_MESSAGES.length) {
@@ -249,7 +249,11 @@ function LiveDemoSection() {
   }, [currentIndex]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Scroll within the container only, not the page
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [messages]);
 
   return (
@@ -293,7 +297,7 @@ function LiveDemoSection() {
               </div>
             </div>
 
-            <div className="demo-messages">
+            <div className="demo-messages" ref={messagesContainerRef}>
               {messages.map((msg, i) => {
                 const provider = PROVIDERS[msg.provider as keyof typeof PROVIDERS];
                 return (
@@ -309,7 +313,6 @@ function LiveDemoSection() {
                   </div>
                 );
               })}
-              <div ref={messagesEndRef} />
 
               {messages.length < DEMO_MESSAGES.length && (
                 <div className="typing-indicator">

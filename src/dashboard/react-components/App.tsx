@@ -446,7 +446,12 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
       />
 
       {/* Sidebar with Workspace Selector */}
-      <div className="flex flex-col w-[280px] h-screen bg-bg-primary border-r border-border-subtle">
+      <div className={`
+        flex flex-col w-[280px] max-md:w-[85vw] max-md:max-w-[280px] h-screen bg-bg-primary border-r border-border-subtle
+        fixed left-0 top-0 z-[1000] transition-transform duration-200
+        md:relative md:translate-x-0 md:flex-shrink-0
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
         {/* Workspace Selector */}
         <div className="p-3 border-b border-sidebar-border">
           <WorkspaceSelector
@@ -479,9 +484,10 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-bg-secondary/50">
-        {/* Header */}
-        <Header
+      <main className="flex-1 flex flex-col min-w-0 bg-bg-secondary/50 overflow-hidden">
+        {/* Header - sticky on mobile */}
+        <div className="sticky top-0 z-50 flex-shrink-0">
+          <Header
           currentChannel={currentChannel}
           selectedAgent={selectedAgent}
           onCommandPaletteOpen={handleCommandPaletteOpen}
@@ -491,11 +497,12 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           onMenuClick={() => setIsSidebarOpen(true)}
           hasUnreadNotifications={hasUnreadMessages}
         />
+        </div>
 
         {/* Content Area */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Message List */}
-          <div className={`flex-1 min-h-0 overflow-y-auto ${currentThread ? 'hidden md:block md:flex-[2]' : ''}`}>
+          <div className={`flex-1 min-h-0 overflow-hidden ${currentThread ? 'hidden md:block md:flex-[2]' : ''}`}>
             {wsError ? (
               <div className="flex flex-col items-center justify-center h-full text-text-muted text-center px-4">
                 <ErrorIcon />

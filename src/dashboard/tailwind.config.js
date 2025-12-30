@@ -9,52 +9,70 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Dark theme colors (default)
+        // Mission Control Theme - Deep Space
         bg: {
-          primary: '#1a1d21',
-          secondary: '#222529',
-          tertiary: '#19171d',
-          hover: 'rgba(255, 255, 255, 0.06)',
-          active: 'rgba(255, 255, 255, 0.1)',
+          deep: '#0a0a0f',
+          primary: '#0d0d14',
+          secondary: '#12121c',
+          tertiary: '#181824',
+          card: '#1a1a28',
+          elevated: '#202030',
+          hover: 'rgba(255, 255, 255, 0.04)',
+          active: 'rgba(255, 255, 255, 0.08)',
         },
         text: {
-          primary: '#d1d2d3',
-          secondary: '#ababad',
-          muted: '#8d8d8e',
-          inverse: '#1a1d21',
+          primary: '#f0f0f5',
+          secondary: '#a0a0b0',
+          muted: '#606070',
+          dim: '#404050',
+          inverse: '#0a0a0f',
         },
         border: {
           DEFAULT: 'rgba(255, 255, 255, 0.1)',
-          light: 'rgba(255, 255, 255, 0.06)',
-          dark: 'rgba(255, 255, 255, 0.15)',
+          subtle: 'rgba(255, 255, 255, 0.06)',
+          light: 'rgba(255, 255, 255, 0.1)',
+          medium: 'rgba(255, 255, 255, 0.15)',
         },
+        // Neon Accent Colors
         accent: {
-          DEFAULT: '#1264a3',
-          hover: '#0d4f82',
-          light: 'rgba(18, 100, 163, 0.15)',
+          DEFAULT: '#00d9ff',
+          cyan: '#00d9ff',
+          orange: '#ff6b35',
+          purple: '#a855f7',
+          green: '#00ffc8',
+          hover: '#00b8d9',
+          light: 'rgba(0, 217, 255, 0.15)',
         },
+        // Provider Colors
+        provider: {
+          claude: '#00d9ff',
+          codex: '#ff6b35',
+          gemini: '#a855f7',
+        },
+        // Status Colors
         success: {
-          DEFAULT: '#2bac76',
-          light: 'rgba(43, 172, 118, 0.15)',
+          DEFAULT: '#00ffc8',
+          light: 'rgba(0, 255, 200, 0.15)',
         },
         warning: {
-          DEFAULT: '#e8a427',
-          light: 'rgba(232, 164, 39, 0.15)',
+          DEFAULT: '#ff6b35',
+          light: 'rgba(255, 107, 53, 0.15)',
         },
         error: {
-          DEFAULT: '#e01e5a',
-          light: 'rgba(224, 30, 90, 0.15)',
+          DEFAULT: '#ff4757',
+          light: 'rgba(255, 71, 87, 0.15)',
         },
-        // Sidebar colors
+        // Sidebar
         sidebar: {
-          bg: '#1a1a2e',
-          border: '#2a2a3e',
-          hover: '#3a3a4e',
+          bg: '#0d0d14',
+          border: 'rgba(255, 255, 255, 0.08)',
+          hover: 'rgba(255, 255, 255, 0.06)',
         },
       },
       fontFamily: {
-        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
-        mono: ['SF Mono', 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', 'monospace'],
+        display: ['Outfit', 'sans-serif'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        mono: ['IBM Plex Mono', 'SF Mono', 'Consolas', 'monospace'],
       },
       fontSize: {
         xs: '11px',
@@ -63,6 +81,8 @@ module.exports = {
         lg: '15px',
         xl: '16px',
         '2xl': '18px',
+        '3xl': '24px',
+        '4xl': '32px',
       },
       spacing: {
         sidebar: '280px',
@@ -73,13 +93,18 @@ module.exports = {
         md: '6px',
         lg: '8px',
         xl: '12px',
+        '2xl': '16px',
       },
       boxShadow: {
         sm: '0 1px 2px rgba(0, 0, 0, 0.05)',
         md: '0 1px 3px rgba(0, 0, 0, 0.1)',
         lg: '0 4px 6px rgba(0, 0, 0, 0.1)',
         xl: '0 10px 15px rgba(0, 0, 0, 0.1)',
-        modal: '0 16px 70px rgba(0, 0, 0, 0.5)',
+        modal: '0 16px 70px rgba(0, 0, 0, 0.7)',
+        'glow-cyan': '0 0 20px rgba(0, 217, 255, 0.3)',
+        'glow-orange': '0 0 20px rgba(255, 107, 53, 0.3)',
+        'glow-purple': '0 0 20px rgba(168, 85, 247, 0.3)',
+        'glow-green': '0 0 20px rgba(0, 255, 200, 0.3)',
       },
       animation: {
         spin: 'spin 1s linear infinite',
@@ -88,6 +113,7 @@ module.exports = {
         'slide-up': 'slideUp 200ms ease',
         'slide-down': 'slideDown 200ms ease',
         'kill-pulse': 'killPulse 0.6s ease-in-out infinite',
+        'pulse-glow': 'pulseGlow 2s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
@@ -105,6 +131,10 @@ module.exports = {
         killPulse: {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.6' },
+        },
+        pulseGlow: {
+          '0%, 100%': { opacity: '1', boxShadow: '0 0 0 0 rgba(0, 217, 255, 0.4)' },
+          '50%': { opacity: '0.8', boxShadow: '0 0 20px 4px transparent' },
         },
       },
       transitionDuration: {

@@ -69,18 +69,30 @@ export function AddWorkspaceModal({
   const displayError = error || localError;
 
   return (
-    <div className="modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
-      <div className="modal add-workspace-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>Add Workspace</h2>
-          <button className="modal-close" onClick={onClose}>
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] backdrop-blur-sm"
+      onClick={onClose}
+      onKeyDown={handleKeyDown}
+    >
+      <div
+        className="bg-[#1a1a2e] border border-[#3a3a4e] rounded-xl p-6 min-w-[450px] max-w-[90vw] shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="m-0 text-lg font-semibold text-[#e8e8e8]">Add Workspace</h2>
+          <button
+            className="bg-transparent border-none text-[#666] cursor-pointer p-1 flex items-center justify-center rounded transition-all hover:bg-white/10 hover:text-[#e8e8e8]"
+            onClick={onClose}
+          >
             <CloseIcon />
           </button>
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="workspace-path">Repository Path</label>
+          <div className="mb-5">
+            <label htmlFor="workspace-path" className="block mb-2 text-[13px] font-medium text-[#e8e8e8]">
+              Repository Path
+            </label>
             <input
               ref={inputRef}
               id="workspace-path"
@@ -93,14 +105,17 @@ export function AddWorkspaceModal({
               placeholder="/path/to/repository"
               disabled={isAdding}
               autoComplete="off"
+              className="w-full px-3 py-2.5 bg-[#2a2a3e] border border-[#3a3a4e] rounded-md text-[#e8e8e8] text-sm outline-none transition-colors box-border focus:border-[#00c896] placeholder:text-[#666] disabled:opacity-60 disabled:cursor-not-allowed"
             />
-            <p className="form-hint">
+            <p className="mt-1.5 text-xs text-[#666] leading-relaxed">
               Enter the full path to your repository. Use ~ for home directory.
             </p>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="workspace-name">Display Name (optional)</label>
+          <div className="mb-5">
+            <label htmlFor="workspace-name" className="block mb-2 text-[13px] font-medium text-[#e8e8e8]">
+              Display Name (optional)
+            </label>
             <input
               id="workspace-name"
               type="text"
@@ -109,19 +124,33 @@ export function AddWorkspaceModal({
               placeholder="My Project"
               disabled={isAdding}
               autoComplete="off"
+              className="w-full px-3 py-2.5 bg-[#2a2a3e] border border-[#3a3a4e] rounded-md text-[#e8e8e8] text-sm outline-none transition-colors box-border focus:border-[#00c896] placeholder:text-[#666] disabled:opacity-60 disabled:cursor-not-allowed"
             />
-            <p className="form-hint">
+            <p className="mt-1.5 text-xs text-[#666] leading-relaxed">
               A friendly name for this workspace. Defaults to the folder name.
             </p>
           </div>
 
-          {displayError && <div className="form-error">{displayError}</div>}
+          {displayError && (
+            <div className="px-3 py-2.5 bg-red-500/10 border border-red-500/30 rounded-md text-red-500 text-[13px] mb-5">
+              {displayError}
+            </div>
+          )}
 
-          <div className="modal-actions">
-            <button type="button" className="btn-secondary" onClick={onClose} disabled={isAdding}>
+          <div className="flex gap-3 justify-end mt-6">
+            <button
+              type="button"
+              className="px-5 py-2.5 rounded-md text-sm font-medium cursor-pointer transition-all bg-transparent border border-[#3a3a4e] text-[#e8e8e8] hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={onClose}
+              disabled={isAdding}
+            >
               Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={isAdding || !path.trim()}>
+            <button
+              type="submit"
+              className="px-5 py-2.5 rounded-md text-sm font-medium cursor-pointer transition-all bg-[#00c896] border-none text-[#1a1a2e] hover:bg-[#00a87d] disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isAdding || !path.trim()}
+            >
               {isAdding ? 'Adding...' : 'Add Workspace'}
             </button>
           </div>
@@ -139,140 +168,3 @@ function CloseIcon() {
     </svg>
   );
 }
-
-export const addWorkspaceModalStyles = `
-.add-workspace-modal {
-  min-width: 450px;
-  max-width: 90vw;
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-
-.modal-header h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #e8e8e8;
-}
-
-.modal-close {
-  background: transparent;
-  border: none;
-  color: #666;
-  cursor: pointer;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.modal-close:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #e8e8e8;
-}
-
-.form-group {
-  margin-bottom: 20px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #e8e8e8;
-}
-
-.form-group input {
-  width: 100%;
-  padding: 10px 12px;
-  background: #2a2a3e;
-  border: 1px solid #3a3a4e;
-  border-radius: 6px;
-  color: #e8e8e8;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.2s;
-  box-sizing: border-box;
-}
-
-.form-group input:focus {
-  border-color: #00c896;
-}
-
-.form-group input::placeholder {
-  color: #666;
-}
-
-.form-group input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.form-hint {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #666;
-  line-height: 1.4;
-}
-
-.form-error {
-  padding: 10px 12px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 6px;
-  color: #ef4444;
-  font-size: 13px;
-  margin-bottom: 20px;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  margin-top: 24px;
-}
-
-.btn-secondary,
-.btn-primary {
-  padding: 10px 20px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 1px solid #3a3a4e;
-  color: #e8e8e8;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.btn-primary {
-  background: #00c896;
-  border: none;
-  color: #1a1a2e;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #00a87d;
-}
-
-.btn-secondary:disabled,
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-`;

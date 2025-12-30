@@ -10,6 +10,7 @@ import { sleep } from './utils.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
 import { resolveCommand } from '../utils/command-resolver.js';
 import { PtyWrapper, type PtyWrapperConfig } from '../wrapper/pty-wrapper.js';
+import { selectShadowCli } from './shadow-cli.js';
 import type {
   SpawnRequest,
   SpawnResult,
@@ -191,7 +192,7 @@ export class AgentSpawner {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 to: name,
-                body: task,
+                message: task,
                 from: '__spawner__',
               }),
             });
@@ -287,8 +288,22 @@ export class AgentSpawner {
     const defaultPrompt = `You are a shadow agent monitoring "${primary.name}". You receive copies of their messages. Your role: ${shadow.role || 'observer'}. Stay passive unless your triggers activate: ${speakOn.join(', ')}.`;
     const shadowTask = shadow.prompt || defaultPrompt;
 
+    // Decide how to run the shadow (subagent for Claude/OpenCode primaries, process fallback otherwise)
+    let shadowSelection: Awaited<ReturnType<typeof selectShadowCli>> | null = null;
+    try {
+      shadowSelection = await selectShadowCli(primary.command || 'claude', {
+        preferredShadowCli: shadow.command,
+      });
+    } catch (err: any) {
+      console.warn(`[spawner] Shadow CLI selection failed for ${shadow.name}: ${err.message}`);
+    }
+
     if (debug) {
-      console.log(`[spawner] spawnWithShadow: primary=${primary.name}, shadow=${shadow.name}, speakOn=${speakOn.join(',')}`);
+      const mode = shadowSelection?.mode ?? 'unknown';
+      const cli = shadowSelection?.command ?? shadow.command ?? primary.command ?? 'claude';
+      console.log(
+        `[spawner] spawnWithShadow: primary=${primary.name}, shadow=${shadow.name}, mode=${mode}, cli=${cli}, speakOn=${speakOn.join(',')}`
+      );
     }
 
     // Step 1: Spawn primary agent
@@ -311,10 +326,36 @@ export class AgentSpawner {
     // The spawn() method already waits, but we add a small delay for stability
     await sleep(1000);
 
+    // Subagent mode: no separate process needed
+    if (shadowSelection?.mode === 'subagent') {
+      console.log(
+        `[spawner] Shadow ${shadow.name} will run as ${shadowSelection.cli} subagent inside ${primary.name} (no separate process)`
+      );
+      return {
+        success: true,
+        primary: primaryResult,
+        shadow: {
+          success: true,
+          name: shadow.name,
+        },
+      };
+    }
+
+    // No available shadow CLI - proceed without spawning a shadow process
+    if (!shadowSelection) {
+      console.warn(`[spawner] No authenticated shadow CLI available; ${primary.name} will run without a shadow`);
+      return {
+        success: true,
+        primary: primaryResult,
+        error: 'Shadow spawn skipped: no authenticated shadow CLI available',
+      };
+    }
+
     // Step 3: Spawn shadow agent with shadowOf and shadowSpeakOn
     const shadowResult = await this.spawn({
       name: shadow.name,
-      cli: shadow.command || primary.command || 'claude',
+      // Use the selected/validated CLI for process-mode shadows
+      cli: shadowSelection.command || shadow.command || primary.command || 'claude',
       task: shadowTask,
       shadowOf: primary.name,
       shadowSpeakOn: speakOn,

@@ -42,14 +42,24 @@ const DEFAULT_OPTIONS: Required<UseWebSocketOptions> = {
 
 /**
  * Get the default WebSocket URL based on the current page location
- * Uses the same host that served the page (works with tunnels/proxies)
+ *
+ * In dev mode (Next.js on 3888), WebSocket connects to dashboard server on 3889
+ * because Next.js rewrites don't support WebSocket upgrade requests.
+ *
+ * In production, everything runs on the same port.
  */
 function getDefaultUrl(): string {
   if (typeof window === 'undefined') {
-    return 'ws://localhost:3888/ws';
+    return 'ws://localhost:3889/ws';
   }
+
+  // Dev mode: Next.js on 3888, dashboard server on 3889
+  if (window.location.port === '3888' && window.location.hostname === 'localhost') {
+    return 'ws://localhost:3889/ws';
+  }
+
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // Use the current host - works with Cloudflare Tunnel, ngrok, etc.
+  // Production: use the same host (works with tunnels/proxies)
   return `${protocol}//${window.location.host}/ws`;
 }
 

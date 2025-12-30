@@ -6,6 +6,7 @@
 
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import { createClient } from 'redis';
 import { requireAuth } from './auth.js';
 import { getConfig } from '../config.js';
 import { db } from '../db/index.js';
@@ -87,7 +88,41 @@ interface ActiveDeviceFlow {
   error?: string;
 }
 
-const activeFlows = new Map<string, ActiveDeviceFlow>();
+// Redis v4 client type
+type RedisClientType = ReturnType<typeof createClient>;
+let redisClient: RedisClientType | null = null;
+
+async function getRedisClient(): Promise<RedisClientType> {
+  if (!redisClient) {
+    const config = getConfig();
+    redisClient = createClient({ url: config.redisUrl });
+    redisClient.on('error', (err: Error) => console.error('[redis] provider flow error', err));
+    await (redisClient as any).connect();
+  }
+  return redisClient;
+}
+
+const flowKey = (flowId: string) => `provider-flow:${flowId}`;
+
+async function saveFlow(flowId: string, flow: ActiveDeviceFlow): Promise<void> {
+  const client = await getRedisClient() as any;
+  const ttlSeconds = Math.max(60, Math.ceil((flow.expiresAt.getTime() - Date.now()) / 1000));
+  await client.setEx(flowKey(flowId), ttlSeconds, JSON.stringify(flow));
+}
+
+async function loadFlow(flowId: string): Promise<ActiveDeviceFlow | null> {
+  const client = await getRedisClient() as any;
+  const raw: string | null = await client.get(flowKey(flowId));
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as ActiveDeviceFlow;
+  parsed.expiresAt = new Date(parsed.expiresAt);
+  return parsed;
+}
+
+async function deleteFlow(flowId: string): Promise<void> {
+  const client = await getRedisClient() as any;
+  await client.del(flowKey(flowId));
+}
 
 /**
  * GET /api/providers
@@ -207,8 +242,7 @@ providersRouter.post('/:provider/connect', async (req: Request, res: Response) =
     // Generate flow ID
     const flowId = crypto.randomUUID();
 
-    // Store active flow
-    activeFlows.set(flowId, {
+    const flow: ActiveDeviceFlow = {
       userId,
       provider,
       deviceCode: data.device_code,
@@ -218,7 +252,9 @@ providersRouter.post('/:provider/connect', async (req: Request, res: Response) =
       expiresAt: new Date(Date.now() + data.expires_in * 1000),
       pollInterval: data.interval || 5,
       status: 'pending',
-    });
+    };
+
+    await saveFlow(flowId, flow);
 
     // Start background polling
     pollForToken(flowId, provider, clientConfig.clientId);
@@ -285,22 +321,28 @@ providersRouter.get('/:provider/status/:flowId', (req: Request, res: Response) =
   const { flowId } = req.params;
   const userId = req.session.userId!;
 
-  const flow = activeFlows.get(flowId);
-  if (!flow) {
-    return res.status(404).json({ error: 'Flow not found or expired' });
-  }
+  loadFlow(flowId)
+    .then((flow) => {
+      if (!flow) {
+        return res.status(404).json({ error: 'Flow not found or expired' });
+      }
 
-  if (flow.userId !== userId) {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
+      if (flow.userId !== userId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
 
-  const expiresIn = Math.max(0, Math.floor((flow.expiresAt.getTime() - Date.now()) / 1000));
+      const expiresIn = Math.max(0, Math.floor((flow.expiresAt.getTime() - Date.now()) / 1000));
 
-  res.json({
-    status: flow.status,
-    expiresIn,
-    error: flow.error,
-  });
+      res.json({
+        status: flow.status,
+        expiresIn,
+        error: flow.error,
+      });
+    })
+    .catch((error) => {
+      console.error('Error checking flow status:', error);
+      res.status(500).json({ error: 'Failed to check flow status' });
+    });
 });
 
 /**
@@ -332,31 +374,32 @@ providersRouter.delete('/:provider/flow/:flowId', (req: Request, res: Response) 
   const { flowId } = req.params;
   const userId = req.session.userId!;
 
-  const flow = activeFlows.get(flowId);
-  if (flow?.userId === userId) {
-    activeFlows.delete(flowId);
-  }
-
-  res.json({ success: true });
+  loadFlow(flowId)
+    .then(async (flow) => {
+      if (flow?.userId === userId) {
+        await deleteFlow(flowId);
+      }
+      res.json({ success: true });
+    })
+    .catch((error) => {
+      console.error('Error deleting flow:', error);
+      res.status(500).json({ error: 'Failed to cancel flow' });
+    });
 });
 
 /**
  * Background polling for device authorization
  */
 async function pollForToken(flowId: string, provider: ProviderType, clientId: string) {
-  const flow = activeFlows.get(flowId);
-  if (!flow) return;
-
   const providerConfig = PROVIDERS[provider];
-  let interval = flow.pollInterval * 1000;
 
-  const poll = async () => {
-    const current = activeFlows.get(flowId);
+  const poll = async (intervalMs: number) => {
+    const current = await loadFlow(flowId);
     if (!current || current.status !== 'pending') return;
 
-    // Check expiry
     if (Date.now() > current.expiresAt.getTime()) {
       current.status = 'expired';
+      await saveFlow(flowId, current);
       return;
     }
 
@@ -386,12 +429,11 @@ async function pollForToken(flowId: string, provider: ProviderType, clientId: st
       if (data.error) {
         switch (data.error) {
           case 'authorization_pending':
-            setTimeout(poll, interval);
-            break;
-          case 'slow_down':
-            interval = (data.interval || 10) * 1000;
-            setTimeout(poll, interval);
-            break;
+            return setTimeout(() => poll(intervalMs), intervalMs).unref();
+          case 'slow_down': {
+            const nextInterval = (data.interval || intervalMs / 1000 || 5) * 1000;
+            return setTimeout(() => poll(nextInterval), nextInterval).unref();
+          }
           case 'expired_token':
             current.status = 'expired';
             break;
@@ -402,6 +444,7 @@ async function pollForToken(flowId: string, provider: ProviderType, clientId: st
             current.status = 'error';
             current.error = data.error_description || data.error;
         }
+        await saveFlow(flowId, current);
         return;
       }
 
@@ -414,17 +457,23 @@ async function pollForToken(flowId: string, provider: ProviderType, clientId: st
       });
 
       current.status = 'success';
-
-      // Clean up after 60s
-      setTimeout(() => activeFlows.delete(flowId), 60000);
+      await saveFlow(flowId, current);
+      setTimeout(() => {
+        deleteFlow(flowId).catch((err) => console.error('Error cleaning up flow', err));
+      }, 60000).unref();
     } catch (error) {
       console.error('Poll error:', error);
-      setTimeout(poll, interval * 2);
+      const nextInterval = intervalMs * 2;
+      setTimeout(() => poll(nextInterval), nextInterval).unref();
     }
   };
 
-  // Start polling after initial interval
-  setTimeout(poll, interval);
+  loadFlow(flowId)
+    .then((flow) => {
+      const initialInterval = (flow?.pollInterval ?? 5) * 1000;
+      setTimeout(() => poll(initialInterval), initialInterval).unref();
+    })
+    .catch((err) => console.error('Poll start error:', err));
 }
 
 /**

@@ -12,7 +12,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { RelayClient } from './client.js';
 import type { ParsedCommand } from './parser.js';
-import type { SendPayload, SpeakOnTrigger } from '../protocol/types.js';
+import type { SendPayload, SendMeta, SpeakOnTrigger } from '../protocol/types.js';
 
 /** Maximum lines to keep in output buffer */
 const MAX_BUFFER_LINES = 10000;
@@ -61,7 +61,7 @@ export class PtyWrapper extends EventEmitter {
   private sentMessageHashes: Set<string> = new Set();
   private processedSpawnCommands: Set<string> = new Set();
   private processedReleaseCommands: Set<string> = new Set();
-  private messageQueue: Array<{ from: string; body: string; messageId: string }> = [];
+  private messageQueue: Array<{ from: string; body: string; messageId: string; thread?: string; importance?: number }> = [];
   private isInjecting = false;
   private readyForMessages = false;
   private logFilePath?: string;
@@ -82,8 +82,8 @@ export class PtyWrapper extends EventEmitter {
     });
 
     // Handle incoming messages
-    this.client.onMessage = (from: string, payload: SendPayload, messageId: string) => {
-      this.handleIncomingMessage(from, payload, messageId);
+    this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
+      this.handleIncomingMessage(from, payload, messageId, meta);
     };
   }
 
@@ -200,6 +200,9 @@ export class PtyWrapper extends EventEmitter {
     // The prompt shows: "2. Yes, I accept" - we send "2" to accept
     this.handleAutoAcceptPrompts(data);
 
+    // Handle terminal escape sequences that require responses (e.g., cursor position query)
+    this.handleTerminalEscapeSequences(data);
+
     // Store in line buffer for logs
     const lines = data.split('\n');
     for (const line of lines) {
@@ -241,6 +244,36 @@ export class PtyWrapper extends EventEmitter {
   }
 
   /**
+   * Handle terminal escape sequences that require responses.
+   *
+   * Some CLI tools (like Codex) query terminal capabilities and expect responses.
+   * Without proper responses, they timeout and crash.
+   *
+   * Supported sequences:
+   * - CSI 6 n (DSR - Device Status Report for cursor position)
+   *   Response: CSI row ; col R (we report position 1;1)
+   */
+  private handleTerminalEscapeSequences(data: string): void {
+    if (!this.ptyProcess || !this.running) return;
+
+    // Check for cursor position query: ESC [ 6 n
+    // This can appear as \x1b[6n or \x1b[?6n
+    // eslint-disable-next-line no-control-regex
+    if (/\x1b\[\??6n/.test(data)) {
+      // Respond with cursor at position (1, 1)
+      // Format: ESC [ row ; col R
+      const response = '\x1b[1;1R';
+
+      // Small delay to ensure the query has been fully processed
+      setTimeout(() => {
+        if (this.ptyProcess && this.running) {
+          this.ptyProcess.write(response);
+        }
+      }, 10);
+    }
+  }
+
+  /**
    * Parse relay commands from output.
    * Handles both single-line and multi-line (fenced) formats.
    * Deduplication via sentMessageHashes.
@@ -259,18 +292,22 @@ export class PtyWrapper extends EventEmitter {
   }
 
   /**
-   * Parse fenced multi-line messages: ->relay:Target <<<\n...\n>>>
+   * Parse fenced multi-line messages: ->relay:Target [thread:xxx] <<<\n...\n>>>
    */
   private parseFencedMessages(content: string): void {
-    // Pattern: ->relay:Target <<<  (with content on same or following lines until >>>)
+    // Pattern: ->relay:Target [thread:xxx] <<<  (with content on same or following lines until >>>)
+    // Thread is optional, can be [thread:id] or [thread:project:id] for cross-project
+    const escapedPrefix = this.relayPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const fenceStartPattern = new RegExp(
-      `${this.relayPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\S+)\\s*<<<`,
+      `${escapedPrefix}(\\S+)(?:\\s+\\[thread:(?:([\\w-]+):)?([\\w-]+)\\])?\\s*<<<`,
       'g'
     );
 
     let match;
     while ((match = fenceStartPattern.exec(content)) !== null) {
       const target = match[1];
+      const threadProject = match[2]; // Optional: project part of thread
+      const threadId = match[3];      // Thread ID
       const startIdx = match.index + match[0].length;
 
       // Find the closing >>>
@@ -295,6 +332,8 @@ export class PtyWrapper extends EventEmitter {
         kind: 'message',
         body,
         project,
+        thread: threadId || undefined,
+        threadProject: threadProject || undefined,
         raw: match[0],
       });
     }
@@ -302,6 +341,7 @@ export class PtyWrapper extends EventEmitter {
 
   /**
    * Parse single-line messages (no fenced format)
+   * Format: ->relay:Target [thread:xxx] message body
    */
   private parseSingleLineMessages(content: string): void {
     const lines = content.split('\n');
@@ -317,15 +357,37 @@ export class PtyWrapper extends EventEmitter {
       // Extract everything after the prefix
       const afterPrefix = line.substring(prefixIdx + this.relayPrefix.length);
 
-      // Find the target (first non-whitespace segment)
-      const targetMatch = afterPrefix.match(/^(\S+)/);
-      if (!targetMatch) continue;
+      // Pattern: Target [thread:project:id] body or Target [thread:id] body or Target body
+      // Thread is optional, can include project prefix
+      const targetMatch = afterPrefix.match(/^(\S+)(?:\s+\[thread:(?:([\w-]+):)?([\w-]+)\])?\s+(.+)$/);
+      if (!targetMatch) {
+        // Fallback: try simpler pattern without thread
+        const simpleMatch = afterPrefix.match(/^(\S+)\s+(.+)$/);
+        if (!simpleMatch) continue;
 
-      const target = targetMatch[1];
-      const bodyStart = targetMatch[0].length;
-      const body = afterPrefix.substring(bodyStart).trim();
+        const [, target, body] = simpleMatch;
+        if (!body) continue;
 
-      // Skip if no body
+        // Parse target for cross-project syntax
+        const colonIdx = target.indexOf(':');
+        let to = target;
+        let project: string | undefined;
+        if (colonIdx > 0 && colonIdx < target.length - 1) {
+          project = target.substring(0, colonIdx);
+          to = target.substring(colonIdx + 1);
+        }
+
+        this.sendRelayCommand({
+          to,
+          kind: 'message',
+          body,
+          project,
+          raw: line,
+        });
+        continue;
+      }
+
+      const [, target, threadProject, threadId, body] = targetMatch;
       if (!body) continue;
 
       // Parse target for cross-project syntax
@@ -342,6 +404,8 @@ export class PtyWrapper extends EventEmitter {
         kind: 'message',
         body,
         project,
+        thread: threadId || undefined,
+        threadProject: threadProject || undefined,
         raw: line,
       });
     }
@@ -364,9 +428,15 @@ export class PtyWrapper extends EventEmitter {
     // Remove carriage returns (causes text overwriting issues)
     str = str.replace(/\r(?!\n)/g, '');
 
-    // Strip remaining ANSI escape sequences
+    // Strip remaining ANSI escape sequences (with \x1B prefix)
     // eslint-disable-next-line no-control-regex
-    return str.replace(/\x1B(?:\[[0-9;]*[A-Za-z]|\].*?(?:\x07|\x1B\\)|[@-Z\\-_])/g, '');
+    str = str.replace(/\x1B(?:\[[0-9;?]*[A-Za-z]|\].*?(?:\x07|\x1B\\)|[@-Z\\-_])/g, '');
+
+    // Strip orphaned CSI sequences that lost their escape byte
+    // These look like [?25h, [?2026l, [0m, etc. at the start of content
+    str = str.replace(/^\s*(\[\??\d*[A-Za-z])+\s*/g, '');
+
+    return str;
   }
 
   /**
@@ -511,8 +581,8 @@ export class PtyWrapper extends EventEmitter {
   /**
    * Handle incoming message from relay
    */
-  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string): void {
-    this.messageQueue.push({ from, body: payload.body, messageId });
+  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta): void {
+    this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance });
     this.processMessageQueue();
   }
 
@@ -535,8 +605,13 @@ export class PtyWrapper extends EventEmitter {
 
     try {
       const shortId = msg.messageId.substring(0, 8);
-      const sanitizedBody = msg.body.replace(/[\r\n]+/g, ' ').trim();
-      const injection = `Relay message from ${msg.from} [${shortId}]: ${sanitizedBody}`;
+      // Strip ANSI escape sequences and orphaned control sequences from message body
+      const sanitizedBody = this.stripAnsi(msg.body).replace(/[\r\n]+/g, ' ').trim();
+      // Thread/importance hints to match tmux-wrapper format
+      const threadHint = msg.thread ? ` [thread:${msg.thread}]` : '';
+      const importanceHint = msg.importance !== undefined && msg.importance > 75 ? ' [!!]' :
+                             msg.importance !== undefined && msg.importance > 50 ? ' [!]' : '';
+      const injection = `Relay message from ${msg.from} [${shortId}]${threadHint}${importanceHint}: ${sanitizedBody}`;
 
       // Write message to PTY, then send Enter separately after a small delay
       // This matches how TmuxWrapper does it for better CLI compatibility
@@ -562,7 +637,7 @@ export class PtyWrapper extends EventEmitter {
     if (!this.running || !this.ptyProcess) return;
 
     const escapedPrefix = '\\' + this.relayPrefix;
-    const instructions = `[Agent Relay] You are "${this.config.name}" - connected for real-time messaging. SEND: ${escapedPrefix}AgentName message`;
+    const instructions = `[Agent Relay] You are "${this.config.name}" - connected for real-time messaging. SEND: ${escapedPrefix}AgentName message. PROTOCOL: (1) Wait for task via relay. (2) ACK receipt before starting. (3) Send "DONE: <summary>" when complete, then wait for next task.`;
 
     try {
       this.ptyProcess.write(instructions + '\r');

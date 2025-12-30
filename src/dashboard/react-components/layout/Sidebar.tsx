@@ -1,8 +1,8 @@
 /**
- * Sidebar Component
+ * Sidebar Component - Mission Control Theme
  *
  * Main navigation sidebar with project/agent list, view mode toggle,
- * and quick actions. Supports unified project navigation with nested agents.
+ * and quick actions. Redesigned to match landing page aesthetic.
  */
 
 import React, { useState } from 'react';
@@ -25,6 +25,7 @@ export interface SidebarProps {
   onViewModeChange?: (mode: 'local' | 'fleet') => void;
   onSpawnClick?: () => void;
   onReleaseClick?: (agent: Agent) => void;
+  onLogsClick?: (agent: Agent) => void;
   /** Mobile: close sidebar handler */
   onClose?: () => void;
 }
@@ -43,6 +44,7 @@ export function Sidebar({
   onViewModeChange,
   onSpawnClick,
   onReleaseClick,
+  onLogsClick,
   onClose,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,29 +54,33 @@ export function Sidebar({
 
   return (
     <aside
-      className={`
-        w-[280px] h-screen flex flex-col border-r
-        bg-sidebar-bg text-text-primary border-sidebar-border
-        fixed left-0 top-0 z-[1000] -translate-x-full transition-transform duration-200
-        md:relative md:translate-x-0 md:z-auto
-        ${isOpen ? 'translate-x-0' : ''}
-        max-md:w-[85vw] max-md:max-w-[280px]
-      `}
+      className="flex-1 flex flex-col overflow-hidden"
     >
       {/* Header */}
-      <div className="p-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-2 mb-3">
-          <h1 className="text-lg font-semibold m-0">Agent Relay</h1>
+      <div className="p-4 border-b border-border-subtle">
+        <div className="flex items-center gap-3 mb-3">
+          <span className="text-2xl text-accent-cyan drop-shadow-[0_0_8px_rgba(0,217,255,0.5)]">⬢</span>
+          <h1 className="text-lg font-display font-semibold m-0 text-text-primary">Agent Relay</h1>
           <ConnectionIndicator isConnected={isConnected} />
+          {/* Mobile close button */}
+          <button
+            className="md:hidden ml-auto p-2 -mr-2 bg-transparent border-none text-text-muted cursor-pointer rounded-lg transition-colors hover:bg-bg-hover hover:text-text-primary"
+            onClick={onClose}
+            aria-label="Close sidebar"
+          >
+            <CloseIcon />
+          </button>
         </div>
 
         {/* View Mode Toggle */}
         {isFleetAvailable && (
-          <div className="flex bg-sidebar-border rounded-md p-0.5">
+          <div className="flex bg-bg-tertiary rounded-lg p-1">
             <button
               className={`
-                flex-1 py-1.5 px-3 bg-transparent border-none text-xs cursor-pointer rounded transition-all duration-200
-                ${viewMode === 'local' ? 'bg-sidebar-hover text-white' : 'text-text-muted'}
+                flex-1 py-2 px-4 bg-transparent border-none text-xs font-medium cursor-pointer rounded-md transition-all duration-150
+                ${viewMode === 'local'
+                  ? 'bg-bg-elevated text-accent-cyan shadow-sm'
+                  : 'text-text-muted hover:text-text-secondary'}
               `}
               onClick={() => onViewModeChange?.('local')}
             >
@@ -82,8 +88,10 @@ export function Sidebar({
             </button>
             <button
               className={`
-                flex-1 py-1.5 px-3 bg-transparent border-none text-xs cursor-pointer rounded transition-all duration-200
-                ${viewMode === 'fleet' ? 'bg-sidebar-hover text-white' : 'text-text-muted'}
+                flex-1 py-2 px-4 bg-transparent border-none text-xs font-medium cursor-pointer rounded-md transition-all duration-150
+                ${viewMode === 'fleet'
+                  ? 'bg-bg-elevated text-accent-cyan shadow-sm'
+                  : 'text-text-muted hover:text-text-secondary'}
               `}
               onClick={() => onViewModeChange?.('fleet')}
             >
@@ -94,7 +102,7 @@ export function Sidebar({
       </div>
 
       {/* Search */}
-      <div className="flex items-center gap-2 py-3 px-4 bg-sidebar-border m-3 rounded-md">
+      <div className="flex items-center gap-2 py-2.5 px-3 bg-bg-tertiary m-3 rounded-lg border border-border-subtle focus-within:border-accent-cyan/50 transition-colors">
         <SearchIcon />
         <input
           type="text"
@@ -105,7 +113,7 @@ export function Sidebar({
         />
         {searchQuery && (
           <button
-            className="bg-transparent border-none text-text-muted cursor-pointer p-0.5 flex items-center justify-center hover:text-text-secondary"
+            className="bg-transparent border-none text-text-muted cursor-pointer p-1 flex items-center justify-center hover:text-text-secondary rounded transition-colors"
             onClick={() => setSearchQuery('')}
           >
             <ClearIcon />
@@ -125,6 +133,7 @@ export function Sidebar({
             onProjectSelect={onProjectSelect}
             onAgentSelect={onAgentSelect}
             onReleaseClick={onReleaseClick}
+            onLogsClick={onLogsClick}
             compact={true}
           />
         ) : (
@@ -134,6 +143,7 @@ export function Sidebar({
             searchQuery={searchQuery}
             onAgentSelect={(agent) => onAgentSelect?.(agent)}
             onReleaseClick={onReleaseClick}
+            onLogsClick={onLogsClick}
             compact={true}
             showGroupStats={true}
           />
@@ -141,9 +151,9 @@ export function Sidebar({
       </div>
 
       {/* Footer Actions */}
-      <div className="p-4 border-t border-sidebar-border">
+      <div className="p-4 border-t border-border-subtle">
         <button
-          className="w-full py-2.5 px-4 bg-sidebar-hover border border-border-dark rounded-md text-text-primary text-sm cursor-pointer flex items-center justify-center gap-2 transition-colors duration-200 hover:bg-bg-active"
+          className="w-full py-3 px-4 bg-gradient-to-r from-accent-cyan to-[#00b8d9] text-bg-deep font-semibold text-sm cursor-pointer flex items-center justify-center gap-2 rounded-lg transition-all duration-150 hover:shadow-glow-cyan hover:-translate-y-0.5"
           onClick={onSpawnClick}
         >
           <PlusIcon />
@@ -156,10 +166,18 @@ export function Sidebar({
 
 function ConnectionIndicator({ isConnected }: { isConnected: boolean }) {
   return (
-    <div
-      className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`}
-      title={isConnected ? 'Connected' : 'Disconnected'}
-    />
+    <div className="flex items-center gap-1.5 ml-auto">
+      <div
+        className={`w-2 h-2 rounded-full ${
+          isConnected
+            ? 'bg-success animate-pulse-glow'
+            : 'bg-text-dim'
+        }`}
+      />
+      <span className="text-xs text-text-muted">
+        {isConnected ? 'Live' : 'Offline'}
+      </span>
+    </div>
   );
 }
 
@@ -183,9 +201,18 @@ function ClearIcon() {
 
 function PlusIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
       <line x1="12" y1="5" x2="12" y2="19" />
       <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 }

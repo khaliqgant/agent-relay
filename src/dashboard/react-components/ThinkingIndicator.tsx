@@ -16,6 +16,8 @@ export interface ThinkingIndicatorProps {
   size?: 'small' | 'medium' | 'large';
   /** Show elapsed time */
   showElapsed?: boolean;
+  /** Show label text */
+  showLabel?: boolean;
 }
 
 export function ThinkingIndicator({
@@ -23,6 +25,7 @@ export function ThinkingIndicator({
   processingStartedAt,
   size = 'medium',
   showElapsed = false,
+  showLabel = false,
 }: ThinkingIndicatorProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
 
@@ -46,12 +49,6 @@ export function ThinkingIndicator({
     return null;
   }
 
-  const sizeClasses: Record<string, string> = {
-    small: 'thinking-indicator-small',
-    medium: 'thinking-indicator-medium',
-    large: 'thinking-indicator-large',
-  };
-
   const formatElapsed = (ms: number): string => {
     const seconds = Math.floor(ms / 1000);
     if (seconds < 60) return `${seconds}s`;
@@ -59,17 +56,44 @@ export function ThinkingIndicator({
     return `${minutes}m ${seconds % 60}s`;
   };
 
+  const dotSizeClasses: Record<string, string> = {
+    small: 'w-1 h-1',
+    medium: 'w-1.5 h-1.5',
+    large: 'w-2 h-2',
+  };
+
+  const gapClasses: Record<string, string> = {
+    small: 'gap-0.5',
+    medium: 'gap-1',
+    large: 'gap-1.5',
+  };
+
   return (
-    <div className={`thinking-indicator ${sizeClasses[size]}`}>
-      <div className="thinking-dots">
-        <span className="thinking-dot" />
-        <span className="thinking-dot" />
-        <span className="thinking-dot" />
-      </div>
-      {showElapsed && elapsedMs > 0 && (
-        <span className="thinking-elapsed">{formatElapsed(elapsedMs)}</span>
+    <span
+      className="inline-flex items-center gap-1.5 text-accent-purple"
+      title="Processing..."
+    >
+      <span className={`inline-flex items-center ${gapClasses[size]}`}>
+        <span
+          className={`${dotSizeClasses[size]} rounded-full bg-accent-purple animate-bounce`}
+          style={{ animationDelay: '0ms', animationDuration: '800ms' }}
+        />
+        <span
+          className={`${dotSizeClasses[size]} rounded-full bg-accent-purple animate-bounce`}
+          style={{ animationDelay: '150ms', animationDuration: '800ms' }}
+        />
+        <span
+          className={`${dotSizeClasses[size]} rounded-full bg-accent-purple animate-bounce`}
+          style={{ animationDelay: '300ms', animationDuration: '800ms' }}
+        />
+      </span>
+      {showLabel && (
+        <span className="text-xs font-medium text-accent-purple">thinking</span>
       )}
-    </div>
+      {showElapsed && elapsedMs > 0 && (
+        <span className="text-xs text-accent-purple/70">{formatElapsed(elapsedMs)}</span>
+      )}
+    </span>
   );
 }
 

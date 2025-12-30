@@ -64,6 +64,7 @@ export interface ProjectListProps {
   onProjectSelect?: (project: Project) => void;
   onAgentSelect?: (agent: Agent, project?: Project) => void;
   onReleaseClick?: (agent: Agent) => void;
+  onLogsClick?: (agent: Agent) => void;
   compact?: boolean;
 }
 
@@ -76,6 +77,7 @@ export function ProjectList({
   onProjectSelect,
   onAgentSelect,
   onReleaseClick,
+  onLogsClick,
   compact = false,
 }: ProjectListProps) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
@@ -175,6 +177,7 @@ export function ProjectList({
           onToggle={() => toggleProject('__local__')}
           onAgentSelect={(agent) => onAgentSelect?.(agent)}
           onReleaseClick={onReleaseClick}
+          onLogsClick={onLogsClick}
         />
       )}
 
@@ -191,6 +194,7 @@ export function ProjectList({
           onProjectSelect={() => onProjectSelect?.(project)}
           onAgentSelect={(agent) => onAgentSelect?.(agent, project)}
           onReleaseClick={onReleaseClick}
+          onLogsClick={onLogsClick}
         />
       ))}
     </div>
@@ -207,6 +211,7 @@ interface ProjectSectionProps {
   onProjectSelect?: () => void;
   onAgentSelect?: (agent: Agent) => void;
   onReleaseClick?: (agent: Agent) => void;
+  onLogsClick?: (agent: Agent) => void;
 }
 
 interface TeamGroup {
@@ -224,6 +229,7 @@ function ProjectSection({
   onProjectSelect,
   onAgentSelect,
   onReleaseClick,
+  onLogsClick,
 }: ProjectSectionProps) {
   const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
 
@@ -356,6 +362,7 @@ function ProjectSection({
                       displayNameOverride={stripTeamPrefix(agent.name, team.name)}
                       onClick={onAgentSelect}
                       onReleaseClick={onReleaseClick}
+                      onLogsClick={onLogsClick}
                     />
                   ))}
                 </div>
@@ -372,6 +379,7 @@ function ProjectSection({
               compact={compact}
               onClick={onAgentSelect}
               onReleaseClick={onReleaseClick}
+              onLogsClick={onLogsClick}
             />
           ))}
         </div>

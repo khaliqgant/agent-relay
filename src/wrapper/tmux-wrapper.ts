@@ -597,8 +597,15 @@ export class TmuxWrapper {
    * Strip ANSI escape codes
    */
   private stripAnsi(str: string): string {
+    // Strip ANSI escape sequences (with \x1B prefix)
     // eslint-disable-next-line no-control-regex
-    return str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+    let result = str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+
+    // Strip orphaned CSI sequences that lost their escape byte
+    // These look like [?25h, [?2026l, [0m, etc. at the start of content
+    result = result.replace(/^\s*(\[\??\d*[A-Za-z])+\s*/g, '');
+
+    return result;
   }
 
   /**
@@ -967,7 +974,8 @@ export class TmuxWrapper {
     this.logStderr(`Injecting message from ${msg.from} (cli: ${this.cliType})`);
 
     try {
-      let sanitizedBody = msg.body.replace(/[\r\n]+/g, ' ').trim();
+      // Strip ANSI escape sequences and orphaned control sequences from message body
+      let sanitizedBody = this.stripAnsi(msg.body).replace(/[\r\n]+/g, ' ').trim();
 
       // Gemini interprets certain keywords (While, For, If, etc.) as shell commands
       // Wrap in backticks to prevent shell keyword interpretation

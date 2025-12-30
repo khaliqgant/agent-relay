@@ -7,6 +7,7 @@ WORKDIR /app
 
 # Install system dependencies for AI CLIs
 RUN apt-get update && apt-get install -y \
+    bash \
     ca-certificates \
     curl \
     git \
@@ -20,6 +21,8 @@ RUN apt-get update && apt-get install -y \
 COPY --from=ghcr.io/khaliqgant/agent-relay:latest /app/dist ./dist
 COPY --from=ghcr.io/khaliqgant/agent-relay:latest /app/node_modules ./node_modules
 COPY --from=ghcr.io/khaliqgant/agent-relay:latest /app/package*.json ./
+COPY deploy/workspace/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Create workspace directory
 RUN mkdir -p /workspace /data
@@ -31,6 +34,7 @@ USER workspace
 
 # Environment
 ENV NODE_ENV=production
+ENV PORT=3888
 ENV AGENT_RELAY_DATA_DIR=/data
 ENV AGENT_RELAY_DASHBOARD_PORT=3888
 
@@ -46,5 +50,4 @@ VOLUME ["/data", "/workspace"]
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD node -e "require('http').get('http://localhost:3888/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-# Start relay daemon with dashboard
-CMD ["node", "dist/cli/index.js", "up", "--port", "3888"]
+ENTRYPOINT ["/entrypoint.sh"]

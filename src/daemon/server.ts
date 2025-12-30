@@ -119,7 +119,11 @@ export class Daemon {
       this.storage = await createStorageAdapter(storagePath, this.config.storageConfig);
     }
 
-    this.router = new Router({ storage: this.storage, registry: this.registry });
+    this.router = new Router({
+      storage: this.storage,
+      registry: this.registry,
+      onProcessingStateChange: () => this.writeProcessingStateFile(),
+    });
     this.storageInitialized = true;
   }
 

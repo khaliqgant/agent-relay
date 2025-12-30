@@ -10,6 +10,7 @@
 export { AgentCard, type AgentCardProps } from './AgentCard';
 export { AgentList, type AgentListProps } from './AgentList';
 export { ThinkingIndicator, ThinkingDot, type ThinkingIndicatorProps } from './ThinkingIndicator';
+export { MessageStatusIndicator, type MessageStatusIndicatorProps } from './MessageStatusIndicator';
 export { MessageList, type MessageListProps } from './MessageList';
 export { ThreadPanel, type ThreadPanelProps } from './ThreadPanel';
 export { CommandPalette, type CommandPaletteProps, type Command } from './CommandPalette';

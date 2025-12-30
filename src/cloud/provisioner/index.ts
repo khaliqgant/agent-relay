@@ -8,6 +8,70 @@ import { getConfig } from '../config.js';
 import { db, Workspace } from '../db/index.js';
 import { vault } from '../vault/index.js';
 
+const WORKSPACE_PORT = 3888;
+const FETCH_TIMEOUT_MS = 10_000;
+
+async function loadCredentialToken(userId: string, provider: string): Promise<string | null> {
+  try {
+    const cred = await vault.getCredential(userId, provider);
+    if (cred?.accessToken) {
+      return cred.accessToken;
+    }
+  } catch (error) {
+    console.warn(`Failed to decrypt ${provider} credential from vault; trying raw storage fallback`, error);
+    const raw = await db.credentials.findByUserAndProvider(userId, provider);
+    return raw?.accessToken ?? null;
+  }
+  return null;
+}
+
+async function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit & { retries?: number } = {},
+): Promise<Response> {
+  const retries = options.retries ?? 2;
+  let attempt = 0;
+
+  while (attempt <= retries) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      if (!response.ok && response.status >= 500 && attempt < retries) {
+        attempt += 1;
+        await wait(500 * attempt);
+        continue;
+      }
+      return response;
+    } catch (error) {
+      clearTimeout(timer);
+      if (attempt >= retries) {
+        throw error;
+      }
+      attempt += 1;
+      await wait(500 * attempt);
+    }
+  }
+
+  throw new Error('fetchWithRetry exhausted retries');
+}
+
+async function softHealthCheck(url: string): Promise<void> {
+  try {
+    const res = await fetchWithRetry(`${url.replace(/\/$/, '')}/health`, { method: 'GET', retries: 1 });
+    if (!res.ok) {
+      console.warn(`[health] Non-200 from ${url}/health: ${res.status}`);
+    }
+  } catch (error) {
+    console.warn(`[health] Failed to reach ${url}/health`, error);
+  }
+}
+
 export interface ProvisionConfig {
   userId: string;
   name: string;
@@ -67,7 +131,7 @@ class FlyProvisioner implements ComputeProvisioner {
     const appName = `ar-${workspace.id.substring(0, 8)}`;
 
     // Create Fly app
-    const createResponse = await fetch('https://api.machines.dev/v1/apps', {
+    const createResponse = await fetchWithRetry('https://api.machines.dev/v1/apps', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -79,18 +143,13 @@ class FlyProvisioner implements ComputeProvisioner {
       }),
     });
 
-    if (!createResponse.ok) {
-      const error = await createResponse.text();
-      throw new Error(`Failed to create Fly app: ${error}`);
-    }
-
     // Set secrets (credentials)
     const secrets: Record<string, string> = {};
     for (const [provider, token] of credentials) {
       secrets[`${provider.toUpperCase()}_TOKEN`] = token;
     }
 
-    await fetch(`https://api.machines.dev/v1/apps/${appName}/secrets`, {
+    await fetchWithRetry(`https://api.machines.dev/v1/apps/${appName}/secrets`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -109,7 +168,7 @@ class FlyProvisioner implements ComputeProvisioner {
     }
 
     // Create machine with auto-stop/start for cost optimization
-    const machineResponse = await fetch(
+    const machineResponse = await fetchWithRetry(
       `https://api.machines.dev/v1/apps/${appName}/machines`,
       {
         method: 'POST',
@@ -127,6 +186,8 @@ class FlyProvisioner implements ComputeProvisioner {
               MAX_AGENTS: String(workspace.config.maxAgents ?? 10),
               REPOSITORIES: (workspace.config.repositories ?? []).join(','),
               PROVIDERS: (workspace.config.providers ?? []).join(','),
+              PORT: String(WORKSPACE_PORT),
+              AGENT_RELAY_DASHBOARD_PORT: String(WORKSPACE_PORT),
             },
             services: [
               {
@@ -135,7 +196,7 @@ class FlyProvisioner implements ComputeProvisioner {
                   { port: 80, handlers: ['http'] },
                 ],
                 protocol: 'tcp',
-                internal_port: 3000,
+                internal_port: WORKSPACE_PORT,
                 // Auto-stop after 5 minutes of inactivity
                 auto_stop_machines: true,
                 auto_start_machines: true,
@@ -164,6 +225,8 @@ class FlyProvisioner implements ComputeProvisioner {
       ? `https://${customHostname}`
       : `https://${appName}.fly.dev`;
 
+    await softHealthCheck(publicUrl);
+
     return {
       computeId: machine.id,
       publicUrl,
@@ -177,7 +240,7 @@ class FlyProvisioner implements ComputeProvisioner {
     appName: string,
     hostname: string
   ): Promise<void> {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://api.machines.dev/v1/apps/${appName}/certificates`,
       {
         method: 'POST',
@@ -201,7 +264,7 @@ class FlyProvisioner implements ComputeProvisioner {
   async deprovision(workspace: Workspace): Promise<void> {
     const appName = `ar-${workspace.id.substring(0, 8)}`;
 
-    await fetch(`https://api.machines.dev/v1/apps/${appName}`, {
+    await fetchWithRetry(`https://api.machines.dev/v1/apps/${appName}`, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -214,7 +277,7 @@ class FlyProvisioner implements ComputeProvisioner {
 
     const appName = `ar-${workspace.id.substring(0, 8)}`;
 
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://api.machines.dev/v1/apps/${appName}/machines/${workspace.computeId}`,
       {
         headers: {
@@ -245,7 +308,7 @@ class FlyProvisioner implements ComputeProvisioner {
 
     const appName = `ar-${workspace.id.substring(0, 8)}`;
 
-    await fetch(
+    await fetchWithRetry(
       `https://api.machines.dev/v1/apps/${appName}/machines/${workspace.computeId}/restart`,
       {
         method: 'POST',
@@ -276,7 +339,7 @@ class RailwayProvisioner implements ComputeProvisioner {
     credentials: Map<string, string>
   ): Promise<{ computeId: string; publicUrl: string }> {
     // Create project
-    const projectResponse = await fetch('https://backboard.railway.app/graphql/v2', {
+    const projectResponse = await fetchWithRetry('https://backboard.railway.app/graphql/v2', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -303,7 +366,7 @@ class RailwayProvisioner implements ComputeProvisioner {
     const projectId = projectData.data.projectCreate.id;
 
     // Deploy service
-    const serviceResponse = await fetch('https://backboard.railway.app/graphql/v2', {
+    const serviceResponse = await fetchWithRetry('https://backboard.railway.app/graphql/v2', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -339,13 +402,15 @@ class RailwayProvisioner implements ComputeProvisioner {
       MAX_AGENTS: String(workspace.config.maxAgents ?? 10),
       REPOSITORIES: (workspace.config.repositories ?? []).join(','),
       PROVIDERS: (workspace.config.providers ?? []).join(','),
+      PORT: String(WORKSPACE_PORT),
+      AGENT_RELAY_DASHBOARD_PORT: String(WORKSPACE_PORT),
     };
 
     for (const [provider, token] of credentials) {
       envVars[`${provider.toUpperCase()}_TOKEN`] = token;
     }
 
-    await fetch('https://backboard.railway.app/graphql/v2', {
+    await fetchWithRetry('https://backboard.railway.app/graphql/v2', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -368,7 +433,7 @@ class RailwayProvisioner implements ComputeProvisioner {
     });
 
     // Generate domain
-    const domainResponse = await fetch('https://backboard.railway.app/graphql/v2', {
+    const domainResponse = await fetchWithRetry('https://backboard.railway.app/graphql/v2', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -393,6 +458,8 @@ class RailwayProvisioner implements ComputeProvisioner {
     const domainData = await domainResponse.json() as { data: { serviceDomainCreate: { domain: string } } };
     const domain = domainData.data.serviceDomainCreate.domain;
 
+    await softHealthCheck(`https://${domain}`);
+
     return {
       computeId: projectId,
       publicUrl: `https://${domain}`,
@@ -402,7 +469,7 @@ class RailwayProvisioner implements ComputeProvisioner {
   async deprovision(workspace: Workspace): Promise<void> {
     if (!workspace.computeId) return;
 
-    await fetch('https://backboard.railway.app/graphql/v2', {
+    await fetchWithRetry('https://backboard.railway.app/graphql/v2', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -424,7 +491,7 @@ class RailwayProvisioner implements ComputeProvisioner {
   async getStatus(workspace: Workspace): Promise<WorkspaceStatus> {
     if (!workspace.computeId) return 'error';
 
-    const response = await fetch('https://backboard.railway.app/graphql/v2', {
+    const response = await fetchWithRetry('https://backboard.railway.app/graphql/v2', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -477,7 +544,7 @@ class RailwayProvisioner implements ComputeProvisioner {
     // Railway doesn't have a direct restart - redeploy instead
     if (!workspace.computeId) return;
 
-    await fetch('https://backboard.railway.app/graphql/v2', {
+    await fetchWithRetry('https://backboard.railway.app/graphql/v2', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
@@ -516,6 +583,8 @@ class DockerProvisioner implements ComputeProvisioner {
       `-e MAX_AGENTS=${workspace.config.maxAgents ?? 10}`,
       `-e REPOSITORIES=${(workspace.config.repositories ?? []).join(',')}`,
       `-e PROVIDERS=${(workspace.config.providers ?? []).join(',')}`,
+      `-e PORT=${WORKSPACE_PORT}`,
+      `-e AGENT_RELAY_DASHBOARD_PORT=${WORKSPACE_PORT}`,
     ];
 
     for (const [provider, token] of credentials) {
@@ -524,17 +593,17 @@ class DockerProvisioner implements ComputeProvisioner {
 
     // Run container
     const { execSync } = await import('child_process');
-    const port = 3000 + Math.floor(Math.random() * 1000);
+    const hostPort = 3000 + Math.floor(Math.random() * 1000);
 
     try {
       execSync(
-        `docker run -d --name ${containerName} -p ${port}:3000 ${envArgs.join(' ')} ghcr.io/khaliqgant/agent-relay-workspace:latest`,
+        `docker run -d --name ${containerName} -p ${hostPort}:${WORKSPACE_PORT} ${envArgs.join(' ')} ghcr.io/khaliqgant/agent-relay-workspace:latest`,
         { stdio: 'pipe' }
       );
 
       return {
         computeId: containerName,
-        publicUrl: `http://localhost:${port}`,
+        publicUrl: `http://localhost:${hostPort}`,
       };
     } catch (error) {
       throw new Error(`Failed to start Docker container: ${error}`);
@@ -633,9 +702,19 @@ export class WorkspaceProvisioner {
     // Get credentials
     const credentials = new Map<string, string>();
     for (const provider of config.providers) {
-      const cred = await vault.getCredential(config.userId, provider);
-      if (cred) {
-        credentials.set(provider, cred.accessToken);
+      const token = await loadCredentialToken(config.userId, provider);
+      if (token) {
+        credentials.set(provider, token);
+      }
+    }
+
+    // GitHub token is required for cloning repositories
+    if (config.repositories.length > 0) {
+      const githubToken = await loadCredentialToken(config.userId, 'github');
+      if (githubToken) {
+        credentials.set('github', githubToken);
+      } else {
+        console.warn(`No GitHub token found for user ${config.userId}; repository cloning may fail.`);
       }
     }
 

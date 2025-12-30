@@ -31,6 +31,9 @@ export interface AgentSummary {
   files?: string[];
 }
 
+// Message Status
+export type MessageStatus = 'unread' | 'read' | 'acked' | 'sending';
+
 // Message Types
 export interface Message {
   id: string;
@@ -42,6 +45,8 @@ export interface Message {
   isBroadcast?: boolean;
   isRead?: boolean;
   replyCount?: number;
+  /** Message delivery status: sending → acked (received by agent) */
+  status?: MessageStatus;
 }
 
 export interface Thread {
@@ -179,8 +184,14 @@ export interface SpawnAgentRequest {
   cli?: string;
   task?: string;
   team?: string;
+  /** Shadow execution mode (subagent for Claude/OpenCode, process otherwise) */
+  shadowMode?: 'subagent' | 'process';
   /** Primary agent to shadow (if this agent is a shadow) */
   shadowOf?: string;
+  /** Shadow agent profile to use (for subagent mode) */
+  shadowAgent?: string;
+  /** When the shadow should be invoked (for subagent mode) */
+  shadowTriggers?: SpeakOnTrigger[];
   /** When the shadow should speak */
   shadowSpeakOn?: SpeakOnTrigger[];
 }

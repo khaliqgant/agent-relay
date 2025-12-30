@@ -5,7 +5,7 @@
  * provider-colored icons, and From → To format.
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type { Message, Agent } from '../types';
 import { MessageStatusIndicator } from './MessageStatusIndicator';
 import { ThinkingIndicator } from './ThinkingIndicator';
@@ -64,9 +64,10 @@ export function MessageList({
       });
     }
   }
-  const listRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
   const prevFilteredLengthRef = useRef<number>(0);
+  const prevChannelRef = useRef<string>(currentChannel);
 
   // Filter messages for current channel
   const filteredMessages = messages.filter((msg) => {
@@ -76,31 +77,47 @@ export function MessageList({
     return msg.from === currentChannel || msg.to === currentChannel;
   });
 
-  // Auto-scroll to bottom when new messages arrive in current channel
-  useEffect(() => {
-    const currentLength = filteredMessages.length;
-    const prevLength = prevFilteredLengthRef.current;
+  // Handle scroll to detect manual scroll (disable/enable auto-scroll)
+  const handleScroll = useCallback(() => {
+    if (!scrollContainerRef.current) return;
 
-    // Only scroll if new messages were added (not on initial render or channel switch)
-    if (currentLength > prevLength && prevLength > 0) {
-      // Use setTimeout to ensure DOM has fully updated before scrolling
-      setTimeout(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
-      }, 0);
-    } else if (currentLength > 0 && prevLength === 0) {
-      // Initial load or channel switch - scroll immediately without animation
-      setTimeout(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
-      }, 0);
+    const container = scrollContainerRef.current;
+    const isAtBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+
+    // Re-enable auto-scroll when user scrolls to bottom
+    if (isAtBottom && !autoScroll) {
+      setAutoScroll(true);
     }
+    // Disable auto-scroll when user scrolls away from bottom
+    else if (!isAtBottom && autoScroll) {
+      setAutoScroll(false);
+    }
+  }, [autoScroll]);
 
-    prevFilteredLengthRef.current = currentLength;
-  }, [filteredMessages.length]);
-
-  // Reset scroll position when channel changes
+  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    prevFilteredLengthRef.current = 0;
-    bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    if (autoScroll && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [filteredMessages.length, autoScroll]);
+
+  // Reset scroll position and auto-scroll when channel changes
+  useEffect(() => {
+    if (currentChannel !== prevChannelRef.current) {
+      prevChannelRef.current = currentChannel;
+      prevFilteredLengthRef.current = 0;
+      setAutoScroll(true);
+      // Scroll to bottom on channel change
+      if (scrollContainerRef.current) {
+        const container = scrollContainerRef.current;
+        // Use setTimeout to ensure DOM has updated
+        setTimeout(() => {
+          container.scrollTop = container.scrollHeight;
+        }, 0);
+      }
+    }
   }, [currentChannel]);
 
   if (filteredMessages.length === 0) {
@@ -118,7 +135,11 @@ export function MessageList({
   }
 
   return (
-    <div className="flex flex-col gap-1 p-4 bg-bg-secondary" ref={listRef}>
+    <div
+      className="flex flex-col gap-1 p-4 bg-bg-secondary h-full overflow-y-auto"
+      ref={scrollContainerRef}
+      onScroll={handleScroll}
+    >
       {filteredMessages.map((message) => {
         // Check if the recipient is currently processing
         // Only show thinking indicator for messages from Dashboard to a specific agent
@@ -136,7 +157,6 @@ export function MessageList({
           />
         );
       })}
-      <div ref={bottomRef} />
     </div>
   );
 }

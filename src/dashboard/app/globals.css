@@ -1,124 +1,30 @@
 /**
  * Dashboard V2 - Global Styles with Tailwind CSS v4
+ * Mission Control Theme
  */
 
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
 @config "../tailwind.config.js";
-
-/* CSS Custom Properties for Theme Switching */
-:root {
-  /* Colors - Dark Theme (default) */
-  --color-bg-primary: #1a1d21;
-  --color-bg-secondary: #222529;
-  --color-bg-tertiary: #19171d;
-  --color-bg-hover: rgba(255, 255, 255, 0.06);
-  --color-bg-active: rgba(255, 255, 255, 0.1);
-
-  --color-text-primary: #d1d2d3;
-  --color-text-secondary: #ababad;
-  --color-text-muted: #8d8d8e;
-  --color-text-inverse: #1a1d21;
-
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-border-light: rgba(255, 255, 255, 0.06);
-  --color-border-dark: rgba(255, 255, 255, 0.15);
-
-  --color-accent: #1264a3;
-  --color-accent-hover: #0d4f82;
-  --color-accent-light: rgba(18, 100, 163, 0.15);
-
-  --color-success: #2bac76;
-  --color-success-light: rgba(43, 172, 118, 0.15);
-
-  --color-warning: #e8a427;
-  --color-warning-light: rgba(232, 164, 39, 0.15);
-
-  --color-error: #e01e5a;
-  --color-error-light: rgba(224, 30, 90, 0.15);
-
-  /* Sidebar colors */
-  --sidebar-bg: #1a1a2e;
-  --sidebar-border: #2a2a3e;
-  --sidebar-hover: #3a3a4e;
-}
-
-/* Light Theme Override */
-[data-theme="light"] {
-  --color-bg-primary: #ffffff;
-  --color-bg-secondary: #f8f9fa;
-  --color-bg-tertiary: #f1f3f5;
-  --color-bg-hover: rgba(0, 0, 0, 0.04);
-  --color-bg-active: rgba(0, 0, 0, 0.08);
-
-  --color-text-primary: #1a1d21;
-  --color-text-secondary: #616061;
-  --color-text-muted: #868686;
-  --color-text-inverse: #ffffff;
-
-  --color-border: rgba(0, 0, 0, 0.1);
-  --color-border-light: rgba(0, 0, 0, 0.06);
-  --color-border-dark: rgba(0, 0, 0, 0.15);
-
-  --sidebar-bg: #3f0e40;
-  --sidebar-border: #522653;
-  --sidebar-hover: #4a154b;
-}
-
-/* Tailwind v4 Theme */
-@theme {
-  --color-accent: #1264a3;
-  --color-accent-hover: #0d4f82;
-  --color-success: #2bac76;
-  --color-warning: #e8a427;
-  --color-error: #e01e5a;
-
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: SF Mono, SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
-
-  --shadow-modal: 0 16px 70px rgba(0, 0, 0, 0.5);
-
-  --animate-fade-in: fadeIn 150ms ease;
-  --animate-slide-up: slideUp 200ms ease;
-  --animate-slide-down: slideDown 200ms ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 
 /* Base styles */
 html,
 body {
   height: 100%;
-  font-family: var(--font-sans);
-  font-size: 14px;
-  color: var(--color-text-primary);
-  background: var(--color-bg-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 /* Focus styles */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid #00d9ff;
   outline-offset: 2px;
 }
 
-/* Scrollbar styles */
+/* Scrollbar styles - Sleek dark */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -126,18 +32,18 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border-dark);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Selection */
 ::selection {
-  background: var(--color-accent-light);
-  color: var(--color-accent);
+  background: rgba(0, 217, 255, 0.15);
+  color: #00d9ff;
 }
 
 /* Reduced motion preference */

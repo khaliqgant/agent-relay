@@ -31,6 +31,8 @@ export interface OrchestratorEvent {
 export interface UseOrchestratorOptions {
   /** Orchestrator API URL (default: http://localhost:3456) */
   apiUrl?: string;
+  /** Enable orchestrator connection (default: false - orchestrator is optional) */
+  enabled?: boolean;
 }
 
 export interface UseOrchestratorResult {
@@ -61,13 +63,13 @@ export interface UseOrchestratorResult {
 }
 
 export function useOrchestrator(options: UseOrchestratorOptions = {}): UseOrchestratorResult {
-  const { apiUrl = 'http://localhost:3456' } = options;
+  const { apiUrl = 'http://localhost:3456', enabled = false } = options;
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>();
   const [agents, setAgents] = useState<OrchestratorAgent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(enabled);
   const [error, setError] = useState<Error | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -76,8 +78,12 @@ export function useOrchestrator(options: UseOrchestratorOptions = {}): UseOrches
   // Convert API URL to WebSocket URL
   const wsUrl = apiUrl.replace(/^http/, 'ws');
 
-  // Fetch initial data
+  // Fetch initial data - only if enabled
   const fetchData = useCallback(async () => {
+    if (!enabled) {
+      return;
+    }
+
     try {
       setIsLoading(true);
       setError(null);
@@ -114,10 +120,15 @@ export function useOrchestrator(options: UseOrchestratorOptions = {}): UseOrches
     } finally {
       setIsLoading(false);
     }
-  }, [apiUrl]);
+  }, [apiUrl, enabled]);
 
-  // WebSocket connection
+  // WebSocket connection - only connect if enabled
   useEffect(() => {
+    // Skip connection if orchestrator is not enabled
+    if (!enabled) {
+      return;
+    }
+
     const connect = () => {
       try {
         const ws = new WebSocket(wsUrl);
@@ -187,7 +198,7 @@ export function useOrchestrator(options: UseOrchestratorOptions = {}): UseOrches
         wsRef.current.close();
       }
     };
-  }, [wsUrl, fetchData]);
+  }, [wsUrl, fetchData, enabled]);
 
   // Handle real-time events
   const handleEvent = useCallback((event: OrchestratorEvent) => {

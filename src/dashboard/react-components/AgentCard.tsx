@@ -25,6 +25,7 @@ export interface AgentCardProps {
   onClick?: (agent: Agent) => void;
   onMessageClick?: (agent: Agent) => void;
   onReleaseClick?: (agent: Agent) => void;
+  onLogsClick?: (agent: Agent) => void;
 }
 
 export function AgentCard({
@@ -36,6 +37,7 @@ export function AgentCard({
   onClick,
   onMessageClick,
   onReleaseClick,
+  onLogsClick,
 }: AgentCardProps) {
   const colors = getAgentColor(agent.name);
   const initials = getAgentInitials(agent.name);
@@ -54,6 +56,11 @@ export function AgentCard({
   const handleReleaseClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onReleaseClick?.(agent);
+  };
+
+  const handleLogsClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onLogsClick?.(agent);
   };
 
   if (compact) {
@@ -82,6 +89,15 @@ export function AgentCard({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {agent.isSpawned && onLogsClick && (
+            <button
+              className="relative bg-transparent border border-transparent text-text-muted p-1 cursor-pointer flex items-center justify-center rounded transition-all duration-200 opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:bg-[rgba(0,217,255,0.1)] hover:border-accent-cyan/30 hover:text-accent-cyan hover:shadow-[0_0_10px_rgba(0,217,255,0.3)] hover:scale-110"
+              onClick={handleLogsClick}
+              title="View logs"
+            >
+              <LogsIcon />
+            </button>
+          )}
           {agent.isSpawned && onReleaseClick && (
             <button
               className="relative bg-transparent border border-transparent text-text-muted p-1 cursor-pointer flex items-center justify-center rounded transition-all duration-200 opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:bg-gradient-to-b hover:from-error-light hover:to-[rgba(180,40,40,0.2)] hover:border-error/50 hover:text-error hover:shadow-[0_0_10px_rgba(255,68,68,0.3)] hover:scale-110"
@@ -171,6 +187,15 @@ export function AgentCard({
           )}
         </div>
         <div className="flex gap-1.5">
+          {agent.isSpawned && onLogsClick && (
+            <button
+              className="relative bg-gradient-to-b from-[#1a2a3a] to-[#0f1a2a] text-accent-cyan border border-[#204060] rounded-md py-1.5 px-2.5 cursor-pointer flex items-center justify-center gap-1 transition-all duration-200 shadow-[inset_0_1px_0_rgba(0,217,255,0.1),0_2px_4px_rgba(0,0,0,0.3)] overflow-hidden hover:bg-gradient-to-b hover:from-[#204060] hover:to-[#1a3a50] hover:border-accent-cyan hover:shadow-[inset_0_1px_0_rgba(0,217,255,0.2),0_0_12px_rgba(0,217,255,0.4),0_2px_8px_rgba(0,0,0,0.4)] hover:scale-105 active:scale-[0.98]"
+              onClick={handleLogsClick}
+              title="View logs"
+            >
+              <LogsIcon />
+            </button>
+          )}
           {agent.isSpawned && onReleaseClick && (
             <button
               className="relative bg-gradient-to-b from-[#3a1a1a] to-[#2a0f0f] text-[#ff6b6b] border border-[#4a2020] rounded-md py-1.5 px-2.5 cursor-pointer flex items-center justify-center gap-1 transition-all duration-200 shadow-[inset_0_1px_0_rgba(255,107,107,0.1),0_2px_4px_rgba(0,0,0,0.3)] overflow-hidden hover:bg-gradient-to-b hover:from-[#4a2020] hover:to-[#3a1515] hover:border-[#ff4444] hover:text-[#ff4444] hover:shadow-[inset_0_1px_0_rgba(255,68,68,0.2),0_0_12px_rgba(255,68,68,0.4),0_2px_8px_rgba(0,0,0,0.4)] hover:scale-105 active:scale-[0.98]"
@@ -243,6 +268,24 @@ function ReleaseIcon() {
         strokeWidth="2.5"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function LogsIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   );
 }

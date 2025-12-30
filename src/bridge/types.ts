@@ -41,8 +41,14 @@ export interface SpawnRequest {
   task: string;
   /** Optional team name to organize agents under */
   team?: string;
+  /** Shadow execution mode (subagent = no extra process) */
+  shadowMode?: 'subagent' | 'process';
   /** Primary agent to shadow (if this agent is a shadow) */
   shadowOf?: string;
+  /** Shadow agent profile to use (for subagent mode) */
+  shadowAgent?: string;
+  /** When to trigger the shadow (for subagent mode) */
+  shadowTriggers?: Array<'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES'>;
   /** When the shadow should speak (default: ['EXPLICIT_ASK']) */
   shadowSpeakOn?: Array<'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES'>;
 }

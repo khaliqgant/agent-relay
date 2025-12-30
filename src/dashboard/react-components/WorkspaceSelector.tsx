@@ -63,36 +63,36 @@ export function WorkspaceSelector({
   }, []);
 
   return (
-    <div className="workspace-selector" ref={dropdownRef}>
+    <div className="relative w-full" ref={dropdownRef}>
       <button
-        className="workspace-trigger"
+        className="w-full flex items-center gap-2 px-3 py-2.5 bg-[#2a2a3e] border border-[#3a3a4e] rounded-lg text-[#e8e8e8] text-sm cursor-pointer transition-all hover:bg-[#3a3a4e] hover:border-[#4a4a5e] disabled:opacity-60 disabled:cursor-not-allowed"
         onClick={() => setIsOpen(!isOpen)}
         disabled={isLoading}
       >
         {isLoading ? (
-          <span className="workspace-loading">Loading...</span>
+          <span className="flex-1 text-left text-[#666]">Loading...</span>
         ) : activeWorkspace ? (
           <>
             <ProviderIcon provider={activeWorkspace.provider} />
-            <span className="workspace-name">{activeWorkspace.name}</span>
+            <span className="flex-1 text-left font-medium">{activeWorkspace.name}</span>
             {activeWorkspace.gitBranch && (
-              <span className="workspace-branch">
+              <span className="flex items-center gap-1 text-xs text-[#888] bg-white/5 px-1.5 py-0.5 rounded">
                 <BranchIcon />
                 {activeWorkspace.gitBranch}
               </span>
             )}
           </>
         ) : (
-          <span className="workspace-placeholder">Select workspace...</span>
+          <span className="flex-1 text-left text-[#666]">Select workspace...</span>
         )}
         <ChevronIcon isOpen={isOpen} />
       </button>
 
       {isOpen && (
-        <div className="workspace-dropdown">
-          <div className="workspace-list">
+        <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-[#1a1a2e] border border-[#3a3a4e] rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.4)] z-[1000] overflow-hidden">
+          <div className="max-h-[300px] overflow-y-auto">
             {workspaces.length === 0 ? (
-              <div className="workspace-empty">
+              <div className="py-6 px-4 text-center text-[#666] text-[13px] leading-relaxed">
                 No workspaces added yet.
                 <br />
                 Add a repository to get started.
@@ -101,16 +101,20 @@ export function WorkspaceSelector({
               workspaces.map((workspace) => (
                 <button
                   key={workspace.id}
-                  className={`workspace-item ${workspace.id === activeWorkspaceId ? 'active' : ''}`}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 bg-transparent border-none text-[#e8e8e8] text-sm cursor-pointer transition-colors text-left hover:bg-white/5 ${
+                    workspace.id === activeWorkspaceId ? 'bg-[rgba(0,200,150,0.1)]' : ''
+                  }`}
                   onClick={() => {
                     onSelect(workspace);
                     setIsOpen(false);
                   }}
                 >
                   <ProviderIcon provider={workspace.provider} />
-                  <div className="workspace-item-info">
-                    <span className="workspace-item-name">{workspace.name}</span>
-                    <span className="workspace-item-path">{workspace.path}</span>
+                  <div className="flex-1 flex flex-col gap-0.5 min-w-0">
+                    <span className="font-medium">{workspace.name}</span>
+                    <span className="text-[11px] text-[#666] overflow-hidden text-ellipsis whitespace-nowrap">
+                      {workspace.path}
+                    </span>
                   </div>
                   <StatusIndicator status={workspace.status} />
                 </button>
@@ -118,8 +122,11 @@ export function WorkspaceSelector({
             )}
           </div>
 
-          <div className="workspace-actions">
-            <button className="workspace-add-btn" onClick={onAddWorkspace}>
+          <div className="p-2 border-t border-[#3a3a4e]">
+            <button
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-transparent border border-dashed border-[#3a3a4e] rounded-md text-[#888] text-[13px] cursor-pointer transition-all hover:bg-white/5 hover:border-[#4a4a5e] hover:text-[#e8e8e8]"
+              onClick={onAddWorkspace}
+            >
               <PlusIcon />
               Add Workspace
             </button>
@@ -139,7 +146,7 @@ function ProviderIcon({ provider }: { provider: string }) {
   };
 
   return (
-    <span className="provider-icon" title={provider}>
+    <span className="text-base" title={provider}>
       {icons[provider] || icons.generic}
     </span>
   );
@@ -147,15 +154,14 @@ function ProviderIcon({ provider }: { provider: string }) {
 
 function StatusIndicator({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    active: '#22c55e',
-    inactive: '#6b7280',
-    error: '#ef4444',
+    active: 'bg-green-500',
+    inactive: 'bg-gray-500',
+    error: 'bg-red-500',
   };
 
   return (
     <span
-      className="status-indicator"
-      style={{ backgroundColor: colors[status] || colors.inactive }}
+      className={`w-2 h-2 rounded-full flex-shrink-0 ${colors[status] || colors.inactive}`}
       title={status}
     />
   );
@@ -164,7 +170,7 @@ function StatusIndicator({ status }: { status: string }) {
 function ChevronIcon({ isOpen }: { isOpen: boolean }) {
   return (
     <svg
-      className={`chevron-icon ${isOpen ? 'open' : ''}`}
+      className={`text-[#666] transition-transform ${isOpen ? 'rotate-180' : ''}`}
       width="16"
       height="16"
       viewBox="0 0 24 24"
@@ -203,180 +209,3 @@ function PlusIcon() {
     </svg>
   );
 }
-
-export const workspaceSelectorStyles = `
-.workspace-selector {
-  position: relative;
-  width: 100%;
-}
-
-.workspace-trigger {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #2a2a3e;
-  border: 1px solid #3a3a4e;
-  border-radius: 8px;
-  color: #e8e8e8;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.workspace-trigger:hover {
-  background: #3a3a4e;
-  border-color: #4a4a5e;
-}
-
-.workspace-trigger:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.provider-icon {
-  font-size: 16px;
-}
-
-.workspace-name {
-  flex: 1;
-  text-align: left;
-  font-weight: 500;
-}
-
-.workspace-branch {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: #888;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.workspace-placeholder {
-  flex: 1;
-  text-align: left;
-  color: #666;
-}
-
-.workspace-loading {
-  flex: 1;
-  text-align: left;
-  color: #666;
-}
-
-.chevron-icon {
-  color: #666;
-  transition: transform 0.2s;
-}
-
-.chevron-icon.open {
-  transform: rotate(180deg);
-}
-
-.workspace-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: #1a1a2e;
-  border: 1px solid #3a3a4e;
-  border-radius: 8px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
-  z-index: 1000;
-  overflow: hidden;
-}
-
-.workspace-list {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.workspace-empty {
-  padding: 24px 16px;
-  text-align: center;
-  color: #666;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.workspace-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  background: transparent;
-  border: none;
-  color: #e8e8e8;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.15s;
-  text-align: left;
-}
-
-.workspace-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.workspace-item.active {
-  background: rgba(0, 200, 150, 0.1);
-}
-
-.workspace-item-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.workspace-item-name {
-  font-weight: 500;
-}
-
-.workspace-item-path {
-  font-size: 11px;
-  color: #666;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.workspace-actions {
-  padding: 8px;
-  border-top: 1px solid #3a3a4e;
-}
-
-.workspace-add-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: transparent;
-  border: 1px dashed #3a3a4e;
-  border-radius: 6px;
-  color: #888;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.workspace-add-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: #4a4a5e;
-  color: #e8e8e8;
-}
-`;

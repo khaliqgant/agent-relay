@@ -58,8 +58,9 @@ export interface PrometheusMetric {
   values: Array<{ labels: Record<string, string>; value: number }>;
 }
 
-// Consider agents offline after 5 minutes of inactivity
-const OFFLINE_THRESHOLD_MS = 5 * 60 * 1000;
+// Consider agents offline after 30 seconds of inactivity
+// Aligns with heartbeat timeout (5s heartbeat * 6 multiplier = 30s)
+const OFFLINE_THRESHOLD_MS = 30 * 1000;
 
 /**
  * Compute agent-level metrics from registry data

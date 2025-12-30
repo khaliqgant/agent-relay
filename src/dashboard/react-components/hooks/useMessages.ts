@@ -44,11 +44,25 @@ export function useMessages({
   const [sendError, setSendError] = useState<string | null>(null);
 
   // Filter messages by current channel
+  // Only exclude reply-chain replies (where thread is another message's ID)
+  // Keep topic thread messages (where thread is a topic name, not a message ID)
   const filteredMessages = useMemo(() => {
+    // Build set of message IDs for efficient lookup
+    const messageIds = new Set(messages.map((m) => m.id));
+
+    // Filter out reply-chain replies (thread points to existing message ID)
+    // Keep topic thread messages (thread is a name, not a message ID)
+    const mainViewMessages = messages.filter((m) => {
+      if (!m.thread) return true; // No thread - show it
+      // If thread is a message ID, it's a reply - hide it from main view
+      // If thread is a topic name, show it
+      return !messageIds.has(m.thread);
+    });
+
     if (currentChannel === 'general') {
-      return messages;
+      return mainViewMessages;
     }
-    return messages.filter(
+    return mainViewMessages.filter(
       (m) => m.from === currentChannel || m.to === currentChannel
     );
   }, [messages, currentChannel]);

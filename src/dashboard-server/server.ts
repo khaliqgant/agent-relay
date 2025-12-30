@@ -40,6 +40,7 @@ interface Message {
   id: string; // unique-ish id
   thread?: string;
   isBroadcast?: boolean;
+  status?: string;
 }
 
 interface SessionInfo {
@@ -175,6 +176,11 @@ export async function startDashboard(
   wssBridge.on('error', (err) => {
     console.error('[dashboard] Bridge WebSocket server error:', err);
   });
+
+  wssLogs.on('error', (err) => {
+    console.error('[dashboard] Logs WebSocket server error:', err);
+  });
+
   if (storage) {
     await storage.init();
   }
@@ -311,12 +317,37 @@ export async function startDashboard(
   // Start bridge client connection (non-blocking)
   connectBridgeClient().catch(() => {});
 
+  // Helper to check if an agent is online (seen within heartbeat timeout window)
+  // Uses 30 second threshold to align with heartbeat timeout (5s * 6 multiplier)
+  const isAgentOnline = (agentName: string): boolean => {
+    if (agentName === '*') return true; // Broadcast always allowed
+
+    const agentsPath = path.join(teamDir, 'agents.json');
+    if (!fs.existsSync(agentsPath)) return false;
+
+    try {
+      const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+      const agent = data.agents?.find((a: { name: string }) => a.name === agentName);
+      if (!agent || !agent.lastSeen) return false;
+
+      const thirtySecondsAgo = Date.now() - 30 * 1000;
+      return new Date(agent.lastSeen).getTime() > thirtySecondsAgo;
+    } catch {
+      return false;
+    }
+  };
+
   // API endpoint to send messages
   app.post('/api/send', async (req, res) => {
     const { to, message, thread } = req.body;
 
     if (!to || !message) {
       return res.status(400).json({ error: 'Missing "to" or "message" field' });
+    }
+
+    // Fail fast if target agent is offline (except broadcasts)
+    if (to !== '*' && !isAgentOnline(to)) {
+      return res.status(404).json({ error: `Agent "${to}" is not online` });
     }
 
     if (!relayClient || relayClient.state !== 'READY') {
@@ -458,6 +489,7 @@ export async function startDashboard(
       thread: row.thread,
       isBroadcast: row.is_broadcast,
       replyCount: row.replyCount,
+      status: row.status,
     }));
 
   const getMessages = async (agents: any[]): Promise<Message[]> => {
@@ -588,7 +620,7 @@ export async function startDashboard(
     });
 
     // Read processing state from daemon
-    const processingStatePath = path.join(dataDir, 'processing-state.json');
+    const processingStatePath = path.join(teamDir, 'processing-state.json');
     if (fs.existsSync(processingStatePath)) {
       try {
         const processingData = JSON.parse(fs.readFileSync(processingStatePath, 'utf-8'));
@@ -627,9 +659,11 @@ export async function startDashboard(
 
     // Filter agents:
     // 1. Exclude "Dashboard" (internal agent, not a real team member)
-    // 2. Exclude offline agents (no lastSeen or lastSeen > 5 minutes ago)
+    // 2. Exclude offline agents (no lastSeen or lastSeen > threshold)
     const now = Date.now();
-    const OFFLINE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+    // 30 seconds - aligns with heartbeat timeout (5s heartbeat * 6 multiplier = 30s)
+    // This ensures agents disappear quickly after they stop responding to heartbeats
+    const OFFLINE_THRESHOLD_MS = 30 * 1000;
     const filteredAgents = Array.from(agentsMap.values()).filter(agent => {
       // Exclude Dashboard
       if (agent.name === 'Dashboard') return false;
@@ -710,12 +744,12 @@ export async function startDashboard(
                 try {
                   const agentsData = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
                   if (agentsData.agents && Array.isArray(agentsData.agents)) {
-                    // Filter to only show online agents (seen in last 5 minutes)
-                    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+                    // Filter to only show online agents (seen within 30 seconds - aligns with heartbeat timeout)
+                    const thirtySecondsAgo = Date.now() - 30 * 1000;
                     project.agents = agentsData.agents
                       .filter((a: { lastSeen?: string }) => {
                         if (!a.lastSeen) return false;
-                        return new Date(a.lastSeen).getTime() > fiveMinutesAgo;
+                        return new Date(a.lastSeen).getTime() > thirtySecondsAgo;
                       })
                       .map((a: { name: string; cli?: string; lastSeen?: string }) => ({
                         name: a.name,
@@ -836,20 +870,70 @@ export async function startDashboard(
     });
   });
 
+  // Track alive status for ping/pong keepalive on log connections
+  const logClientAlive = new WeakMap<WebSocket, boolean>();
+
+  // Ping interval for log WebSocket connections (30 seconds)
+  // This prevents TCP/proxy timeouts from killing idle connections
+  const LOG_PING_INTERVAL_MS = 30000;
+  const logPingInterval = setInterval(() => {
+    wssLogs.clients.forEach((ws) => {
+      if (logClientAlive.get(ws) === false) {
+        // Client didn't respond to last ping - close gracefully
+        console.log('[dashboard] Logs WebSocket client unresponsive, closing gracefully');
+        ws.close(1000, 'unresponsive');
+        return;
+      }
+      // Mark as not alive until we get a pong
+      logClientAlive.set(ws, false);
+      ws.ping();
+    });
+  }, LOG_PING_INTERVAL_MS);
+
+  // Clean up ping interval on server close
+  wssLogs.on('close', () => {
+    clearInterval(logPingInterval);
+  });
+
   // Handle logs WebSocket connections for live log streaming
   wssLogs.on('connection', (ws, req) => {
     console.log('[dashboard] Logs WebSocket client connected');
     const clientSubscriptions = new Set<string>();
 
+    // Mark client as alive initially
+    logClientAlive.set(ws, true);
+
+    // Handle pong responses (keep connection alive)
+    ws.on('pong', () => {
+      logClientAlive.set(ws, true);
+    });
+
+    // Helper to check if agent is daemon-connected (from agents.json)
+    const isDaemonConnected = (agentName: string): boolean => {
+      const agentsPath = path.join(teamDir, 'agents.json');
+      if (!fs.existsSync(agentsPath)) return false;
+      try {
+        const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+        return data.agents?.some((a: { name: string }) => a.name === agentName) ?? false;
+      } catch {
+        return false;
+      }
+    };
+
     // Helper to subscribe to an agent
     const subscribeToAgent = (agentName: string) => {
-      // Check if agent exists
-      if (!spawner?.hasWorker(agentName)) {
+      const isSpawned = spawner?.hasWorker(agentName) ?? false;
+      const isDaemon = isDaemonConnected(agentName);
+
+      // Check if agent exists (either spawned or daemon-connected)
+      if (!isSpawned && !isDaemon) {
         ws.send(JSON.stringify({
           type: 'error',
           agent: agentName,
           error: `Agent ${agentName} not found`,
         }));
+        // Close with custom code 4404 to signal "agent not found" - client should not reconnect
+        ws.close(4404, 'Agent not found');
         return false;
       }
 
@@ -860,15 +944,24 @@ export async function startDashboard(
       }
       logSubscriptions.get(agentName)!.add(ws);
 
-      console.log(`[dashboard] Client subscribed to logs for: ${agentName}`);
+      console.log(`[dashboard] Client subscribed to logs for: ${agentName} (spawned: ${isSpawned}, daemon: ${isDaemon})`);
 
-      // Send initial log history
-      const lines = spawner.getWorkerOutput(agentName, 200);
-      ws.send(JSON.stringify({
-        type: 'history',
-        agent: agentName,
-        lines: lines || [],
-      }));
+      if (isSpawned && spawner) {
+        // Send initial log history for spawned agents
+        const lines = spawner.getWorkerOutput(agentName, 200);
+        ws.send(JSON.stringify({
+          type: 'history',
+          agent: agentName,
+          lines: lines || [],
+        }));
+      } else {
+        // For daemon-connected agents, explain that PTY output isn't available
+        ws.send(JSON.stringify({
+          type: 'history',
+          agent: agentName,
+          lines: [`[${agentName} is a daemon-connected agent - PTY output not available. Showing relay messages only.]`],
+        }));
+      }
 
       ws.send(JSON.stringify({
         type: 'subscribed',
@@ -917,12 +1010,13 @@ export async function startDashboard(
       console.error('[dashboard] Logs WebSocket client error:', err);
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
       // Clean up subscriptions on disconnect
       for (const agentName of clientSubscriptions) {
         logSubscriptions.get(agentName)?.delete(ws);
       }
-      console.log('[dashboard] Logs WebSocket client disconnected');
+      const reasonStr = reason?.toString() || 'no reason';
+      console.log(`[dashboard] Logs WebSocket client disconnected (code: ${code}, reason: ${reasonStr})`);
     });
   });
 
@@ -1462,7 +1556,7 @@ export async function startDashboard(
 
   /**
    * POST /api/spawn - Spawn a new agent
-   * Body: { name: string, cli?: string, task?: string, team?: string }
+   * Body: { name: string, cli?: string, task?: string, team?: string, shadowMode?, shadowAgent?, shadowOf?, shadowTriggers?, shadowSpeakOn? }
    */
   app.post('/api/spawn', async (req, res) => {
     if (!spawner) {
@@ -1472,7 +1566,17 @@ export async function startDashboard(
       });
     }
 
-    const { name, cli = 'claude', task = '', team } = req.body;
+    const {
+      name,
+      cli = 'claude',
+      task = '',
+      team,
+      shadowMode,
+      shadowAgent,
+      shadowOf,
+      shadowTriggers,
+      shadowSpeakOn,
+    } = req.body;
 
     if (!name || typeof name !== 'string') {
       return res.status(400).json({
@@ -1487,6 +1591,11 @@ export async function startDashboard(
         cli,
         task,
         team: team || undefined, // Optional team name
+        shadowMode,
+        shadowAgent,
+        shadowOf,
+        shadowTriggers,
+        shadowSpeakOn,
       };
       const result = await spawner.spawn(request);
 
@@ -1573,7 +1682,7 @@ export async function startDashboard(
       if (fs.existsSync(dataDir)) {
           console.log(`Watching ${dataDir} for changes...`);
           fs.watch(dataDir, { recursive: true }, (eventType, filename) => {
-              if (filename && (filename.endsWith('inbox.md') || filename.endsWith('team.json') || filename.endsWith('agents.json'))) {
+              if (filename && (filename.endsWith('inbox.md') || filename.endsWith('team.json') || filename.endsWith('agents.json') || filename.endsWith('processing-state.json'))) {
                   // Debounce
                   if (fsWait) return;
                   fsWait = setTimeout(() => {

@@ -82,10 +82,14 @@ export class Router {
   /** Default timeout for processing indicator (30 seconds) */
   private static readonly PROCESSING_TIMEOUT_MS = 30_000;
 
-  constructor(options: { storage?: StorageAdapter; delivery?: Partial<DeliveryReliabilityOptions>; registry?: AgentRegistry } = {}) {
+  /** Callback when processing state changes (for real-time dashboard updates) */
+  private onProcessingStateChange?: () => void;
+
+  constructor(options: { storage?: StorageAdapter; delivery?: Partial<DeliveryReliabilityOptions>; registry?: AgentRegistry; onProcessingStateChange?: () => void } = {}) {
     this.storage = options.storage;
     this.deliveryOptions = { ...DEFAULT_DELIVERY_OPTIONS, ...options.delivery };
     this.registry = options.registry;
+    this.onProcessingStateChange = options.onProcessingStateChange;
   }
 
   /**
@@ -581,6 +585,7 @@ export class Router {
       timer,
     });
     console.log(`[router] ${agentName} started processing (message: ${messageId})`);
+    this.onProcessingStateChange?.();
   }
 
   /**
@@ -594,6 +599,7 @@ export class Router {
       }
       this.processingAgents.delete(agentName);
       console.log(`[router] ${agentName} finished processing`);
+      this.onProcessingStateChange?.();
     }
   }
 

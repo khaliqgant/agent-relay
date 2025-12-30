@@ -5,7 +5,7 @@
  * Supports different agent types (claude, codex, etc.) and naming conventions.
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { getAgentColor, getAgentInitials } from '../lib/colors';
 
 export type SpeakOnTrigger = 'SESSION_END' | 'CODE_WRITTEN' | 'REVIEW_REQUEST' | 'EXPLICIT_ASK' | 'ALL_MESSAGES';
@@ -15,8 +15,17 @@ export interface SpawnConfig {
   command: string;
   cwd?: string;
   team?: string;
+  shadowMode?: 'subagent' | 'process';
   shadowOf?: string;
+  shadowAgent?: string;
+  shadowTriggers?: SpeakOnTrigger[];
   shadowSpeakOn?: SpeakOnTrigger[];
+}
+
+function deriveShadowMode(command: string): 'subagent' | 'process' {
+  const base = command.trim().split(' ')[0].toLowerCase();
+  if (base.startsWith('claude') || base === 'codex' || base === 'opencode') return 'subagent';
+  return 'process';
 }
 
 export interface SpawnModalProps {
@@ -52,17 +61,6 @@ const AGENT_TEMPLATES = [
   },
 ];
 
-const NAME_PREFIXES = [
-  'frontend',
-  'backend',
-  'lead',
-  'test',
-  'docs',
-  'review',
-  'deploy',
-  'data',
-];
-
 export function SpawnModal({
   isOpen,
   onClose,
@@ -78,9 +76,12 @@ export function SpawnModal({
   const [team, setTeam] = useState('');
   const [isShadow, setIsShadow] = useState(false);
   const [shadowOf, setShadowOf] = useState('');
+  const [shadowAgent, setShadowAgent] = useState('');
   const [shadowSpeakOn, setShadowSpeakOn] = useState<SpeakOnTrigger[]>(['EXPLICIT_ASK']);
   const [localError, setLocalError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const effectiveCommand = selectedTemplate.id === 'custom' ? customCommand : selectedTemplate.command;
+  const shadowMode = useMemo(() => deriveShadowMode(effectiveCommand), [effectiveCommand]);
 
   const SPEAK_ON_OPTIONS: { value: SpeakOnTrigger; label: string; description: string }[] = [
     { value: 'EXPLICIT_ASK', label: 'Explicit Ask', description: 'When directly asked' },
@@ -108,6 +109,7 @@ export function SpawnModal({
       setTeam('');
       setIsShadow(false);
       setShadowOf('');
+      setShadowAgent('');
       setShadowSpeakOn(['EXPLICIT_ASK']);
       setLocalError(null);
       setTimeout(() => nameInputRef.current?.focus(), 100);
@@ -140,7 +142,7 @@ export function SpawnModal({
       return;
     }
 
-    const command = selectedTemplate.id === 'custom' ? customCommand : selectedTemplate.command;
+    const command = effectiveCommand;
     if (!command.trim()) {
       setLocalError('Command is required');
       return;
@@ -157,7 +159,10 @@ export function SpawnModal({
       command: command.trim(),
       cwd: cwd.trim() || undefined,
       team: team.trim() || undefined,
+      shadowMode: shadowMode,
       shadowOf: isShadow ? shadowOf : undefined,
+      shadowAgent: shadowAgent.trim() || undefined,
+      shadowTriggers: isShadow ? shadowSpeakOn : undefined,
       shadowSpeakOn: isShadow ? shadowSpeakOn : undefined,
     });
 
@@ -251,18 +256,22 @@ export function SpawnModal({
                 disabled={isSpawning}
               />
             </div>
-            <div className="flex gap-1.5 mt-2">
-              {NAME_PREFIXES.slice(0, 4).map((prefix) => (
-                <button
-                  key={prefix}
-                  type="button"
-                  className="py-1 px-2 bg-bg-hover border border-border rounded text-xs text-text-secondary cursor-pointer font-sans transition-all duration-150 hover:bg-bg-active hover:text-text-primary"
-                  onClick={() => setName(`${prefix}-1`)}
-                >
-                  {prefix}-
-                </button>
-              ))}
-            </div>
+          </div>
+
+          {/* Team Assignment - moved higher for prominence */}
+          <div className="mb-5">
+            <label className="block text-sm font-semibold text-text-primary mb-2" htmlFor="agent-team">
+              Team <span className="font-normal text-text-muted">(optional)</span>
+            </label>
+            <input
+              id="agent-team"
+              type="text"
+              className="w-full py-2.5 px-3.5 border border-border rounded-md text-sm font-sans outline-none bg-transparent text-text-primary transition-colors duration-150 focus:border-accent disabled:bg-bg-hover disabled:text-text-muted placeholder:text-text-muted"
+              placeholder="e.g., frontend, backend, infra"
+              value={team}
+              onChange={(e) => setTeam(e.target.value)}
+              disabled={isSpawning}
+            />
           </div>
 
           {/* Custom Command (if custom template) */}
@@ -299,22 +308,6 @@ export function SpawnModal({
             />
           </div>
 
-          {/* Team Assignment (optional) */}
-          <div className="mb-5">
-            <label className="block text-sm font-semibold text-text-primary mb-2" htmlFor="agent-team">
-              Team <span className="font-normal text-text-muted">(optional)</span>
-            </label>
-            <input
-              id="agent-team"
-              type="text"
-              className="w-full py-2.5 px-3.5 border border-border rounded-md text-sm font-sans outline-none bg-transparent text-text-primary transition-colors duration-150 focus:border-accent disabled:bg-bg-hover disabled:text-text-muted placeholder:text-text-muted"
-              placeholder="e.g., frontend, backend, infra"
-              value={team}
-              onChange={(e) => setTeam(e.target.value)}
-              disabled={isSpawning}
-            />
-          </div>
-
           {/* Shadow Agent Configuration */}
           <div className="mb-5 p-4 border border-border rounded-lg bg-bg-hover/50">
             <div className="flex items-center justify-between mb-3">
@@ -322,7 +315,9 @@ export function SpawnModal({
                 <label className="block text-sm font-semibold text-text-primary">
                   Shadow Mode
                 </label>
-                <span className="text-xs text-text-muted">Monitor another agent's messages</span>
+                <span className="text-xs text-text-muted">
+                  Shadow execution: {shadowMode === 'subagent' ? 'Subagent (in-process)' : 'Process (separate)'}
+                </span>
               </div>
               <button
                 type="button"
@@ -364,6 +359,22 @@ export function SpawnModal({
                       </option>
                     ))}
                   </select>
+                </div>
+
+                {/* Shadow Agent Profile (optional) */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-text-secondary mb-2" htmlFor="shadow-agent">
+                    Shadow Agent Profile <span className="font-normal text-text-muted">(optional)</span>
+                  </label>
+                  <input
+                    id="shadow-agent"
+                    type="text"
+                    className="w-full py-2.5 px-3.5 border border-border rounded-md text-sm font-sans outline-none bg-bg-primary text-text-primary transition-colors duration-150 focus:border-accent disabled:bg-bg-hover disabled:text-text-muted placeholder:text-text-muted"
+                    placeholder="e.g., shadow-reviewer"
+                    value={shadowAgent}
+                    onChange={(e) => setShadowAgent(e.target.value)}
+                    disabled={isSpawning}
+                  />
                 </div>
 
                 {/* Speak On Triggers */}

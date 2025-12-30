@@ -95,29 +95,29 @@ export function SettingsPanel({
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] animate-fade-in"
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000] animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="bg-[var(--color-bg-secondary)] rounded-xl w-[500px] max-w-[90vw] max-h-[80vh] flex flex-col shadow-[0_16px_70px_rgba(0,0,0,0.5)] animate-slide-up"
+        className="bg-bg-secondary rounded-xl w-[500px] max-w-[90vw] max-h-[80vh] flex flex-col shadow-modal animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between py-5 px-6 border-b border-[var(--color-border)]">
-          <h2 className="m-0 text-lg font-semibold text-[var(--color-text-primary)]">Settings</h2>
+        <div className="flex items-center justify-between py-5 px-6 border-b border-border">
+          <h2 className="m-0 text-lg font-semibold text-text-primary">Settings</h2>
           <button
-            className="flex items-center justify-center w-8 h-8 bg-transparent border-none rounded-md text-[var(--color-text-secondary)] cursor-pointer transition-all duration-150 hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
+            className="flex items-center justify-center w-8 h-8 bg-transparent border-none rounded-md text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-hover hover:text-text-primary"
             onClick={onClose}
           >
             <CloseIcon />
           </button>
         </div>
 
-        <div className="flex gap-1 py-3 px-6 border-b border-[var(--color-border)] bg-[var(--color-bg-tertiary)]">
+        <div className="flex gap-1 py-3 px-6 border-b border-border bg-bg-tertiary">
           <button
             className={`flex items-center gap-1.5 py-2 px-3.5 bg-transparent border-none rounded-md text-[13px] cursor-pointer font-[inherit] transition-all duration-150 ${
               activeTab === 'appearance'
-                ? 'bg-[var(--color-accent)] text-white'
-                : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
+                ? 'bg-accent text-white'
+                : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
             }`}
             onClick={() => setActiveTab('appearance')}
           >
@@ -127,8 +127,8 @@ export function SettingsPanel({
           <button
             className={`flex items-center gap-1.5 py-2 px-3.5 bg-transparent border-none rounded-md text-[13px] cursor-pointer font-[inherit] transition-all duration-150 ${
               activeTab === 'notifications'
-                ? 'bg-[var(--color-accent)] text-white'
-                : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
+                ? 'bg-accent text-white'
+                : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
             }`}
             onClick={() => setActiveTab('notifications')}
           >
@@ -138,8 +138,8 @@ export function SettingsPanel({
           <button
             className={`flex items-center gap-1.5 py-2 px-3.5 bg-transparent border-none rounded-md text-[13px] cursor-pointer font-[inherit] transition-all duration-150 ${
               activeTab === 'connection'
-                ? 'bg-[var(--color-accent)] text-white'
-                : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
+                ? 'bg-accent text-white'
+                : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
             }`}
             onClick={() => setActiveTab('connection')}
           >
@@ -152,15 +152,15 @@ export function SettingsPanel({
           {activeTab === 'appearance' && (
             <div className="flex flex-col gap-6">
               <div className="flex flex-col gap-3">
-                <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-[0.5px]">Theme</label>
+                <label className="text-xs font-semibold text-text-muted uppercase tracking-[0.5px]">Theme</label>
                 <div className="flex gap-2">
                   {(['light', 'dark', 'system'] as const).map((theme) => (
                     <button
                       key={theme}
                       className={`flex flex-col items-center gap-1.5 py-4 px-5 border-2 rounded-lg text-xs cursor-pointer font-[inherit] transition-all duration-150 flex-1 ${
                         settings.theme === theme
-                          ? 'bg-[var(--color-accent-light)] border-[var(--color-accent)] text-[var(--color-accent)]'
-                          : 'bg-[var(--color-bg-hover)] border-transparent text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-active)]'
+                          ? 'bg-accent-light border-accent text-accent'
+                          : 'bg-bg-hover border-transparent text-text-secondary hover:bg-bg-active'
                       }`}
                       onClick={() => updateTheme(theme)}
                     >
@@ -174,7 +174,7 @@ export function SettingsPanel({
               </div>
 
               <div className="flex flex-col gap-3">
-                <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-[0.5px]">Display Options</label>
+                <label className="text-xs font-semibold text-text-muted uppercase tracking-[0.5px]">Display Options</label>
                 <ToggleOption
                   label="Compact mode"
                   description="Show more content in less space"
@@ -206,7 +206,7 @@ export function SettingsPanel({
           {activeTab === 'notifications' && (
             <div className="flex flex-col gap-6">
               <div className="flex flex-col gap-3">
-                <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-[0.5px]">Notification Preferences</label>
+                <label className="text-xs font-semibold text-text-muted uppercase tracking-[0.5px]">Notification Preferences</label>
                 <ToggleOption
                   label="Enable notifications"
                   description="Receive alerts for new messages"
@@ -241,7 +241,7 @@ export function SettingsPanel({
           {activeTab === 'connection' && (
             <div className="flex flex-col gap-6">
               <div className="flex flex-col gap-3">
-                <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-[0.5px]">Connection Settings</label>
+                <label className="text-xs font-semibold text-text-muted uppercase tracking-[0.5px]">Connection Settings</label>
                 <ToggleOption
                   label="Auto-reconnect"
                   description="Automatically reconnect on disconnect"
@@ -249,11 +249,11 @@ export function SettingsPanel({
                   onChange={(v) => updateSetting('connection', 'autoReconnect', v)}
                 />
 
-                <div className="flex flex-col gap-1.5 p-3 bg-[var(--color-bg-hover)] rounded-lg">
-                  <label className="text-sm font-medium text-[var(--color-text-primary)]">Reconnect delay (ms)</label>
+                <div className="flex flex-col gap-1.5 p-3 bg-bg-hover rounded-lg">
+                  <label className="text-sm font-medium text-text-primary">Reconnect delay (ms)</label>
                   <input
                     type="number"
-                    className="py-2 px-3 border border-[var(--color-border)] rounded-md text-sm font-[inherit] outline-none transition-colors duration-150 bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] disabled:bg-[var(--color-bg-hover)] disabled:text-[var(--color-text-muted)]"
+                    className="py-2 px-3 border border-border rounded-md text-sm font-[inherit] outline-none transition-colors duration-150 bg-bg-tertiary text-text-primary focus:border-accent disabled:bg-bg-hover disabled:text-text-muted"
                     value={settings.connection.reconnectDelay}
                     onChange={(e) =>
                       updateSetting('connection', 'reconnectDelay', parseInt(e.target.value) || 3000)
@@ -265,11 +265,11 @@ export function SettingsPanel({
                   />
                 </div>
 
-                <div className="flex flex-col gap-1.5 p-3 bg-[var(--color-bg-hover)] rounded-lg">
-                  <label className="text-sm font-medium text-[var(--color-text-primary)]">Keep-alive interval (ms)</label>
+                <div className="flex flex-col gap-1.5 p-3 bg-bg-hover rounded-lg">
+                  <label className="text-sm font-medium text-text-primary">Keep-alive interval (ms)</label>
                   <input
                     type="number"
-                    className="py-2 px-3 border border-[var(--color-border)] rounded-md text-sm font-[inherit] outline-none transition-colors duration-150 bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] disabled:bg-[var(--color-bg-hover)] disabled:text-[var(--color-text-muted)]"
+                    className="py-2 px-3 border border-border rounded-md text-sm font-[inherit] outline-none transition-colors duration-150 bg-bg-tertiary text-text-primary focus:border-accent disabled:bg-bg-hover disabled:text-text-muted"
                     value={settings.connection.keepAliveInterval}
                     onChange={(e) =>
                       updateSetting('connection', 'keepAliveInterval', parseInt(e.target.value) || 30000)
@@ -284,17 +284,17 @@ export function SettingsPanel({
           )}
         </div>
 
-        <div className="flex items-center justify-between py-4 px-6 border-t border-[var(--color-border)]">
+        <div className="flex items-center justify-between py-4 px-6 border-t border-border">
           {onResetSettings && (
             <button
-              className="py-2 px-4 bg-transparent border border-[var(--color-border)] rounded-md text-[13px] text-[var(--color-text-secondary)] cursor-pointer font-[inherit] transition-all duration-150 hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
+              className="py-2 px-4 bg-transparent border border-border rounded-md text-[13px] text-text-secondary cursor-pointer font-[inherit] transition-all duration-150 hover:bg-bg-hover hover:text-text-primary"
               onClick={onResetSettings}
             >
               Reset to defaults
             </button>
           )}
           <button
-            className="py-2 px-5 bg-[var(--color-accent)] border-none rounded-md text-[13px] font-medium text-white cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--color-accent-hover)]"
+            className="py-2 px-5 bg-accent border-none rounded-md text-[13px] font-medium text-white cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-accent-hover"
             onClick={onClose}
           >
             Done
@@ -315,14 +315,14 @@ interface ToggleOptionProps {
 
 function ToggleOption({ label, description, checked, onChange, disabled }: ToggleOptionProps) {
   return (
-    <div className={`flex items-center justify-between p-3 bg-[var(--color-bg-hover)] rounded-lg ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`flex items-center justify-between p-3 bg-bg-hover rounded-lg ${disabled ? 'opacity-50' : ''}`}>
       <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
-        <span className="text-xs text-[var(--color-text-muted)]">{description}</span>
+        <span className="text-sm font-medium text-text-primary">{label}</span>
+        <span className="text-xs text-text-muted">{description}</span>
       </div>
       <button
         className={`w-11 h-6 border-none rounded-xl cursor-pointer relative transition-colors duration-200 ${
-          checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border-dark)]'
+          checked ? 'bg-accent' : 'bg-border-medium'
         } ${disabled ? 'cursor-not-allowed' : ''}`}
         onClick={() => !disabled && onChange(!checked)}
         disabled={disabled}

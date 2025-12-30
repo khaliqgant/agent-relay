@@ -73,6 +73,10 @@ const PROMPTISH_LINE = /^[\s]*[>$%#➜›»][\s]*$/;
 const RELAY_INJECTION_PREFIX = /^\s*Relay message from /;
 const MAX_INLINE_CONTINUATION_LINES = 30;
 
+// Spawn/release command patterns - these should NOT be parsed as relay messages
+const SPAWN_COMMAND_PATTERN = /->relay:spawn\s+\S+/i;
+const RELEASE_COMMAND_PATTERN = /->relay:release\s+\S+/i;
+
 // Claude extended thinking block markers - skip content inside these
 const THINKING_START = /<antml:thinking>/;
 const THINKING_END = /<\/thinking>/;
@@ -125,6 +129,10 @@ function buildEscapePattern(prefix: string, thinkingPrefix: string): RegExp {
 // eslint-disable-next-line no-control-regex
 const ANSI_PATTERN = /\x1b\[[0-9;?]*[a-zA-Z]|\x1b\].*?(?:\x07|\x1b\\)|\r/g;
 
+// Pattern for orphaned CSI sequences that lost their escape byte
+// These look like [?25h, [?2026l, [0m, etc. at the start of content
+const ORPHANED_CSI_PATTERN = /^\s*(\[\??\d*[A-Za-z])+\s*/g;
+
 /**
  * Parse a target string that may contain cross-project syntax.
  * Supports: "agent" (local) or "project:agent" (cross-project)
@@ -150,9 +158,13 @@ function parseTarget(target: string): { to: string; project?: string } {
 
 /**
  * Strip ANSI escape codes from a string for pattern matching.
+ * Also strips orphaned CSI sequences that may have lost their escape byte.
  */
 function stripAnsi(str: string): string {
-  return str.replace(ANSI_PATTERN, '');
+  let result = str.replace(ANSI_PATTERN, '');
+  // Strip orphaned CSI sequences at the start of the string
+  result = result.replace(ORPHANED_CSI_PATTERN, '');
+  return result;
 }
 
 export class OutputParser {
@@ -799,7 +811,7 @@ export class OutputParser {
       // Auto-close on double blank line (agent forgot >>>)
       // Only if we have actual content to send
       if (consecutiveBlankLines >= 2 && this.fencedInlineBuffer.trim().length > 0) {
-        const body = this.fencedInlineBuffer.trim();
+        const body = stripAnsi(this.fencedInlineBuffer.trim());
         const command: ParsedCommand = {
           to: this.fencedInlineTarget,
           kind: this.fencedInlineKind,
@@ -835,7 +847,7 @@ export class OutputParser {
       if (this.inlineRelayPattern.test(stripped) || this.fencedRelayPattern.test(stripped)) {
         // Auto-close and send the incomplete fenced block (if it has content)
         if (this.fencedInlineBuffer.trim().length > 0) {
-          const body = this.fencedInlineBuffer.trim();
+          const body = stripAnsi(this.fencedInlineBuffer.trim());
           const command: ParsedCommand = {
             to: this.fencedInlineTarget,
             kind: this.fencedInlineKind,
@@ -882,7 +894,7 @@ export class OutputParser {
         }
 
         // Complete the fenced inline command
-        const body = this.fencedInlineBuffer.trim();
+        const body = stripAnsi(this.fencedInlineBuffer.trim());
         this.fencedInlineRaw.push(line);
 
         const command: ParsedCommand = {
