@@ -85,7 +85,7 @@ usageRouter.get('/summary', async (req: Request, res: Response) => {
     const usage = await getUserUsage(userId);
 
     // Calculate warnings (when at 80%+ of limit)
-    const warnings = [];
+    const warnings: Array<{ resource: string; message: string; current: number; limit: number }> = [];
 
     const checkLimit = (
       resource: string,

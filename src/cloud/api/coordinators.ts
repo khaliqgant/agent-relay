@@ -7,6 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireAuth } from './auth.js';
+import { checkCoordinatorAccess } from './middleware/planLimits.js';
 import { db, CoordinatorAgentConfig } from '../db/index.js';
 import { getCoordinatorService } from '../services/coordinator.js';
 
@@ -14,6 +15,15 @@ export const coordinatorsRouter = Router();
 
 // All routes require authentication
 coordinatorsRouter.use(requireAuth);
+
+// Coordinator modification routes require Pro plan or higher
+const coordinatorWriteRoutes = [
+  '/:groupId/coordinator/enable',
+  '/:groupId/coordinator/disable',
+];
+coordinatorWriteRoutes.forEach(route => {
+  coordinatorsRouter.use(route, checkCoordinatorAccess);
+});
 
 /**
  * GET /api/project-groups/:groupId/coordinator
@@ -112,17 +122,7 @@ coordinatorsRouter.post('/:groupId/coordinator/enable', async (req: Request, res
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    // Check user plan (coordinators may be a premium feature)
-    const user = await db.users.findById(userId);
-    const hasPremium = user?.plan === 'team' || user?.plan === 'enterprise';
-
-    // For now, allow on free tier but could restrict later
-    // if (!hasPremium) {
-    //   return res.status(402).json({
-    //     error: 'Coordinator agents require Team or Enterprise plan',
-    //     upgrade: '/settings/billing',
-    //   });
-    // }
+    // Plan check is handled by checkCoordinatorAccess middleware
 
     // Get repositories in the group
     const repositories = await db.repositories.findByProjectGroupId(groupId);
