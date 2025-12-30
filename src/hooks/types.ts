@@ -300,6 +300,26 @@ export type PatternHandler = (
 ) => Promise<HookResult | void> | HookResult | void;
 
 /**
+ * Memory configuration for hooks
+ */
+export interface HooksMemoryConfig {
+  /** Memory adapter type: 'inmemory', 'supermemory', etc. */
+  type?: string;
+  /** API key for external memory services */
+  apiKey?: string;
+  /** Custom API endpoint */
+  endpoint?: string;
+  /** Whether to inject memories on session start */
+  injectOnStart?: boolean;
+  /** Maximum memories to inject on start */
+  maxStartMemories?: number;
+  /** Whether to prompt for memory save on session end */
+  promptOnEnd?: boolean;
+  /** Whether to auto-save detected learnings */
+  autoSave?: boolean;
+}
+
+/**
  * Full hooks configuration
  */
 export interface HooksConfig {
@@ -311,4 +331,6 @@ export interface HooksConfig {
   idleTimeout?: number;
   /** Whether to enable trajectory tracking hooks */
   trajectoryTracking?: boolean;
+  /** Memory system configuration */
+  memory?: HooksMemoryConfig | boolean;
 }

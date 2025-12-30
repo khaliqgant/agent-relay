@@ -17,6 +17,7 @@ import type {
   LifecycleHookEvent,
   PatternHandler,
   HooksConfig,
+  HooksMemoryConfig,
   SessionStartContext,
   SessionEndContext,
   OutputContext,
@@ -178,6 +179,66 @@ export class HookRegistry {
     if (config.idleTimeout !== undefined) {
       this.idleTimeout = config.idleTimeout;
     }
+
+    // Register memory hooks if configured
+    if (config.memory) {
+      this.registerMemoryHooksFromConfig(config.memory);
+    }
+  }
+
+  /**
+   * Register memory hooks from configuration
+   */
+  private async registerMemoryHooksFromConfig(
+    config: HooksMemoryConfig | boolean
+  ): Promise<void> {
+    try {
+      // Dynamic import to avoid circular dependencies
+      const { createMemoryHooks } = await import('../memory/memory-hooks.js');
+
+      // Handle boolean config (true = use defaults)
+      if (config === true || config === false) {
+        if (!config) return; // false means disabled
+        const hooks = createMemoryHooks({
+          agentId: this.agentId,
+          projectId: this.projectId,
+        });
+        this.registerLifecycleHooks(hooks);
+        return;
+      }
+
+      // Handle object config
+      const hooks = createMemoryHooks({
+        config: {
+          type: config.type,
+          apiKey: config.apiKey,
+          endpoint: config.endpoint,
+        },
+        agentId: this.agentId,
+        projectId: this.projectId,
+        injectOnStart: config.injectOnStart,
+        maxStartMemories: config.maxStartMemories,
+        promptOnEnd: config.promptOnEnd,
+        autoSave: config.autoSave,
+      });
+
+      this.registerLifecycleHooks(hooks);
+    } catch (error) {
+      console.error('[hooks] Failed to register memory hooks:', error);
+    }
+  }
+
+  /**
+   * Register memory hooks with custom options
+   */
+  async registerMemoryHooks(options?: {
+    type?: string;
+    apiKey?: string;
+    injectOnStart?: boolean;
+    promptOnEnd?: boolean;
+    autoSave?: boolean;
+  }): Promise<void> {
+    await this.registerMemoryHooksFromConfig(options ?? {});
   }
 
   /**
