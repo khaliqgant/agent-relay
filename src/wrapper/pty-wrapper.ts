@@ -16,6 +16,7 @@ import type { SendPayload, SendMeta, SpeakOnTrigger } from '../protocol/types.js
 import { getProjectPaths } from '../utils/project-namespace.js';
 import { getTrailEnvVars } from '../trajectory/integration.js';
 import { HookRegistry, createTrajectoryHooks, type LifecycleHooks } from '../hooks/index.js';
+import { getContinuityManager, type ContinuityManager } from '../continuity/index.js';
 
 /** Maximum lines to keep in output buffer */
 const MAX_BUFFER_LINES = 10000;
@@ -78,6 +79,8 @@ export class PtyWrapper extends EventEmitter {
   private hasAcceptedPrompt = false;
   private hookRegistry: HookRegistry;
   private sessionStartTime = Date.now();
+  private continuity?: ContinuityManager;
+  private agentId?: string;
 
   constructor(config: PtyWrapperConfig) {
     super();
@@ -120,6 +123,9 @@ export class PtyWrapper extends EventEmitter {
     if (config.hooks) {
       this.hookRegistry.registerLifecycleHooks(config.hooks);
     }
+
+    // Initialize continuity manager
+    this.continuity = getContinuityManager({ defaultCli: 'spawned' });
 
     // Handle incoming messages
     this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
@@ -205,6 +211,9 @@ export class PtyWrapper extends EventEmitter {
       console.error(`[pty:${this.config.name}] Session start hook error:`, err);
     });
 
+    // Initialize continuity and get agentId
+    this.initializeAgentId();
+
     // Capture output
     this.ptyProcess.onData((data: string) => {
       this.handleOutput(data);
@@ -225,6 +234,31 @@ export class PtyWrapper extends EventEmitter {
       // Process any messages that arrived while waiting
       this.processMessageQueue();
     }, 2000);
+  }
+
+  /**
+   * Initialize agent ID for continuity/resume functionality
+   */
+  private async initializeAgentId(): Promise<void> {
+    if (!this.continuity) return;
+
+    try {
+      const ledger = await this.continuity.getOrCreateLedger(
+        this.config.name,
+        'spawned'
+      );
+      this.agentId = ledger.agentId;
+      console.log(`[pty:${this.config.name}] Agent ID: ${this.agentId} (use this to resume if agent dies)`);
+    } catch (err: any) {
+      console.error(`[pty:${this.config.name}] Failed to initialize agent ID: ${err.message}`);
+    }
+  }
+
+  /**
+   * Get the current agent ID
+   */
+  getAgentId(): string | undefined {
+    return this.agentId;
   }
 
   /**

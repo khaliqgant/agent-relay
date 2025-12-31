@@ -154,6 +154,11 @@ export function AgentCard({
           ) : (
             <span className="text-xs text-text-muted truncate block">{agent.name}</span>
           )}
+          {agent.agentId && (
+            <span className="text-[10px] text-text-muted font-mono opacity-70" title="Agent ID (use to resume)">
+              ID: {agent.agentId}
+            </span>
+          )}
         </div>
       </div>
 

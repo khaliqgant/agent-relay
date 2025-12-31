@@ -45,6 +45,8 @@ export interface FileRef {
 export interface Ledger {
   /** Agent name this ledger belongs to */
   agentName: string;
+  /** Unique agent instance ID (persists across restarts for resume) */
+  agentId: string;
   /** Unique session identifier */
   sessionId: string;
   /** CLI being used (claude, codex, gemini, custom) */
@@ -89,6 +91,8 @@ export interface Handoff {
   id: string;
   /** Agent that created this handoff */
   agentName: string;
+  /** Agent instance ID that created this handoff */
+  agentId?: string;
   /** CLI used (for context) */
   cli: string;
 

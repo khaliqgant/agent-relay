@@ -194,10 +194,12 @@ export class LedgerStore {
   async create(
     agentName: string,
     cli: string,
-    sessionId: string
+    sessionId: string,
+    agentId: string
   ): Promise<Ledger> {
     const ledger: Ledger = {
       agentName,
+      agentId,
       sessionId,
       cli,
       currentTask: '',
@@ -212,5 +214,19 @@ export class LedgerStore {
 
     await this.save(agentName, ledger);
     return ledger;
+  }
+
+  /**
+   * Find a ledger by agent ID
+   */
+  async findByAgentId(agentId: string): Promise<Ledger | null> {
+    const agents = await this.listAgents();
+    for (const agentName of agents) {
+      const ledger = await this.load(agentName);
+      if (ledger && ledger.agentId === agentId) {
+        return ledger;
+      }
+    }
+    return null;
   }
 }

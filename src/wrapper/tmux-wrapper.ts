@@ -154,6 +154,7 @@ export class TmuxWrapper {
   private lastDetectedPhase?: PDEROPhase; // Track last auto-detected PDERO phase
   private continuity?: ContinuityManager; // Session continuity management
   private processedContinuityCommands: Set<string> = new Set(); // Dedup continuity commands
+  private agentId?: string; // Unique agent ID for resume functionality
 
   constructor(config: TmuxWrapperConfig) {
     this.config = {
@@ -439,6 +440,9 @@ export class TmuxWrapper {
     // Initialize trajectory tracking (auto-start if task provided)
     this.initializeTrajectory();
 
+    // Initialize continuity and get/create agentId
+    this.initializeAgentId();
+
     // Inject instructions for the agent (after a delay to let CLI initialize)
     setTimeout(() => this.injectInstructions(), 3000);
 
@@ -467,6 +471,31 @@ export class TmuxWrapper {
       // Just initialize without starting a trajectory
       await this.trajectory.initialize();
     }
+  }
+
+  /**
+   * Initialize agent ID for continuity/resume functionality
+   */
+  private async initializeAgentId(): Promise<void> {
+    if (!this.continuity) return;
+
+    try {
+      const ledger = await this.continuity.getOrCreateLedger(
+        this.config.name,
+        this.cliType
+      );
+      this.agentId = ledger.agentId;
+      this.logStderr(`Agent ID: ${this.agentId} (use this to resume if agent dies)`);
+    } catch (err: any) {
+      this.logStderr(`Failed to initialize agent ID: ${err.message}`, true);
+    }
+  }
+
+  /**
+   * Get the current agent ID
+   */
+  getAgentId(): string | undefined {
+    return this.agentId;
   }
 
   /**
