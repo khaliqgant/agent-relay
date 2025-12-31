@@ -98,8 +98,14 @@ export function MessageList({
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (autoScroll && scrollContainerRef.current) {
-      const container = scrollContainerRef.current;
-      container.scrollTop = container.scrollHeight;
+      // Use requestAnimationFrame to ensure DOM has been updated
+      // before scrolling to the new content
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          const container = scrollContainerRef.current;
+          container.scrollTop = container.scrollHeight;
+        }
+      });
     }
   }, [filteredMessages.length, autoScroll]);
 

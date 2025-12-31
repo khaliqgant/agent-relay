@@ -746,22 +746,39 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
 
   // Handle paste for clipboard images
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    // First, check clipboardData.files (more reliable for file pastes)
+    const files = e.clipboardData?.files;
+    if (files && files.length > 0) {
+      const imageFiles = Array.from(files).filter(file =>
+        file.type.startsWith('image/')
+      );
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        const dataTransfer = new DataTransfer();
+        imageFiles.forEach(f => dataTransfer.items.add(f));
+        handleFileSelect(dataTransfer.files);
+        return;
+      }
+    }
+
+    // Fall back to checking items (for screenshots and copied images)
     const items = e.clipboardData?.items;
     if (!items) return;
 
+    // Look for items that are files with image type, or have image kind
     const imageItems = Array.from(items).filter(item =>
-      item.type.startsWith('image/')
+      item.kind === 'file' && item.type.startsWith('image/')
     );
 
     if (imageItems.length > 0) {
       e.preventDefault();
-      const files = imageItems
+      const imageFiles = imageItems
         .map(item => item.getAsFile())
         .filter((f): f is File => f !== null);
 
-      if (files.length > 0) {
+      if (imageFiles.length > 0) {
         const dataTransfer = new DataTransfer();
-        files.forEach(f => dataTransfer.items.add(f));
+        imageFiles.forEach(f => dataTransfer.items.add(f));
         handleFileSelect(dataTransfer.files);
       }
     }

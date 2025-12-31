@@ -35,7 +35,10 @@ export function ThreadPanel({
 
   // Auto-scroll when new replies arrive
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Use requestAnimationFrame to ensure DOM has been updated
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
   }, [replies.length]);
 
   // Focus input when panel opens
