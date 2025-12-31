@@ -215,18 +215,30 @@ export class HandoffStore {
           case 'created':
             handoff.createdAt = new Date(value);
             break;
-          case 'trigger':
-            handoff.triggerReason = value as HandoffTrigger;
+          case 'trigger': {
+            const validTriggers: HandoffTrigger[] = ['manual', 'trajectory_complete', 'context_limit', 'auto_restart', 'crash', 'session_end'];
+            if (validTriggers.includes(value as HandoffTrigger)) {
+              handoff.triggerReason = value as HandoffTrigger;
+            }
             break;
+          }
           case 'trajectoryId':
             handoff.trajectoryId = value;
             break;
-          case 'pderoPhase':
-            handoff.pderoPhase = value as any;
+          case 'pderoPhase': {
+            const validPhases = ['plan', 'design', 'execute', 'review', 'observe'];
+            if (validPhases.includes(value)) {
+              handoff.pderoPhase = value as 'plan' | 'design' | 'execute' | 'review' | 'observe';
+            }
             break;
-          case 'confidence':
-            handoff.confidence = parseFloat(value);
+          }
+          case 'confidence': {
+            const conf = parseFloat(value);
+            if (!isNaN(conf)) {
+              handoff.confidence = Math.max(0, Math.min(1, conf));
+            }
             break;
+          }
         }
       }
 
@@ -298,7 +310,12 @@ export class HandoffStore {
 
         const ref: FileRef = { path: match[1] };
         if (match[2] && match[3]) {
-          ref.lines = [parseInt(match[2]), parseInt(match[3])];
+          const startLine = parseInt(match[2], 10);
+          const endLine = parseInt(match[3], 10);
+          // Only set lines if both are valid numbers
+          if (!isNaN(startLine) && !isNaN(endLine)) {
+            ref.lines = [startLine, endLine];
+          }
         }
         if (match[4]) {
           ref.description = match[4];
@@ -328,7 +345,10 @@ export class HandoffStore {
 
       const confidenceMatch = blockContent.match(/\*\*Confidence:\*\*\s*(\d+)%/);
       if (confidenceMatch) {
-        decision.confidence = parseInt(confidenceMatch[1]) / 100;
+        const conf = parseInt(confidenceMatch[1], 10) / 100;
+        if (!isNaN(conf)) {
+          decision.confidence = Math.max(0, Math.min(1, conf));
+        }
       }
 
       decisions.push(decision);

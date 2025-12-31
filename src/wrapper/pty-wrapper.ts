@@ -52,6 +52,8 @@ export interface PtyWrapperConfig {
   hooks?: LifecycleHooks;
   /** Enable trajectory tracking hooks (default: true if task provided) */
   trajectoryTracking?: boolean;
+  /** Resume from a previous agent ID (for crash recovery) */
+  resumeAgentId?: string;
 }
 
 export interface PtyWrapperEvents {
@@ -212,7 +214,9 @@ export class PtyWrapper extends EventEmitter {
     });
 
     // Initialize continuity and get agentId
-    this.initializeAgentId();
+    this.initializeAgentId().catch(err => {
+      console.error(`[pty:${this.config.name}] Agent ID initialization error:`, err);
+    });
 
     // Capture output
     this.ptyProcess.onData((data: string) => {
@@ -243,12 +247,28 @@ export class PtyWrapper extends EventEmitter {
     if (!this.continuity) return;
 
     try {
-      const ledger = await this.continuity.getOrCreateLedger(
-        this.config.name,
-        'spawned'
-      );
+      let ledger;
+
+      // If resuming from a previous agent ID, try to find that ledger
+      if (this.config.resumeAgentId) {
+        ledger = await this.continuity.findLedgerByAgentId(this.config.resumeAgentId);
+        if (ledger) {
+          console.log(`[pty:${this.config.name}] Resuming agent ID: ${ledger.agentId} (from previous session)`);
+        } else {
+          console.error(`[pty:${this.config.name}] Resume agent ID ${this.config.resumeAgentId} not found, creating new`);
+        }
+      }
+
+      // If not resuming or resume ID not found, get or create ledger
+      if (!ledger) {
+        ledger = await this.continuity.getOrCreateLedger(
+          this.config.name,
+          'spawned'
+        );
+        console.log(`[pty:${this.config.name}] Agent ID: ${ledger.agentId} (use this to resume if agent dies)`);
+      }
+
       this.agentId = ledger.agentId;
-      console.log(`[pty:${this.config.name}] Agent ID: ${this.agentId} (use this to resume if agent dies)`);
     } catch (err: any) {
       console.error(`[pty:${this.config.name}] Failed to initialize agent ID: ${err.message}`);
     }

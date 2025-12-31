@@ -101,6 +101,8 @@ export interface TmuxWrapperConfig {
   outputStabilityPollMs?: number;
   /** Stream output to daemon for dashboard log viewing (default: true) */
   streamLogs?: boolean;
+  /** Resume from a previous agent ID (for crash recovery) */
+  resumeAgentId?: string;
 }
 
 /**
@@ -479,12 +481,28 @@ export class TmuxWrapper {
     if (!this.continuity) return;
 
     try {
-      const ledger = await this.continuity.getOrCreateLedger(
-        this.config.name,
-        this.cliType
-      );
+      let ledger;
+
+      // If resuming from a previous agent ID, try to find that ledger
+      if (this.config.resumeAgentId) {
+        ledger = await this.continuity.findLedgerByAgentId(this.config.resumeAgentId);
+        if (ledger) {
+          this.logStderr(`Resuming agent ID: ${ledger.agentId} (from previous session)`);
+        } else {
+          this.logStderr(`Resume agent ID ${this.config.resumeAgentId} not found, creating new`, true);
+        }
+      }
+
+      // If not resuming or resume ID not found, get or create ledger
+      if (!ledger) {
+        ledger = await this.continuity.getOrCreateLedger(
+          this.config.name,
+          this.cliType
+        );
+        this.logStderr(`Agent ID: ${ledger.agentId} (use this to resume if agent dies)`);
+      }
+
       this.agentId = ledger.agentId;
-      this.logStderr(`Agent ID: ${this.agentId} (use this to resume if agent dies)`);
     } catch (err: any) {
       this.logStderr(`Failed to initialize agent ID: ${err.message}`, true);
     }
@@ -993,8 +1011,13 @@ export class TmuxWrapper {
     if (!command) return;
 
     // Create a hash for deduplication
-    const cmdHash = `${command.type}:${command.content || command.query || command.item || ''}`;
-    if (this.processedContinuityCommands.has(cmdHash)) return;
+    // For commands with content (save, handoff, uncertain), use content hash
+    // For commands without content (load, search), allow each unique call
+    const hasContent = command.content || command.query || command.item;
+    const cmdHash = hasContent
+      ? `${command.type}:${command.content || command.query || command.item}`
+      : `${command.type}:${Date.now()}`; // Allow load/search to run each time
+    if (hasContent && this.processedContinuityCommands.has(cmdHash)) return;
     this.processedContinuityCommands.add(cmdHash);
 
     // Limit dedup set size
