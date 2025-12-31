@@ -112,18 +112,80 @@ export class LedgerStore {
   }
 
   /**
-   * Acquire a lock for an agent's ledger (simple async mutex)
+   * Acquire a lock for an agent's ledger with retry logic
+   * @param agentName - Agent name to lock
+   * @param maxRetries - Maximum number of retry attempts (default: 5)
+   * @param baseDelayMs - Base delay for exponential backoff (default: 100ms)
+   * @param timeoutMs - Maximum time to wait for lock (default: 10000ms)
    */
-  private async acquireLock(agentName: string): Promise<() => void> {
+  private async acquireLock(
+    agentName: string,
+    maxRetries = 5,
+    baseDelayMs = 100,
+    timeoutMs = 10000
+  ): Promise<() => void> {
     const key = this.getFilenameForAgent(agentName);
+    const startTime = Date.now();
 
-    // Wait for any existing lock
-    const existingLock = this.locks.get(key);
-    if (existingLock) {
-      await existingLock.promise;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // Check timeout
+      if (Date.now() - startTime > timeoutMs) {
+        throw new Error(`Lock acquisition timeout for agent "${agentName}" after ${timeoutMs}ms`);
+      }
+
+      const existingLock = this.locks.get(key);
+
+      if (!existingLock) {
+        // Lock is available, acquire it
+        let release: () => void = () => {};
+        const promise = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+
+        this.locks.set(key, { promise, release });
+
+        return () => {
+          release();
+          this.locks.delete(key);
+        };
+      }
+
+      // Lock is occupied, wait with exponential backoff
+      const delay = Math.min(baseDelayMs * Math.pow(2, attempt), 2000); // Cap at 2s
+
+      try {
+        // Race between lock release and timeout
+        await Promise.race([
+          existingLock.promise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('retry')), delay)
+          ),
+        ]);
+      } catch {
+        // Timeout or retry, continue to next attempt
+      }
     }
 
-    // Create new lock
+    // Final attempt - wait for existing lock or throw
+    const existingLock = this.locks.get(key);
+    if (existingLock) {
+      const remainingTime = timeoutMs - (Date.now() - startTime);
+      if (remainingTime > 0) {
+        await Promise.race([
+          existingLock.promise,
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`Lock acquisition timeout for agent "${agentName}"`)),
+              remainingTime
+            )
+          ),
+        ]);
+      } else {
+        throw new Error(`Lock acquisition timeout for agent "${agentName}" after ${maxRetries} retries`);
+      }
+    }
+
+    // Lock should be available now
     let release: () => void = () => {};
     const promise = new Promise<void>((resolve) => {
       release = resolve;
