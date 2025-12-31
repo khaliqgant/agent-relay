@@ -22,6 +22,14 @@ import type { SendPayload, SendMeta } from '../protocol/types.js';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
 import { getTmuxPath } from '../utils/tmux-resolver.js';
+import {
+  TrajectoryIntegration,
+  getTrajectoryIntegration,
+  detectPhaseFromContent,
+  getCompactTrailInstructions,
+  getTrailEnvVars,
+  type PDEROPhase,
+} from '../trajectory/integration.js';
 
 const execAsync = promisify(exec);
 const escapeRegex = (str: string): string => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -135,6 +143,8 @@ export class TmuxWrapper {
   private receivedMessageIdOrder: string[] = [];
   private readonly MAX_RECEIVED_MESSAGES = 2000;
   private tmuxPath: string; // Resolved path to tmux binary (system or bundled)
+  private trajectory?: TrajectoryIntegration; // Trajectory tracking via trail
+  private lastDetectedPhase?: PDEROPhase; // Track last auto-detected PDERO phase
 
   constructor(config: TmuxWrapperConfig) {
     this.config = {
@@ -209,6 +219,9 @@ export class TmuxWrapper {
       return false;
     });
 
+    // Initialize trajectory tracking via trail CLI
+    this.trajectory = getTrajectoryIntegration(projectPaths.projectId, config.name);
+
     // Handle incoming messages from relay
     this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
       this.handleIncomingMessage(from, payload, messageId, meta);
@@ -245,6 +258,23 @@ export class TmuxWrapper {
 
     // Prefix with newline to avoid corrupting tmux status line
     process.stderr.write(`\r[relay:${this.config.name}] ${msg}\n`);
+  }
+
+  /**
+   * Detect PDERO phase from output content and auto-transition if needed
+   */
+  private detectAndTransitionPhase(content: string): void {
+    if (!this.trajectory) return;
+
+    const detectedPhase = detectPhaseFromContent(content);
+    if (detectedPhase && detectedPhase !== this.lastDetectedPhase) {
+      const currentPhase = this.trajectory.getPhase();
+      if (detectedPhase !== currentPhase) {
+        this.trajectory.transition(detectedPhase, 'Auto-detected from output');
+        this.lastDetectedPhase = detectedPhase;
+        this.logStderr(`Phase transition: ${currentPhase || 'none'} → ${detectedPhase}`);
+      }
+    }
   }
 
   /**
@@ -361,9 +391,13 @@ export class TmuxWrapper {
         }
       }
 
-      // Set environment variables
+      // Set environment variables including trail/trajectory vars
+      const projectPaths = getProjectPaths();
+      const trailEnvVars = getTrailEnvVars(projectPaths.projectId, this.config.name, projectPaths.dataDir);
+
       for (const [key, value] of Object.entries({
         ...this.config.env,
+        ...trailEnvVars,
         AGENT_RELAY_NAME: this.config.name,
         TERM: 'xterm-256color',
       })) {
@@ -390,6 +424,9 @@ export class TmuxWrapper {
     this.lastActivityTime = Date.now();
     this.activityState = 'active';
 
+    // Initialize trajectory tracking (auto-start if task provided)
+    this.initializeTrajectory();
+
     // Inject instructions for the agent (after a delay to let CLI initialize)
     setTimeout(() => this.injectInstructions(), 3000);
 
@@ -402,6 +439,25 @@ export class TmuxWrapper {
   }
 
   /**
+   * Initialize trajectory tracking
+   * Auto-starts a trajectory if task is provided in config
+   */
+  private async initializeTrajectory(): Promise<void> {
+    if (!this.trajectory) return;
+
+    // Auto-start trajectory if task is provided
+    if (this.config.task) {
+      const success = await this.trajectory.initialize(this.config.task);
+      if (success) {
+        this.logStderr(`Trajectory started for task: ${this.config.task}`);
+      }
+    } else {
+      // Just initialize without starting a trajectory
+      await this.trajectory.initialize();
+    }
+  }
+
+  /**
    * Inject usage instructions for the agent
    */
   private async injectInstructions(): Promise<void> {
@@ -409,17 +465,29 @@ export class TmuxWrapper {
 
     // Use escaped prefix (\->relay:) in examples to prevent parser from treating them as real commands
     const escapedPrefix = '\\' + this.relayPrefix;
-    const instructions = [
+
+    // Build instructions including relay and trail
+    const relayInstructions = [
       `[Agent Relay] You are "${this.config.name}" - connected for real-time messaging.`,
       `SEND: ${escapedPrefix}AgentName message`,
       `MULTI-LINE: ${escapedPrefix}AgentName <<<(newline)content(newline)>>> - ALWAYS end with >>> on its own line!`,
-      `RECEIVE: Messages appear as "Relay message from X [id]: content" - use "agent-relay read <id>" for long messages`,
     ].join(' | ');
 
+    // Add trail instructions if available
+    const trailInstructions = getCompactTrailInstructions();
+
     try {
-      await this.sendKeysLiteral(instructions);
+      await this.sendKeysLiteral(relayInstructions);
       await this.sleep(50);
       await this.sendKeys('Enter');
+
+      // Inject trail instructions
+      if (this.trajectory?.isTrailInstalledSync()) {
+        await this.sleep(100);
+        await this.sendKeysLiteral(trailInstructions);
+        await this.sleep(50);
+        await this.sendKeys('Enter');
+      }
     } catch {
       // Silent fail - instructions are nice-to-have
     }
@@ -573,6 +641,9 @@ export class TmuxWrapper {
 
       // Check for [[SUMMARY]] blocks and save to storage
       this.parseSummaryAndSave(cleanContent);
+
+      // Detect PDERO phase transitions from output content
+      this.detectAndTransitionPhase(cleanContent);
 
       // Check for [[SESSION_END]] blocks to explicitly close session
       this.parseSessionEndAndClose(cleanContent);
@@ -744,6 +815,9 @@ export class TmuxWrapper {
       this.queuedMessageHashes.delete(msgHash);
       const truncatedBody = cmd.body.substring(0, Math.min(RELAY_LOG_TRUNCATE_LENGTH, cmd.body.length));
       this.logStderr(`→ ${cmd.to}: ${truncatedBody}...`);
+
+      // Record in trajectory via trail
+      this.trajectory?.message('sent', this.config.name, cmd.to, cmd.body);
     } else if (this.client.state !== 'READY') {
       // Only log failure once per state change
       this.logStderr(`Send failed (client ${this.client.state})`);
@@ -931,6 +1005,9 @@ export class TmuxWrapper {
 
     const truncatedBody = payload.body.substring(0, Math.min(DEBUG_LOG_TRUNCATE_LENGTH, payload.body.length));
     this.logStderr(`← ${from}: ${truncatedBody}...`);
+
+    // Record in trajectory via trail
+    this.trajectory?.message('received', from, this.config.name, payload.body);
 
     // Queue for injection
     this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance });

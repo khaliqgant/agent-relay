@@ -13,6 +13,9 @@ import { EventEmitter } from 'node:events';
 import { RelayClient } from './client.js';
 import type { ParsedCommand } from './parser.js';
 import type { SendPayload, SendMeta, SpeakOnTrigger } from '../protocol/types.js';
+import { getProjectPaths } from '../utils/project-namespace.js';
+import { getTrailEnvVars } from '../trajectory/integration.js';
+import { HookRegistry, createTrajectoryHooks, type LifecycleHooks } from '../hooks/index.js';
 
 /** Maximum lines to keep in output buffer */
 const MAX_BUFFER_LINES = 10000;
@@ -42,6 +45,12 @@ export interface PtyWrapperConfig {
   shadowSpeakOn?: SpeakOnTrigger[];
   /** Stream output to daemon for dashboard log viewing (default: true) */
   streamLogs?: boolean;
+  /** Task/role description for trajectory tracking */
+  task?: string;
+  /** Custom lifecycle hooks */
+  hooks?: LifecycleHooks;
+  /** Enable trajectory tracking hooks (default: true if task provided) */
+  trajectoryTracking?: boolean;
 }
 
 export interface PtyWrapperEvents {
@@ -67,6 +76,8 @@ export class PtyWrapper extends EventEmitter {
   private logFilePath?: string;
   private logStream?: fs.WriteStream;
   private hasAcceptedPrompt = false;
+  private hookRegistry: HookRegistry;
+  private sessionStartTime = Date.now();
 
   constructor(config: PtyWrapperConfig) {
     super();
@@ -80,6 +91,35 @@ export class PtyWrapper extends EventEmitter {
       workingDirectory: config.cwd ?? process.cwd(),
       quiet: true,
     });
+
+    // Initialize hook registry
+    const projectPaths = getProjectPaths();
+    this.hookRegistry = new HookRegistry({
+      agentName: config.name,
+      workingDir: config.cwd ?? process.cwd(),
+      projectId: projectPaths.projectId,
+      task: config.task,
+      env: config.env,
+      inject: (text) => this.write(text + '\r'),
+      send: async (to, body) => {
+        this.client.sendMessage(to, body, 'message');
+      },
+    });
+
+    // Register trajectory hooks if enabled (default: true if task provided)
+    const enableTrajectory = config.trajectoryTracking ?? !!config.task;
+    if (enableTrajectory) {
+      const trajectoryHooks = createTrajectoryHooks({
+        projectId: projectPaths.projectId,
+        agentName: config.name,
+      });
+      this.hookRegistry.registerLifecycleHooks(trajectoryHooks);
+    }
+
+    // Register custom hooks if provided
+    if (config.hooks) {
+      this.hookRegistry.registerLifecycleHooks(config.hooks);
+    }
 
     // Handle incoming messages
     this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
@@ -131,6 +171,10 @@ export class PtyWrapper extends EventEmitter {
     console.log(`[pty:${this.config.name}] Spawning: ${this.config.command} ${args.join(' ')}`);
     console.log(`[pty:${this.config.name}] CWD: ${cwd}`);
 
+    // Get trail environment variables
+    const projectPaths = getProjectPaths();
+    const trailEnvVars = getTrailEnvVars(projectPaths.projectId, this.config.name, projectPaths.dataDir);
+
     // Spawn the process with error handling
     try {
       this.ptyProcess = pty.spawn(this.config.command, args, {
@@ -141,6 +185,7 @@ export class PtyWrapper extends EventEmitter {
         env: {
           ...process.env,
           ...this.config.env,
+          ...trailEnvVars,
           AGENT_RELAY_NAME: this.config.name,
           TERM: 'xterm-256color',
         },
@@ -153,6 +198,12 @@ export class PtyWrapper extends EventEmitter {
     }
 
     this.running = true;
+    this.sessionStartTime = Date.now();
+
+    // Dispatch session start hook (handles trajectory initialization)
+    this.hookRegistry.dispatchSessionStart().catch(err => {
+      console.error(`[pty:${this.config.name}] Session start hook error:`, err);
+    });
 
     // Capture output
     this.ptyProcess.onData((data: string) => {
@@ -218,6 +269,12 @@ export class PtyWrapper extends EventEmitter {
 
     // Parse for relay commands
     this.parseRelayCommands();
+
+    // Dispatch output hook (handles phase detection, etc.)
+    const cleanData = this.stripAnsi(data);
+    this.hookRegistry.dispatchOutput(cleanData, data).catch(err => {
+      console.error(`[pty:${this.config.name}] Output hook error:`, err);
+    });
   }
 
   /**
@@ -456,6 +513,11 @@ export class PtyWrapper extends EventEmitter {
     const success = this.client.sendMessage(cmd.to, cmd.body, cmd.kind, cmd.data, cmd.thread);
     if (success) {
       this.sentMessageHashes.add(msgHash);
+
+      // Dispatch message sent hook
+      this.hookRegistry.dispatchMessageSent(cmd.to, cmd.body, cmd.thread).catch(err => {
+        console.error(`[pty:${this.config.name}] Message sent hook error:`, err);
+      });
     }
   }
 
@@ -584,6 +646,11 @@ export class PtyWrapper extends EventEmitter {
   private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta): void {
     this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance });
     this.processMessageQueue();
+
+    // Dispatch message received hook
+    this.hookRegistry.dispatchMessageReceived(from, payload.body, messageId).catch(err => {
+      console.error(`[pty:${this.config.name}] Message received hook error:`, err);
+    });
   }
 
   /**
@@ -639,6 +706,8 @@ export class PtyWrapper extends EventEmitter {
     const escapedPrefix = '\\' + this.relayPrefix;
     const instructions = `[Agent Relay] You are "${this.config.name}" - connected for real-time messaging. SEND: ${escapedPrefix}AgentName message. PROTOCOL: (1) Wait for task via relay. (2) ACK receipt before starting. (3) Send "DONE: <summary>" when complete, then wait for next task.`;
 
+    // Note: Trail instructions are injected via hooks (trajectory-hooks.ts)
+
     try {
       this.ptyProcess.write(instructions + '\r');
     } catch {
@@ -679,6 +748,11 @@ export class PtyWrapper extends EventEmitter {
     if (!this.running) return;
     this.running = false;
 
+    // Dispatch session end hook (handles trajectory completion)
+    this.hookRegistry.dispatchSessionEnd(0, true).catch(err => {
+      console.error(`[pty:${this.config.name}] Session end hook error:`, err);
+    });
+
     if (this.ptyProcess) {
       // Try graceful termination first
       this.ptyProcess.write('\x03'); // Ctrl+C
@@ -691,6 +765,7 @@ export class PtyWrapper extends EventEmitter {
 
     this.closeLogStream();
     this.client.destroy();
+    this.hookRegistry.destroy();
   }
 
   /**
@@ -698,11 +773,18 @@ export class PtyWrapper extends EventEmitter {
    */
   kill(): void {
     this.running = false;
+
+    // Dispatch session end hook (forced termination)
+    this.hookRegistry.dispatchSessionEnd(undefined, false).catch(err => {
+      console.error(`[pty:${this.config.name}] Session end hook error:`, err);
+    });
+
     if (this.ptyProcess) {
       this.ptyProcess.kill();
     }
     this.closeLogStream();
     this.client.destroy();
+    this.hookRegistry.destroy();
   }
 
   /**
