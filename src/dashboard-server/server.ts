@@ -17,6 +17,107 @@ import type { ProjectConfig, SpawnRequest } from '../bridge/types.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ===== File Search Helper =====
+
+interface FileSearchResult {
+  path: string;
+  name: string;
+  isDirectory: boolean;
+}
+
+/**
+ * Search for files in a directory matching a query pattern.
+ * Uses a simple recursive search with common ignore patterns.
+ */
+async function searchFiles(
+  rootDir: string,
+  query: string,
+  limit: number
+): Promise<FileSearchResult[]> {
+  const results: FileSearchResult[] = [];
+  const queryLower = query.toLowerCase();
+
+  // Directories to ignore
+  const ignoreDirs = new Set([
+    'node_modules', '.git', 'dist', 'build', '.next', 'coverage',
+    '__pycache__', '.venv', 'venv', '.cache', '.turbo', '.vercel',
+    '.nuxt', '.output', 'vendor', 'target', '.idea', '.vscode'
+  ]);
+
+  // File patterns to ignore
+  const ignorePatterns = [
+    /\.lock$/,
+    /\.log$/,
+    /\.min\.(js|css)$/,
+    /\.map$/,
+    /\.d\.ts$/,
+    /\.pyc$/,
+  ];
+
+  const shouldIgnore = (name: string, isDir: boolean): boolean => {
+    if (isDir) return ignoreDirs.has(name);
+    return ignorePatterns.some(pattern => pattern.test(name));
+  };
+
+  const matchesQuery = (filePath: string, fileName: string): boolean => {
+    if (!query) return true;
+    const pathLower = filePath.toLowerCase();
+    const nameLower = fileName.toLowerCase();
+
+    // If query contains '/', match against full path
+    if (queryLower.includes('/')) {
+      return pathLower.includes(queryLower);
+    }
+
+    // Otherwise match against file name or path segments
+    return nameLower.includes(queryLower) || pathLower.includes(queryLower);
+  };
+
+  const searchDir = async (dir: string, relativePath: string = ''): Promise<void> => {
+    if (results.length >= limit) return;
+
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+
+      // Sort: directories first, then alphabetically
+      entries.sort((a, b) => {
+        if (a.isDirectory() !== b.isDirectory()) {
+          return a.isDirectory() ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+      for (const entry of entries) {
+        if (results.length >= limit) break;
+
+        const entryPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+        const fullPath = path.join(dir, entry.name);
+
+        if (shouldIgnore(entry.name, entry.isDirectory())) continue;
+
+        if (matchesQuery(entryPath, entry.name)) {
+          results.push({
+            path: entryPath,
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+          });
+        }
+
+        // Recurse into directories
+        if (entry.isDirectory() && results.length < limit) {
+          await searchDir(fullPath, entryPath);
+        }
+      }
+    } catch (err) {
+      // Ignore permission errors, etc.
+      console.warn(`[searchFiles] Error reading ${dir}:`, err);
+    }
+  };
+
+  await searchDir(rootDir);
+  return results;
+}
+
 interface AgentStatus {
   name: string;
   role: string;
@@ -363,6 +464,22 @@ export async function startDashboard(
     }
   };
 
+  // Helper to get team members from agents.json
+  const getTeamMembers = (teamName: string): string[] => {
+    const agentsPath = path.join(teamDir, 'agents.json');
+    if (!fs.existsSync(agentsPath)) return [];
+
+    try {
+      const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+      const members = (data.agents || [])
+        .filter((a: { team?: string }) => a.team === teamName)
+        .map((a: { name: string }) => a.name);
+      return members;
+    } catch {
+      return [];
+    }
+  };
+
   // API endpoint to send messages
   app.post('/api/send', async (req, res) => {
     const { to, message, thread, attachments: attachmentIds } = req.body;
@@ -371,9 +488,27 @@ export async function startDashboard(
       return res.status(400).json({ error: 'Missing "to" or "message" field' });
     }
 
-    // Fail fast if target agent is offline (except broadcasts)
-    if (to !== '*' && !isAgentOnline(to)) {
-      return res.status(404).json({ error: `Agent "${to}" is not online` });
+    // Check if this is a team mention (team:teamName)
+    const teamMatch = to.match(/^team:(.+)$/);
+    let targets: string[];
+
+    if (teamMatch) {
+      const teamName = teamMatch[1];
+      const members = getTeamMembers(teamName);
+      if (members.length === 0) {
+        return res.status(404).json({ error: `No agents found in team "${teamName}"` });
+      }
+      // Filter to only online members
+      targets = members.filter(isAgentOnline);
+      if (targets.length === 0) {
+        return res.status(404).json({ error: `No online agents in team "${teamName}"` });
+      }
+    } else {
+      // Fail fast if target agent is offline (except broadcasts)
+      if (to !== '*' && !isAgentOnline(to)) {
+        return res.status(404).json({ error: `Agent "${to}" is not online` });
+      }
+      targets = [to];
     }
 
     if (!relayClient || relayClient.state !== 'READY') {
@@ -402,11 +537,20 @@ export async function startDashboard(
         ? { attachments }
         : undefined;
 
-      const sent = relayClient.sendMessage(to, message, 'message', messageData, thread);
-      if (sent) {
-        res.json({ success: true });
+      // Send to all targets (single agent, team members, or broadcast)
+      let allSent = true;
+      for (const target of targets) {
+        const sent = relayClient.sendMessage(target, message, 'message', messageData, thread);
+        if (!sent) {
+          allSent = false;
+          console.error(`[dashboard] Failed to send message to ${target}`);
+        }
+      }
+
+      if (allSent) {
+        res.json({ success: true, sentTo: targets.length > 1 ? targets : targets[0] });
       } else {
-        res.status(500).json({ error: 'Failed to send message' });
+        res.status(500).json({ error: 'Failed to send message to some recipients' });
       }
     } catch (err) {
       console.error('[dashboard] Failed to send message:', err);
@@ -1339,6 +1483,33 @@ export async function startDashboard(
     } catch (err) {
       console.error('Failed to compute Prometheus metrics', err);
       res.status(500).send('# Error computing metrics\n');
+    }
+  });
+
+  // ===== File Search API =====
+
+  /**
+   * GET /api/files - Search for files in the repository
+   * Query params:
+   *   - q: Search query (file path pattern)
+   *   - limit: Max number of results (default 15)
+   *
+   * This endpoint searches for files in the project root directory
+   * to support @-file autocomplete in the message composer.
+   */
+  app.get('/api/files', async (req, res) => {
+    const query = (req.query.q as string) || '';
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 15, 50);
+
+    // Get project root (parent of dataDir, or use projectRoot if available)
+    const searchRoot = options.projectRoot || path.dirname(dataDir);
+
+    try {
+      const results = await searchFiles(searchRoot, query, limit);
+      res.json({ files: results, query, searchRoot: path.basename(searchRoot) });
+    } catch (err) {
+      console.error('[api] File search error:', err);
+      res.status(500).json({ error: 'Failed to search files', files: [] });
     }
   });
 

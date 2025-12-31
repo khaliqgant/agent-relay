@@ -2,7 +2,11 @@
  * MentionAutocomplete Component
  *
  * Provides @-mention autocomplete for the message composer.
- * Shows a dropdown list of agents when typing @ at the start of a message.
+ * Shows a dropdown list of agents and teams when typing @ at the start of a message.
+ * Supports:
+ * - @AgentName - mention a specific agent
+ * - @everyone / @* - broadcast to all agents
+ * - @team:name - mention all agents in a team
  */
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
@@ -29,6 +33,8 @@ interface MentionOption {
   displayName: string;
   description: string;
   isBroadcast?: boolean;
+  isTeam?: boolean;
+  memberCount?: number;
 }
 
 /**
@@ -76,6 +82,19 @@ export function MentionAutocomplete({
     [inputValue, cursorPosition]
   );
 
+  // Extract unique teams from agents
+  const teams = useMemo(() => {
+    const teamMap = new Map<string, Agent[]>();
+    agents.forEach((agent) => {
+      if (agent.team) {
+        const existing = teamMap.get(agent.team) || [];
+        existing.push(agent);
+        teamMap.set(agent.team, existing);
+      }
+    });
+    return teamMap;
+  }, [agents]);
+
   // Filter options based on query
   const options = useMemo((): MentionOption[] => {
     if (query === null) return [];
@@ -100,6 +119,31 @@ export function MentionAutocomplete({
       });
     }
 
+    // Add team options if query matches "team" or a team name
+    const isTeamQuery = queryLower.startsWith('team:') || queryLower.startsWith('team');
+    const teamSearchQuery = queryLower.startsWith('team:')
+      ? queryLower.substring(5)
+      : queryLower.replace(/^team/, '');
+
+    if (isTeamQuery || queryLower === '') {
+      teams.forEach((members, teamName) => {
+        const teamNameLower = teamName.toLowerCase();
+        if (
+          teamSearchQuery === '' ||
+          teamNameLower.includes(teamSearchQuery) ||
+          `team:${teamNameLower}`.includes(queryLower)
+        ) {
+          result.push({
+            name: `team:${teamName}`,
+            displayName: `@team:${teamName}`,
+            description: `${members.length} agent${members.length !== 1 ? 's' : ''}: ${members.map(m => m.name).join(', ')}`,
+            isTeam: true,
+            memberCount: members.length,
+          });
+        }
+      });
+    }
+
     // Filter agents by name
     const matchingAgents = agents.filter((agent) =>
       agent.name.toLowerCase().includes(queryLower)
@@ -109,12 +153,12 @@ export function MentionAutocomplete({
       result.push({
         name: agent.name,
         displayName: `@${agent.name}`,
-        description: agent.status || 'Agent',
+        description: agent.team ? `${agent.status || 'Agent'} · ${agent.team}` : (agent.status || 'Agent'),
       });
     });
 
     return result;
-  }, [query, agents]);
+  }, [query, agents, teams]);
 
   // Reset selection when options change
   useEffect(() => {
@@ -203,14 +247,23 @@ export function MentionAutocomplete({
             style={{
               background: option.isBroadcast
                 ? 'var(--color-warning, #f59e0b)'
+                : option.isTeam
+                ? 'var(--color-accent-purple, #a855f7)'
                 : getAgentColor(option.name).primary,
             }}
           >
-            {option.isBroadcast ? '*' : getAgentInitials(option.name)}
+            {option.isBroadcast ? '*' : option.isTeam ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            ) : getAgentInitials(option.name)}
           </div>
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
             <span className="text-sm font-medium text-[#d1d2d3]">{option.displayName}</span>
-            <span className="text-xs text-[#8d8d8e]">{option.description}</span>
+            <span className="text-xs text-[#8d8d8e] truncate">{option.description}</span>
           </div>
         </div>
       ))}
