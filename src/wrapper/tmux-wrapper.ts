@@ -30,6 +30,13 @@ import {
   getTrailEnvVars,
   type PDEROPhase,
 } from '../trajectory/integration.js';
+import {
+  getContinuityManager,
+  parseContinuityCommand,
+  hasContinuityCommand,
+  type ContinuityManager,
+  type ContinuityCommand,
+} from '../continuity/index.js';
 
 const execAsync = promisify(exec);
 const escapeRegex = (str: string): string => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -145,6 +152,8 @@ export class TmuxWrapper {
   private tmuxPath: string; // Resolved path to tmux binary (system or bundled)
   private trajectory?: TrajectoryIntegration; // Trajectory tracking via trail
   private lastDetectedPhase?: PDEROPhase; // Track last auto-detected PDERO phase
+  private continuity?: ContinuityManager; // Session continuity management
+  private processedContinuityCommands: Set<string> = new Set(); // Dedup continuity commands
 
   constructor(config: TmuxWrapperConfig) {
     this.config = {
@@ -221,6 +230,9 @@ export class TmuxWrapper {
 
     // Initialize trajectory tracking via trail CLI
     this.trajectory = getTrajectoryIntegration(projectPaths.projectId, config.name);
+
+    // Initialize continuity manager for session persistence
+    this.continuity = getContinuityManager({ defaultCli: this.cliType });
 
     // Handle incoming messages from relay
     this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
@@ -488,8 +500,47 @@ export class TmuxWrapper {
         await this.sleep(50);
         await this.sendKeys('Enter');
       }
+
+      // Inject continuity context from previous session
+      await this.injectContinuityContext();
     } catch {
       // Silent fail - instructions are nice-to-have
+    }
+  }
+
+  /**
+   * Inject continuity context from previous session
+   */
+  private async injectContinuityContext(): Promise<void> {
+    if (!this.continuity || !this.running) return;
+
+    try {
+      const context = await this.continuity.getStartupContext(this.config.name);
+      if (context && context.formatted) {
+        // Inject a brief notification about loaded context
+        const notification = `[Continuity] Previous session context loaded. ${
+          context.ledger ? `Task: ${context.ledger.currentTask?.slice(0, 50) || 'unknown'}` : ''
+        }${context.handoff ? ` | Last handoff: ${context.handoff.createdAt.toISOString().split('T')[0]}` : ''}`;
+
+        await this.sleep(200);
+        await this.sendKeysLiteral(notification);
+        await this.sleep(50);
+        await this.sendKeys('Enter');
+
+        // Queue the full context for injection when agent is ready
+        this.messageQueue.push({
+          from: 'system',
+          body: context.formatted,
+          messageId: `continuity-startup-${Date.now()}`,
+        });
+        this.checkForInjectionOpportunity();
+
+        if (this.config.debug) {
+          this.logStderr(`[CONTINUITY] Loaded context for ${this.config.name}`);
+        }
+      }
+    } catch (err: any) {
+      this.logStderr(`[CONTINUITY] Failed to load context: ${err.message}`, true);
     }
   }
 
@@ -644,6 +695,9 @@ export class TmuxWrapper {
 
       // Detect PDERO phase transitions from output content
       this.detectAndTransitionPhase(cleanContent);
+
+      // Parse and handle continuity commands (->continuity:save, ->continuity:load, etc.)
+      await this.parseContinuityCommands(joinedContent);
 
       // Check for [[SESSION_END]] blocks to explicitly close session
       this.parseSessionEndAndClose(cleanContent);
@@ -892,6 +946,54 @@ export class TmuxWrapper {
         this.logStderr(`Failed to save summary: ${err.message}`, true);
       });
     });
+  }
+
+  /**
+   * Parse ->continuity: commands from output and handle them.
+   * Supported commands:
+   *   ->continuity:save <<<...>>>  - Save session state to ledger
+   *   ->continuity:load            - Request context injection
+   *   ->continuity:search "query"  - Search past handoffs
+   *   ->continuity:uncertain "..."  - Mark item as uncertain
+   *   ->continuity:handoff <<<...>>> - Create explicit handoff
+   */
+  private async parseContinuityCommands(content: string): Promise<void> {
+    if (!this.continuity) return;
+    if (!hasContinuityCommand(content)) return;
+
+    const command = parseContinuityCommand(content);
+    if (!command) return;
+
+    // Create a hash for deduplication
+    const cmdHash = `${command.type}:${command.content || command.query || command.item || ''}`;
+    if (this.processedContinuityCommands.has(cmdHash)) return;
+    this.processedContinuityCommands.add(cmdHash);
+
+    // Limit dedup set size
+    if (this.processedContinuityCommands.size > 100) {
+      const oldest = this.processedContinuityCommands.values().next().value;
+      if (oldest) this.processedContinuityCommands.delete(oldest);
+    }
+
+    try {
+      if (this.config.debug) {
+        this.logStderr(`[CONTINUITY] Processing ${command.type} command`);
+      }
+
+      const response = await this.continuity.handleCommand(this.config.name, command);
+
+      // If there's a response (e.g., from load or search), inject it
+      if (response) {
+        this.messageQueue.push({
+          from: 'system',
+          body: response,
+          messageId: `continuity-${Date.now()}`,
+        });
+        this.checkForInjectionOpportunity();
+      }
+    } catch (err: any) {
+      this.logStderr(`[CONTINUITY] Error: ${err.message}`, true);
+    }
   }
 
   /**
@@ -1395,6 +1497,13 @@ export class TmuxWrapper {
     if (!this.running) return;
     this.running = false;
     this.activityState = 'disconnected';
+
+    // Auto-save continuity state before shutdown (fire and forget)
+    if (this.continuity) {
+      this.continuity.autoSave(this.config.name, 'session_end').catch((err) => {
+        this.logStderr(`[CONTINUITY] Auto-save failed: ${err.message}`, true);
+      });
+    }
 
     // Reset session state for potential reuse
     this.resetSessionState();
