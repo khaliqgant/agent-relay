@@ -418,6 +418,33 @@ export const api = {
       return { success: false, error: 'Network error' };
     }
   },
+
+  // ===== File Search API =====
+
+  /**
+   * Search for files in the repository
+   */
+  async searchFiles(params?: {
+    query?: string;
+    limit?: number;
+  }): Promise<ApiResponse<FileSearchResponse>> {
+    try {
+      const queryParams = new URLSearchParams();
+      if (params?.query) queryParams.set('q', params.query);
+      if (params?.limit) queryParams.set('limit', String(params.limit));
+
+      const response = await fetch(`${API_BASE}/api/files?${queryParams}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        return { success: true, data };
+      }
+
+      return { success: false, error: 'Failed to search files' };
+    } catch (_error) {
+      return { success: false, error: 'Network error' };
+    }
+  },
 };
 
 // History API types
@@ -460,6 +487,19 @@ export interface HistoryStats {
   activeSessions: number | string;
   uniqueAgents: number | string;
   oldestMessageDate?: string | null;
+}
+
+// File search types
+export interface FileSearchResult {
+  path: string;
+  name: string;
+  isDirectory: boolean;
+}
+
+export interface FileSearchResponse {
+  files: FileSearchResult[];
+  query: string;
+  searchRoot: string;
 }
 
 /**

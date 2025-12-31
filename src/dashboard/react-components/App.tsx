@@ -17,6 +17,7 @@ import { NewConversationModal } from './NewConversationModal';
 import { SettingsPanel, defaultSettings, type Settings } from './SettingsPanel';
 import { ConversationHistory } from './ConversationHistory';
 import { MentionAutocomplete, getMentionQuery, completeMentionInValue } from './MentionAutocomplete';
+import { FileAutocomplete, getFileQuery, completeFileInValue } from './FileAutocomplete';
 import { WorkspaceSelector, type Workspace } from './WorkspaceSelector';
 import { AddWorkspaceModal } from './AddWorkspaceModal';
 import { LogViewerPanel } from './LogViewerPanel';
@@ -680,6 +681,7 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
   const [message, setMessage] = useState('');
   const [cursorPosition, setCursorPosition] = useState(0);
   const [showMentions, setShowMentions] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -688,12 +690,34 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
     setMessage(value);
     setCursorPosition(cursorPos);
 
-    const query = getMentionQuery(value, cursorPos);
-    setShowMentions(query !== null);
+    // Check for file autocomplete first (@ followed by path-like pattern)
+    const fileQuery = getFileQuery(value, cursorPos);
+    if (fileQuery !== null) {
+      setShowFiles(true);
+      setShowMentions(false);
+      return;
+    }
+
+    // Check for mention autocomplete (@ at start without path patterns)
+    const mentionQuery = getMentionQuery(value, cursorPos);
+    if (mentionQuery !== null) {
+      setShowMentions(true);
+      setShowFiles(false);
+      return;
+    }
+
+    // Neither - hide both
+    setShowMentions(false);
+    setShowFiles(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Don't handle Enter/Tab when autocomplete is visible (let autocomplete handle it)
+    if ((showMentions || showFiles) && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab')) {
+      return; // Let the autocomplete component handle these keys
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey && !showMentions && !showFiles) {
       e.preventDefault();
       if (message.trim() && !isSending) {
         handleSubmit(e as unknown as React.FormEvent);
@@ -704,10 +728,24 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
   const handleMentionSelect = (mention: string, newValue: string) => {
     setMessage(newValue);
     setShowMentions(false);
+    setShowFiles(false);
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus();
         const pos = newValue.indexOf(' ') + 1;
+        textareaRef.current.setSelectionRange(pos, pos);
+      }
+    }, 0);
+  };
+
+  const handleFileSelect = (filePath: string, newValue: string) => {
+    setMessage(newValue);
+    setShowFiles(false);
+    setShowMentions(false);
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        const pos = newValue.indexOf(' ', 1) + 1; // After @path/to/file<space>
         textareaRef.current.setSelectionRange(pos, pos);
       }
     }, 0);
@@ -728,7 +766,14 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
       if (mentionedName === '*' || mentionedName.toLowerCase() === 'everyone' || mentionedName.toLowerCase() === 'all') {
         target = '*';
       } else {
-        target = mentionedName;
+        // Check if this is a file path mention (contains / or ends with common file extensions)
+        // If so, keep the full message as content and use default recipient
+        if (mentionedName.includes('/') || /\.(ts|tsx|js|jsx|json|md|py|go|rs|java|c|cpp|h|css|html|yaml|yml|toml)$/i.test(mentionedName)) {
+          target = recipient;
+          content = message; // Keep the @path/to/file in the message
+        } else {
+          target = mentionedName;
+        }
       }
     } else {
       target = recipient;
@@ -739,12 +784,14 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
     if (success) {
       setMessage('');
       setShowMentions(false);
+      setShowFiles(false);
     }
   };
 
   return (
     <form className="flex items-center gap-3" onSubmit={handleSubmit}>
       <div className="flex-1 relative">
+        {/* Agent mention autocomplete */}
         <MentionAutocomplete
           agents={agents}
           inputValue={message}
@@ -753,10 +800,18 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
           onClose={() => setShowMentions(false)}
           isVisible={showMentions}
         />
+        {/* File path autocomplete */}
+        <FileAutocomplete
+          inputValue={message}
+          cursorPosition={cursorPosition}
+          onSelect={handleFileSelect}
+          onClose={() => setShowFiles(false)}
+          isVisible={showFiles}
+        />
         <textarea
           ref={textareaRef}
           className="w-full py-3 px-4 bg-bg-card border border-border-subtle rounded-xl text-sm font-sans text-text-primary outline-none transition-all duration-200 resize-none min-h-[44px] max-h-[120px] overflow-y-auto focus:border-accent-cyan/50 focus:shadow-[0_0_0_3px_rgba(0,217,255,0.1)] placeholder:text-text-muted"
-          placeholder={`Message ${recipient === '*' ? 'everyone' : '@' + recipient}... (Shift+Enter for new line)`}
+          placeholder={`Message ${recipient === '*' ? 'everyone' : '@' + recipient}... (@ for agents or files)`}
           value={message}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
