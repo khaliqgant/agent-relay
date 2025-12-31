@@ -35,7 +35,6 @@ import {
   parseContinuityCommand,
   hasContinuityCommand,
   type ContinuityManager,
-  type ContinuityCommand,
 } from '../continuity/index.js';
 
 const execAsync = promisify(exec);

@@ -173,7 +173,7 @@ export class HandoffStore {
   /**
    * Parse a markdown file back to a Handoff object
    */
-  private fromMarkdown(content: string, filename: string): Handoff {
+  private fromMarkdown(content: string, _filename: string): Handoff {
     const handoff: Handoff = {
       id: '',
       agentName: '',

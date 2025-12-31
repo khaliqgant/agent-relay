@@ -143,19 +143,18 @@ export class HookRegistry {
 
     this.memory = new InMemoryHookMemory();
 
-    // Create relay interface
-    const self = this;
+    // Create relay interface (using arrow functions to capture 'this')
     this.relay = {
-      async send(to: string, body: string): Promise<void> {
-        if (self.sendFn) {
-          await self.sendFn(to, body);
+      send: async (to: string, body: string): Promise<void> => {
+        if (this.sendFn) {
+          await this.sendFn(to, body);
         }
       },
-      isConnected(): boolean {
-        return !!self.sendFn;
+      isConnected: (): boolean => {
+        return !!this.sendFn;
       },
-      getAgentName(): string | undefined {
-        return self.agentName;
+      getAgentName: (): string | undefined => {
+        return this.agentName;
       },
     };
   }
@@ -310,20 +309,19 @@ export class HookRegistry {
    * Get the base hook context
    */
   private getBaseContext(): HookContext {
-    const self = this;
     return {
       agentId: this.agentId,
       sessionId: this.sessionId,
       workingDir: this.workingDir,
       env: this.env,
       inject: (content: string) => {
-        if (self.injectFn) {
-          self.injectFn(content);
+        if (this.injectFn) {
+          this.injectFn(content);
         }
       },
       send: async (to: string, body: string) => {
-        if (self.sendFn) {
-          await self.sendFn(to, body);
+        if (this.sendFn) {
+          await this.sendFn(to, body);
         }
       },
       memory: this.memory,
