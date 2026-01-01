@@ -56,19 +56,21 @@
 }
 
 /* ============================================
-   RESET & BASE
+   RESET & BASE (scoped to landing pages only)
    ============================================ */
-*, *::before, *::after {
+.landing-page *,
+.landing-page *::before,
+.landing-page *::after,
+.pricing-page *,
+.pricing-page *::before,
+.pricing-page *::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
-body {
+.landing-page,
+.pricing-page {
   font-family: var(--font-body);
   font-size: 16px;
   line-height: 1.6;
@@ -78,12 +80,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
+.landing-page a,
+.pricing-page a {
   color: inherit;
   text-decoration: none;
 }
 
-button {
+.landing-page button,
+.pricing-page button {
   font-family: inherit;
   cursor: pointer;
   border: none;

@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import './styles.css';
 import { Logo, LogoIcon, LogoHero } from '../react-components/Logo';
 
 // Agent providers with their signature colors
