@@ -172,7 +172,8 @@ export async function createServer(): Promise<CloudServer> {
   app.use(express.static(dashboardPath));
 
   // SPA fallback - serve index.html for all non-API routes
-  app.get('*', (req, res, next) => {
+  // Express 5 requires named wildcard params instead of bare '*'
+  app.get('/{*splat}', (req, res, next) => {
     // Don't serve index.html for API routes
     if (req.path.startsWith('/api/')) {
       return next();
