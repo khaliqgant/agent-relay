@@ -252,8 +252,8 @@ export function MentionAutocomplete({
           e.preventDefault();
           const selected = options[selectedIndex];
           if (selected) {
-            const newValue = completeMentionInValue(inputValue, selected.name, cursorPosition);
-            onSelect(selected.name, newValue);
+            const result = completeMentionInValue(inputValue, selected.name, cursorPosition);
+            onSelect(selected.name, result.value);
           }
           break;
         case 'Escape':
@@ -276,8 +276,8 @@ export function MentionAutocomplete({
   // Handle click on option
   const handleClick = useCallback(
     (option: MentionOption) => {
-      const newValue = completeMentionInValue(inputValue, option.name, cursorPosition);
-      onSelect(option.name, newValue);
+      const result = completeMentionInValue(inputValue, option.name, cursorPosition);
+      onSelect(option.name, result.value);
     },
     [inputValue, cursorPosition, onSelect]
   );
