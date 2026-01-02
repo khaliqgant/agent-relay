@@ -74,6 +74,9 @@ export interface DaemonEvent {
     | 'agent:crashed'
     | 'agent:restarted'
     | 'agent:output'
+    | 'agent:summary'
+    | 'agent:session-end'
+    | 'agent:injection-failed'
     | 'message:received'
     | 'message:sent';
   workspaceId?: string;

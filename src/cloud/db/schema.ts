@@ -292,6 +292,49 @@ export const usageRecords = pgTable('usage_records', {
 }));
 
 // ============================================================================
+// Agent Sessions (cloud persistence for PtyWrapper agents)
+// ============================================================================
+
+export const agentSessions = pgTable('agent_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  agentName: varchar('agent_name', { length: 255 }).notNull(),
+  status: varchar('status', { length: 50 }).notNull().default('active'),
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  endedAt: timestamp('ended_at'),
+  endMarker: jsonb('end_marker').$type<{
+    summary?: string;
+    completedTasks?: string[];
+  }>(),
+  metadata: jsonb('metadata').notNull().default({}),
+}, (table) => ({
+  workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
+  agentNameIdx: index('idx_agent_sessions_agent_name').on(table.agentName),
+  statusIdx: index('idx_agent_sessions_status').on(table.status),
+}));
+
+// ============================================================================
+// Agent Summaries (cloud persistence for [[SUMMARY]] blocks)
+// ============================================================================
+
+export const agentSummaries = pgTable('agent_summaries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').notNull().references(() => agentSessions.id, { onDelete: 'cascade' }),
+  agentName: varchar('agent_name', { length: 255 }).notNull(),
+  summary: jsonb('summary').$type<{
+    currentTask?: string;
+    completedTasks?: string[];
+    decisions?: string[];
+    context?: string;
+    files?: string[];
+  }>().notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  sessionIdIdx: index('idx_agent_summaries_session_id').on(table.sessionId),
+  agentNameIdx: index('idx_agent_summaries_agent_name').on(table.agentName),
+}));
+
+// ============================================================================
 // Type exports
 // ============================================================================
 
@@ -313,6 +356,11 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type NewSubscription = typeof subscriptions.$inferInsert;
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type NewUsageRecord = typeof usageRecords.$inferInsert;
+
+export type AgentSession = typeof agentSessions.$inferSelect;
+export type NewAgentSession = typeof agentSessions.$inferInsert;
+export type AgentSummary = typeof agentSummaries.$inferSelect;
+export type NewAgentSummary = typeof agentSummaries.$inferInsert;
 
 // Agent configuration types
 export type CoordinatorAgentConfig = NonNullable<ProjectGroup['coordinatorAgent']>;

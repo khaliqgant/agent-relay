@@ -27,6 +27,7 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       sla: false,
       ssoEnabled: false,
       auditLogs: false,
+      sessionPersistence: false,
     },
     features: [
       'Up to 2 workspaces',
@@ -56,6 +57,7 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       sla: false,
       ssoEnabled: false,
       auditLogs: false,
+      sessionPersistence: true,
     },
     features: [
       'Up to 10 workspaces',
@@ -64,6 +66,7 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       '10 GB storage',
       '5 team members',
       'Custom domains',
+      'Session persistence',
       'Email support',
     ],
   },
@@ -87,6 +90,7 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       sla: false,
       ssoEnabled: false,
       auditLogs: true,
+      sessionPersistence: true,
     },
     features: [
       'Up to 50 workspaces',
@@ -95,6 +99,7 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       '50 GB storage',
       '25 team members',
       'Custom domains',
+      'Session persistence',
       'Priority support',
       'Audit logs',
     ],
@@ -119,6 +124,7 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       sla: true,
       ssoEnabled: true,
       auditLogs: true,
+      sessionPersistence: true,
     },
     features: [
       'Unlimited workspaces',
@@ -127,6 +133,7 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       '500 GB storage',
       'Unlimited team members',
       'Custom domains',
+      'Session persistence',
       'Priority support with SLA',
       'SSO/SAML integration',
       'Audit logs & compliance',
@@ -239,6 +246,12 @@ export function comparePlans(from: SubscriptionTier, to: SubscriptionTier): {
     upgrades.push('Audit logs');
   } else if (!toPlan.limits.auditLogs && fromPlan.limits.auditLogs) {
     downgrades.push('Audit logs');
+  }
+
+  if (toPlan.limits.sessionPersistence && !fromPlan.limits.sessionPersistence) {
+    upgrades.push('Session persistence');
+  } else if (!toPlan.limits.sessionPersistence && fromPlan.limits.sessionPersistence) {
+    downgrades.push('Session persistence');
   }
 
   return { upgrades, downgrades };

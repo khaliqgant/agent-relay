@@ -9,7 +9,7 @@ import path from 'node:path';
 import { sleep } from './utils.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
 import { resolveCommand } from '../utils/command-resolver.js';
-import { PtyWrapper, type PtyWrapperConfig } from '../wrapper/pty-wrapper.js';
+import { PtyWrapper, type PtyWrapperConfig, type SummaryEvent, type SessionEndEvent } from '../wrapper/pty-wrapper.js';
 import { selectShadowCli } from './shadow-cli.js';
 import type {
   SpawnRequest,
@@ -19,6 +19,17 @@ import type {
   SpawnWithShadowResult,
   SpeakOnTrigger,
 } from './types.js';
+
+/**
+ * Cloud persistence handler interface.
+ * Implement this to persist agent session data to cloud storage.
+ */
+export interface CloudPersistenceHandler {
+  onSummary: (agentName: string, event: SummaryEvent) => Promise<void>;
+  onSessionEnd: (agentName: string, event: SessionEndEvent) => Promise<void>;
+  /** Optional cleanup method for tests and graceful shutdown */
+  destroy?: () => void;
+}
 
 /** Worker metadata stored in workers.json */
 interface WorkerMeta {
@@ -32,9 +43,17 @@ interface WorkerMeta {
   logFile?: string;
 }
 
+/** Stored listener references for cleanup */
+interface ListenerBindings {
+  output?: (data: string) => void;
+  summary?: (event: SummaryEvent) => void;
+  sessionEnd?: (event: SessionEndEvent) => void;
+}
+
 interface ActiveWorker extends WorkerInfo {
   pty: PtyWrapper;
   logFile?: string;
+  listeners?: ListenerBindings;
 }
 
 /** Callback for agent death notifications */
@@ -54,6 +73,7 @@ export class AgentSpawner {
   private workersPath: string;
   private dashboardPort?: number;
   private onAgentDeath?: OnAgentDeathCallback;
+  private cloudPersistence?: CloudPersistenceHandler;
 
   constructor(projectRoot: string, _tmuxSession?: string, dashboardPort?: number) {
     const paths = getProjectPaths(projectRoot);
@@ -82,6 +102,64 @@ export class AgentSpawner {
    */
   setOnAgentDeath(callback: OnAgentDeathCallback): void {
     this.onAgentDeath = callback;
+  }
+
+  /**
+   * Set cloud persistence handler for forwarding PtyWrapper events.
+   * When set, 'summary' and 'session-end' events from spawned agents
+   * are forwarded to the handler for cloud persistence (PostgreSQL/Redis).
+   *
+   * Note: Enable via RELAY_CLOUD_ENABLED=true environment variable.
+   */
+  setCloudPersistence(handler: CloudPersistenceHandler): void {
+    this.cloudPersistence = handler;
+    console.log('[spawner] Cloud persistence handler set');
+  }
+
+  /**
+   * Bind cloud persistence event handlers to a PtyWrapper.
+   * Returns the listener references for cleanup.
+   */
+  private bindCloudPersistenceEvents(name: string, pty: PtyWrapper): Partial<ListenerBindings> {
+    if (!this.cloudPersistence) return {};
+
+    const summaryListener = async (event: SummaryEvent) => {
+      try {
+        await this.cloudPersistence!.onSummary(name, event);
+      } catch (err) {
+        console.error(`[spawner] Cloud persistence summary error for ${name}:`, err);
+      }
+    };
+
+    const sessionEndListener = async (event: SessionEndEvent) => {
+      try {
+        await this.cloudPersistence!.onSessionEnd(name, event);
+      } catch (err) {
+        console.error(`[spawner] Cloud persistence session-end error for ${name}:`, err);
+      }
+    };
+
+    pty.on('summary', summaryListener);
+    pty.on('session-end', sessionEndListener);
+
+    return { summary: summaryListener, sessionEnd: sessionEndListener };
+  }
+
+  /**
+   * Unbind all tracked listeners from a PtyWrapper.
+   */
+  private unbindListeners(pty: PtyWrapper, listeners?: ListenerBindings): void {
+    if (!listeners) return;
+
+    if (listeners.output) {
+      pty.off('output', listeners.output);
+    }
+    if (listeners.summary) {
+      pty.off('summary', listeners.summary);
+    }
+    if (listeners.sessionEnd) {
+      pty.off('session-end', listeners.sessionEnd);
+    }
   }
 
   /**
@@ -161,12 +239,19 @@ export class AgentSpawner {
         onExit: (code) => {
           if (debug) console.log(`[spawner:debug] Worker ${name} exited with code ${code}`);
 
-          // Get the agentId before removing from active workers
+          // Get the agentId and clean up listeners before removing from active workers
           const worker = this.activeWorkers.get(name);
           const agentId = worker?.pty?.getAgentId?.();
+          if (worker?.listeners) {
+            this.unbindListeners(worker.pty, worker.listeners);
+          }
 
           this.activeWorkers.delete(name);
-          this.saveWorkersMetadata();
+          try {
+            this.saveWorkersMetadata();
+          } catch (err) {
+            console.error(`[spawner] Failed to save metadata on exit:`, err);
+          }
 
           // Notify if agent died unexpectedly (non-zero exit)
           if (code !== 0 && code !== null && this.onAgentDeath) {
@@ -185,14 +270,24 @@ export class AgentSpawner {
       // Create and start the pty wrapper
       const pty = new PtyWrapper(ptyConfig);
 
+      // Track listener references for proper cleanup
+      const listeners: ListenerBindings = {};
+
       // Hook up output events for live log streaming
-      pty.on('output', (data: string) => {
+      const outputListener = (data: string) => {
         // Broadcast to any connected WebSocket clients via global function
         const broadcast = (global as any).__broadcastLogOutput;
         if (broadcast) {
           broadcast(name, data);
         }
-      });
+      };
+      pty.on('output', outputListener);
+      listeners.output = outputListener;
+
+      // Bind cloud persistence events (if enabled) and store references
+      const cloudListeners = this.bindCloudPersistenceEvents(name, pty);
+      if (cloudListeners.summary) listeners.summary = cloudListeners.summary;
+      if (cloudListeners.sessionEnd) listeners.sessionEnd = cloudListeners.sessionEnd;
 
       await pty.start();
 
@@ -259,6 +354,7 @@ export class AgentSpawner {
         pid: pty.pid,
         pty,
         logFile: pty.logPath,
+        listeners, // Store for cleanup
       };
       this.activeWorkers.set(name, workerInfo);
       this.saveWorkersMetadata();
@@ -425,6 +521,9 @@ export class AgentSpawner {
     }
 
     try {
+      // Unbind all listeners first to prevent memory leaks
+      this.unbindListeners(worker.pty, worker.listeners);
+
       // Stop the pty process gracefully (handles auto-save internally)
       await worker.pty.stop();
 
@@ -440,7 +539,8 @@ export class AgentSpawner {
       return true;
     } catch (err: any) {
       console.error(`[spawner] Failed to release ${name}:`, err.message);
-      // Still remove from tracking
+      // Still unbind and remove from tracking
+      this.unbindListeners(worker.pty, worker.listeners);
       this.activeWorkers.delete(name);
       this.saveWorkersMetadata();
       return false;

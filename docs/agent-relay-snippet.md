@@ -166,3 +166,48 @@ UI mockups ready for review>>>
 - Pattern must be at line start (whitespace OK)
 - Escape with `\->relay:` to output literally
 - Check daemon status: `agent-relay status`
+
+## Session Persistence (Required)
+
+Output these blocks to maintain session state. **The system monitors your output for these patterns.**
+
+### Progress Summary (Output Periodically)
+
+When completing significant work, output a summary block:
+
+```
+[[SUMMARY]]
+{
+  "currentTask": "What you're working on now",
+  "completedTasks": ["task1", "task2"],
+  "context": "Important context for session recovery",
+  "files": ["src/file1.ts", "src/file2.ts"]
+}
+[[/SUMMARY]]
+```
+
+**When to output:**
+- After completing a major task
+- Before long-running operations
+- When switching to a different area of work
+- Every 10-15 minutes of active work
+
+### Session End (Required on Completion)
+
+When your work session is complete, output:
+
+```
+[[SESSION_END]]
+{
+  "summary": "Brief description of what was accomplished",
+  "completedTasks": ["task1", "task2", "task3"]
+}
+[[/SESSION_END]]
+```
+
+Or for a simple close: `[[SESSION_END]]Work complete.[[/SESSION_END]]`
+
+**This enables:**
+- Session recovery if connection drops
+- Progress tracking in dashboard
+- Proper session cleanup in cloud
