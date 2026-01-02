@@ -39,6 +39,8 @@
     "dashboard": "node dist/dashboard-server/start.js",
     "pretest": "npm run build",
     "test": "vitest run",
+    "test:integration": "vitest run test/cloud/*.integration.test.ts",
+    "test:qa": "./scripts/run-cloud-qa.sh",
     "pretest:coverage": "npm run build",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",

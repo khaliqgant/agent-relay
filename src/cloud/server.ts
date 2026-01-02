@@ -35,6 +35,7 @@ import { usageRouter } from './api/usage.js';
 import { coordinatorsRouter } from './api/coordinators.js';
 import { daemonsRouter } from './api/daemons.js';
 import { monitoringRouter } from './api/monitoring.js';
+import { testHelpersRouter } from './api/test-helpers.js';
 
 export interface CloudServer {
   app: Express;
@@ -154,6 +155,17 @@ export async function createServer(): Promise<CloudServer> {
       return next();
     }
 
+    // Skip CSRF for Bearer-authenticated endpoints (daemon API, test helpers)
+    const authHeader = req.get('authorization');
+    if (authHeader?.startsWith('Bearer ')) {
+      return next();
+    }
+
+    // Skip CSRF for test endpoints in non-production
+    if (process.env.NODE_ENV !== 'production' && req.path.startsWith('/api/test/')) {
+      return next();
+    }
+
     const token = req.get('x-csrf-token');
     if (!token || token !== req.session.csrfToken) {
       return res.status(403).json({
@@ -181,6 +193,12 @@ export async function createServer(): Promise<CloudServer> {
   app.use('/api/project-groups', coordinatorsRouter);
   app.use('/api/daemons', daemonsRouter);
   app.use('/api/monitoring', monitoringRouter);
+
+  // Test helper routes (only available in non-production)
+  if (process.env.NODE_ENV !== 'production') {
+    app.use('/api/test', testHelpersRouter);
+    console.log('[cloud] Test helper routes enabled (non-production mode)');
+  }
 
   // Serve static dashboard files (Next.js static export)
   // Path: dist/cloud/server.js -> ../../src/dashboard/out
