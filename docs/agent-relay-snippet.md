@@ -111,13 +111,31 @@ LGTM, approved!>>>
 
 Thread messages appear grouped in the dashboard with reply counts.
 
+## Status Updates
+
+**Send status updates to your lead, NOT broadcast:**
+
+```
+# Correct - status to lead only
+->relay:Lead <<<
+STATUS: Working on auth module>>>
+
+# Wrong - don't broadcast status to everyone
+->relay:* <<<
+STATUS: Working on auth module>>>
+```
+
+**Why?** Broadcasting status updates creates noise for other agents. Your lead coordinates the team and needs your updates. Other agents are focused on their own tasks.
+
+**If no lead was announced:** Pick a main point of contact (POC) from your team and send status updates to them.
+
 ## Common Patterns
 
 ```
 ->relay:Lead <<<
 ACK: Starting /api/register implementation>>>
 
-->relay:* <<<
+->relay:Lead <<<
 STATUS: Working on auth module>>>
 
 ->relay:Lead <<<
@@ -279,3 +297,80 @@ Flag items that need verification in future sessions:
 - Save progress every 15-20 minutes of active work
 - Use `--handoff` flag for major milestones
 - Mark uncertainties as you encounter them
+
+## Work Trajectories
+
+Use Trail to record your work as a trajectory for future agents and humans to follow.
+
+### When Starting Work
+
+**Call `trail start` BEFORE diving into implementation** - this captures your full journey, not just the end result.
+
+Start a trajectory when picking up a task:
+
+```bash
+trail start "Implement user authentication"
+```
+
+With external task reference (beads ID, ticket number):
+```bash
+trail start "Fix login bug" --task "agent-relay-123"
+```
+
+### Recording Decisions
+
+Record key decisions as you work:
+
+```bash
+trail decision "Chose JWT over sessions" \
+  --reasoning "Stateless scaling requirements"
+```
+
+For minor decisions, reasoning is optional:
+```bash
+trail decision "Used existing auth middleware"
+```
+
+**Record decisions when you:**
+- Choose between alternatives
+- Make architectural trade-offs
+- Decide on an approach after investigation
+
+### Completing Work
+
+When done, complete with a retrospective:
+
+```bash
+trail complete --summary "Added JWT auth with refresh tokens" --confidence 0.85
+```
+
+**Confidence levels:**
+- 0.9+ : High confidence, well-tested
+- 0.7-0.9 : Good confidence, standard implementation
+- 0.5-0.7 : Some uncertainty, edge cases possible
+- <0.5 : Significant uncertainty, needs review
+
+### Abandoning Work
+
+If you need to stop without completing:
+
+```bash
+trail abandon --reason "Blocked by missing API credentials"
+```
+
+### Checking Status
+
+View current trajectory:
+```bash
+trail status
+```
+
+### Why Trail?
+
+Your trajectory helps others understand:
+- **What** you built (commits show this)
+- **Why** you built it this way (trajectory shows this)
+- **What alternatives** you considered
+- **What challenges** you faced
+
+Future agents can query past trajectories to learn from your decisions.
