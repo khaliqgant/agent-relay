@@ -957,6 +957,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         onAgentSelect={handleAgentSelect}
         onProjectSelect={handleProjectSelect}
         onSpawnClick={handleSpawnClick}
+        onTaskAssignClick={() => setIsTaskPanelOpen(true)}
         onGeneralClick={() => {
           selectAgent(null);
           setCurrentChannel('general');
@@ -1102,19 +1103,16 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         </button>
       )}
 
-      {/* Task Assignment Panel */}
+      {/* Task Assignment Modal */}
       {isTaskPanelOpen && (
-        <div className="fixed right-4 bottom-20 w-[450px] max-h-[600px] z-50 shadow-modal">
-          <div className="relative">
-            <button
-              onClick={() => setIsTaskPanelOpen(false)}
-              className="absolute -top-2 -right-2 w-6 h-6 bg-bg-elevated border border-border rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-bg-hover z-10"
-              title="Close task panel"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-fade-in"
+          onClick={() => setIsTaskPanelOpen(false)}
+        >
+          <div
+            className="w-[500px] max-w-[90vw] max-h-[80vh] overflow-y-auto animate-slide-down"
+            onClick={(e) => e.stopPropagation()}
+          >
             <TaskAssignmentUI
               agents={agents}
               tasks={assignedTasks}
@@ -1124,25 +1122,6 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
             />
           </div>
         </div>
-      )}
-
-      {/* Task Assignment Toggle Button (bottom-right, offset from trajectory) */}
-      {!isTaskPanelOpen && (
-        <button
-          onClick={() => setIsTaskPanelOpen(true)}
-          className="fixed right-20 bottom-4 w-12 h-12 bg-accent-purple text-white rounded-full shadow-[0_0_20px_rgba(168,85,247,0.4)] flex items-center justify-center hover:scale-105 transition-transform z-50"
-          title="Assign Task"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M9 11l3 3L22 4" />
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
-          {assignedTasks.filter((t) => t.status === 'assigned' || t.status === 'in_progress').length > 0 && (
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-accent text-bg-deep text-[10px] font-bold rounded-full flex items-center justify-center">
-              {assignedTasks.filter((t) => t.status === 'assigned' || t.status === 'in_progress').length}
-            </span>
-          )}
-        </button>
       )}
 
       {/* User Profile Panel */}
