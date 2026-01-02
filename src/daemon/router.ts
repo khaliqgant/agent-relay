@@ -770,12 +770,26 @@ export class Router {
       if (elapsed > this.deliveryOptions.deliveryTtlMs) {
         console.warn(`[router] Dropping ${deliverId} after TTL (${this.deliveryOptions.deliveryTtlMs}ms)`);
         this.pendingDeliveries.delete(deliverId);
+        // Mark message as failed in storage
+        const statusUpdate = this.storage?.updateMessageStatus?.(deliverId, 'failed');
+        if (statusUpdate instanceof Promise) {
+          statusUpdate.catch(err => {
+            console.error(`[router] Failed to update status for ${deliverId}:`, err);
+          });
+        }
         return;
       }
 
       if (pending.attempts >= this.deliveryOptions.maxAttempts) {
         console.warn(`[router] Dropping ${deliverId} after max attempts (${this.deliveryOptions.maxAttempts})`);
         this.pendingDeliveries.delete(deliverId);
+        // Mark message as failed in storage
+        const statusUpdate = this.storage?.updateMessageStatus?.(deliverId, 'failed');
+        if (statusUpdate instanceof Promise) {
+          statusUpdate.catch(err => {
+            console.error(`[router] Failed to update status for ${deliverId}:`, err);
+          });
+        }
         return;
       }
 
@@ -783,6 +797,13 @@ export class Router {
       if (!target) {
         console.warn(`[router] Dropping ${deliverId} - connection unavailable`);
         this.pendingDeliveries.delete(deliverId);
+        // Mark message as failed in storage
+        const statusUpdate = this.storage?.updateMessageStatus?.(deliverId, 'failed');
+        if (statusUpdate instanceof Promise) {
+          statusUpdate.catch(err => {
+            console.error(`[router] Failed to update status for ${deliverId}:`, err);
+          });
+        }
         return;
       }
 
