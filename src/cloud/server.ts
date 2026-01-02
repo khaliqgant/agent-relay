@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from 'redis';
 import { RedisStore } from 'connect-redis';
 import { getConfig } from './config.js';
+import { runMigrations } from './db/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -209,6 +210,10 @@ export async function createServer(): Promise<CloudServer> {
     app,
 
     async start() {
+      // Run database migrations before accepting connections
+      console.log('[cloud] Running database migrations...');
+      await runMigrations();
+
       return new Promise((resolve) => {
         server = app.listen(config.port, () => {
           console.log(`Agent Relay Cloud running on port ${config.port}`);
