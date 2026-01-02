@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y \
 # Copy built artifacts
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src/dashboard/out ./src/dashboard/out
+COPY --from=builder /app/src/cloud/db/migrations ./src/cloud/db/migrations
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 
