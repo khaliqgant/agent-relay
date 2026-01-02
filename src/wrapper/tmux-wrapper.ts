@@ -1348,16 +1348,19 @@ export class TmuxWrapper {
         : '';
 
       // Wait for input to be clear before injecting
+      // If input is not clear (human typing), re-queue and try later - never clear forcefully!
+      // Fix for agent-relay-j9z: forceful clearing destroys human input in progress
       const waitTimeoutMs = this.config.inputWaitTimeoutMs ?? 5000;
       const waitPollMs = this.config.inputWaitPollMs ?? 200;
       const inputClear = await this.waitForClearInput(waitTimeoutMs, waitPollMs);
       if (!inputClear) {
-        // Input still has text after timeout - clear it forcefully
-        this.logStderr('Input not clear after waiting, clearing forcefully');
-        await this.sendKeys('Escape');
-        await sleep(30);
-        await this.sendKeys('C-u');
-        await sleep(30);
+        // Input still has text after timeout - DON'T clear forcefully, re-queue instead
+        // This preserves any human input in progress
+        this.logStderr('Input not clear after waiting, re-queuing injection to preserve human input');
+        this.messageQueue.unshift(msg);
+        this.isInjecting = false;
+        setTimeout(() => this.checkForInjectionOpportunity(), this.config.injectRetryMs ?? 1000);
+        return;
       }
 
       // Ensure pane output is stable to avoid interleaving with active generation
