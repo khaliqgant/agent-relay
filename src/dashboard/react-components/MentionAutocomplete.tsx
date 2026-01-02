@@ -13,9 +13,19 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { Agent } from '../types';
 import { getAgentColor, getAgentInitials } from '../lib/colors';
 
+/** Human user info for autocomplete */
+export interface HumanUser {
+  /** Username (GitHub username) */
+  username: string;
+  /** Optional avatar URL */
+  avatarUrl?: string;
+}
+
 export interface MentionAutocompleteProps {
   /** List of available agents */
   agents: Agent[];
+  /** List of human users (extracted from recent messages) */
+  humanUsers?: HumanUser[];
   /** Current input value */
   inputValue: string;
   /** Cursor position in input */
@@ -34,39 +44,70 @@ interface MentionOption {
   description: string;
   isBroadcast?: boolean;
   isTeam?: boolean;
+  isHuman?: boolean;
+  avatarUrl?: string;
   memberCount?: number;
 }
 
 /**
- * Check if the input has an @-mention being typed at the start
+ * Check if the input has an @-mention being typed at the cursor position.
+ * Works for @ at any position in the text, not just the start.
  */
 export function getMentionQuery(value: string, cursorPos: number): string | null {
-  // Check if cursor is within an @mention at the start
-  const atMatch = value.match(/^@(\S*)/);
-  if (atMatch && cursorPos <= atMatch[0].length) {
-    return atMatch[1]; // Return the text after @
+  // Search backwards from cursor to find @
+  const textBeforeCursor = value.substring(0, cursorPos);
+
+  // Find the last @ before cursor that starts a mention
+  // A mention starts after whitespace, at start of string, or after certain punctuation
+  const mentionMatch = textBeforeCursor.match(/(?:^|[\s(])@(\S*)$/);
+  if (mentionMatch) {
+    return mentionMatch[1]; // Return the text after @
   }
   return null;
 }
 
 /**
- * Complete a mention in the input value
+ * Result of completing a mention.
+ */
+export interface CompletionResult {
+  /** The new input value with the completed mention */
+  value: string;
+  /** The cursor position after the completion (after the trailing space) */
+  cursorPosition: number;
+}
+
+/**
+ * Complete a mention in the input value at the cursor position.
  */
 export function completeMentionInValue(
   value: string,
-  mention: string
-): string {
-  const atMatch = value.match(/^@\S*/);
-  if (atMatch) {
-    // Replace the @partial with @CompletedName
-    const completedText = `@${mention} `;
-    return completedText + value.substring(atMatch[0].length);
+  mention: string,
+  cursorPos: number
+): CompletionResult {
+  const textBeforeCursor = value.substring(0, cursorPos);
+  const textAfterCursor = value.substring(cursorPos);
+
+  // Find the @ and partial text before cursor
+  const mentionMatch = textBeforeCursor.match(/(?:^|[\s(])@(\S*)$/);
+  if (mentionMatch) {
+    // Calculate where the @ starts (accounting for whitespace/punctuation before it)
+    const matchStart = mentionMatch.index || 0;
+    const prefixChar = mentionMatch[0].charAt(0);
+    const atStart = prefixChar === '@' ? matchStart : matchStart + 1;
+
+    // Build the new value
+    const beforeMention = value.substring(0, atStart);
+    const completedMention = `@${mention} `;
+    const newValue = beforeMention + completedMention + textAfterCursor;
+    const newCursorPos = beforeMention.length + completedMention.length;
+    return { value: newValue, cursorPosition: newCursorPos };
   }
-  return value;
+  return { value, cursorPosition: cursorPos };
 }
 
 export function MentionAutocomplete({
   agents,
+  humanUsers = [],
   inputValue,
   cursorPosition,
   onSelect,
@@ -144,6 +185,24 @@ export function MentionAutocomplete({
       });
     }
 
+    // Filter human users by username
+    const agentNames = new Set(agents.map(a => a.name.toLowerCase()));
+    const matchingHumans = humanUsers.filter((user) => {
+      const usernameLower = user.username.toLowerCase();
+      return usernameLower.includes(queryLower) &&
+        !agentNames.has(usernameLower); // Don't show if they're also an agent name
+    });
+
+    matchingHumans.forEach((user) => {
+      result.push({
+        name: user.username,
+        displayName: `@${user.username}`,
+        description: 'Human user',
+        isHuman: true,
+        avatarUrl: user.avatarUrl,
+      });
+    });
+
     // Filter agents by name
     const matchingAgents = agents.filter((agent) =>
       agent.name.toLowerCase().includes(queryLower)
@@ -158,7 +217,7 @@ export function MentionAutocomplete({
     });
 
     return result;
-  }, [query, agents, teams]);
+  }, [query, agents, humanUsers, teams]);
 
   // Reset selection when options change
   useEffect(() => {
@@ -193,8 +252,8 @@ export function MentionAutocomplete({
           e.preventDefault();
           const selected = options[selectedIndex];
           if (selected) {
-            const newValue = completeMentionInValue(inputValue, selected.name);
-            onSelect(selected.name, newValue);
+            const result = completeMentionInValue(inputValue, selected.name, cursorPosition);
+            onSelect(selected.name, result.value);
           }
           break;
         case 'Escape':
@@ -203,7 +262,7 @@ export function MentionAutocomplete({
           break;
       }
     },
-    [isVisible, options, selectedIndex, inputValue, onSelect, onClose]
+    [isVisible, options, selectedIndex, inputValue, cursorPosition, onSelect, onClose]
   );
 
   // Register keyboard listener
@@ -217,10 +276,10 @@ export function MentionAutocomplete({
   // Handle click on option
   const handleClick = useCallback(
     (option: MentionOption) => {
-      const newValue = completeMentionInValue(inputValue, option.name);
-      onSelect(option.name, newValue);
+      const result = completeMentionInValue(inputValue, option.name, cursorPosition);
+      onSelect(option.name, result.value);
     },
-    [inputValue, onSelect]
+    [inputValue, cursorPosition, onSelect]
   );
 
   if (!isVisible || options.length === 0) {
@@ -242,25 +301,41 @@ export function MentionAutocomplete({
           onClick={() => handleClick(option)}
           onMouseEnter={() => setSelectedIndex(index)}
         >
-          <div
-            className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[11px] font-semibold"
-            style={{
-              background: option.isBroadcast
-                ? 'var(--color-warning, #f59e0b)'
-                : option.isTeam
-                ? 'var(--color-accent-purple, #a855f7)'
-                : getAgentColor(option.name).primary,
-            }}
-          >
-            {option.isBroadcast ? '*' : option.isTeam ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-            ) : getAgentInitials(option.name)}
-          </div>
+          {/* Avatar/Icon */}
+          {option.isHuman && option.avatarUrl ? (
+            <img
+              src={option.avatarUrl}
+              alt={option.name}
+              className="w-7 h-7 rounded-md object-cover"
+            />
+          ) : (
+            <div
+              className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[11px] font-semibold"
+              style={{
+                background: option.isBroadcast
+                  ? 'var(--color-warning, #f59e0b)'
+                  : option.isTeam
+                  ? 'var(--color-accent-purple, #a855f7)'
+                  : option.isHuman
+                  ? '#a855f7' // Purple for human users
+                  : getAgentColor(option.name).primary,
+              }}
+            >
+              {option.isBroadcast ? '*' : option.isTeam ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+              ) : option.isHuman ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+              ) : getAgentInitials(option.name)}
+            </div>
+          )}
           <div className="flex flex-col gap-0.5 min-w-0 flex-1">
             <span className="text-sm font-medium text-[#d1d2d3]">{option.displayName}</span>
             <span className="text-xs text-[#8d8d8e] truncate">{option.description}</span>

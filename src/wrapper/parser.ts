@@ -58,9 +58,15 @@ const CODE_FENCE = /^```/;
 // Two patterns for fence end detection:
 // - FENCE_END_START: ">>>" at the start of a line (with optional leading whitespace)
 // - FENCE_END_LINE: ">>>" at the end of a line (content followed by >>>)
+// Note: Escaped \>>> should NOT trigger fence end (see isEscapedFenceEnd)
 const FENCE_END_START = /^(?:\s*)?>>>/;
 const FENCE_END_LINE = />>>\s*$/;
 const FENCE_END = new RegExp(`${FENCE_END_START.source}|${FENCE_END_LINE.source}`);
+
+// Escape patterns for literal <<< and >>> in content
+// Use \<<< to output literal <<<, use \>>> to output literal >>>
+const ESCAPED_FENCE_START = /\\<<</g;
+const ESCAPED_FENCE_END = /\\>>>/g;
 
 // Maximum lines in a fenced block before assuming it's stuck
 // Lower value (30) ensures messages get sent even if agent forgets >>>
@@ -74,12 +80,46 @@ const RELAY_INJECTION_PREFIX = /^\s*Relay message from /;
 const MAX_INLINE_CONTINUATION_LINES = 30;
 
 // Spawn/release command patterns - these should NOT be parsed as relay messages
-const _SPAWN_COMMAND_PATTERN = /->relay:spawn\s+\S+/i;
-const _RELEASE_COMMAND_PATTERN = /->relay:release\s+\S+/i;
+// They are handled separately by the wrappers (pty-wrapper.ts, tmux-wrapper.ts)
+const SPAWN_COMMAND_PATTERN = /->relay:spawn\s+\S+/i;
+const RELEASE_COMMAND_PATTERN = /->relay:release\s+\S+/i;
+
+/**
+ * Check if a line is a spawn or release command that should be handled
+ * by the wrapper's spawn subsystem, not parsed as a relay message.
+ */
+function isSpawnOrReleaseCommand(line: string): boolean {
+  return SPAWN_COMMAND_PATTERN.test(line) || RELEASE_COMMAND_PATTERN.test(line);
+}
 
 // Claude extended thinking block markers - skip content inside these
 const THINKING_START = /<antml:thinking>/;
 const THINKING_END = /<\/thinking>/;
+
+/**
+ * Patterns that indicate instructional/example text that should NOT be parsed as actual commands.
+ * These are common in system prompts, documentation, and injected instructions.
+ */
+const INSTRUCTIONAL_MARKERS = [
+  /\bSEND:\s*$/i,                    // "SEND:" at end of body (instruction prefix)
+  /\bPROTOCOL:\s*\(\d+\)/i,          // "PROTOCOL: (1)" - numbered protocol instructions
+  /\bExample:/i,                      // "Example:" marker
+  /\\->relay:/,                       // Escaped relay prefix in body (documentation)
+  /\\->thinking:/,                    // Escaped thinking prefix in body (documentation)
+  /^AgentName\s+/,                    // Body starting with "AgentName" (placeholder in examples)
+  /^Target\s+/,                       // Body starting with "Target" (placeholder in examples)
+  /\[Agent Relay\]/,                  // Injected instruction header
+  /MULTI-LINE:/i,                     // Multi-line format instruction
+  /RECEIVE:/i,                        // Receive instruction marker
+];
+
+/**
+ * Check if a parsed relay command body looks like instructional/example text.
+ * These patterns commonly appear in system prompts and documentation.
+ */
+function isInstructionalText(body: string): boolean {
+  return INSTRUCTIONAL_MARKERS.some(pattern => pattern.test(body));
+}
 
 /**
  * Escape special regex characters in a string
@@ -165,6 +205,32 @@ function stripAnsi(str: string): string {
   // Strip orphaned CSI sequences at the start of the string
   result = result.replace(ORPHANED_CSI_PATTERN, '');
   return result;
+}
+
+/**
+ * Check if a line contains an escaped fence end (\>>>) that should NOT trigger fence close.
+ * Returns true if the >>> is escaped (preceded by backslash).
+ */
+function isEscapedFenceEnd(line: string): boolean {
+  // Check if >>> at end of line is escaped
+  if (/\\>>>\s*$/.test(line)) {
+    return true;
+  }
+  // Check if >>> at start of line is escaped
+  if (/^(?:\s*)?\\>>>/.test(line)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Unescape fence markers in content.
+ * Converts \<<< to <<< and \>>> to >>>
+ */
+function unescapeFenceMarkers(content: string): string {
+  return content
+    .replace(ESCAPED_FENCE_START, '<<<')
+    .replace(ESCAPED_FENCE_END, '>>>');
 }
 
 export class OutputParser {
@@ -670,11 +736,23 @@ export class OutputParser {
       return { command: null, output: unescaped };
     }
 
+    // Skip spawn/release commands - they are handled by the wrapper's spawn subsystem
+    // These should not be parsed as regular relay messages
+    if (isSpawnOrReleaseCommand(stripped)) {
+      return { command: null, output: line };
+    }
+
     // Check for inline relay (on stripped text)
     if (this.options.enableInline) {
       const relayMatch = stripped.match(this.inlineRelayPattern);
       if (relayMatch) {
         const [raw, target, threadProject, threadId, body] = relayMatch;
+
+        // Skip instructional/example text (common in system prompts)
+        if (isInstructionalText(body)) {
+          return { command: null, output: line };
+        }
+
         const { to, project } = parseTarget(target);
         return {
           command: {
@@ -693,6 +771,12 @@ export class OutputParser {
       const thinkingMatch = stripped.match(this.inlineThinkingPattern);
       if (thinkingMatch) {
         const [raw, target, threadProject, threadId, body] = thinkingMatch;
+
+        // Skip instructional/example text (common in system prompts)
+        if (isInstructionalText(body)) {
+          return { command: null, output: line };
+        }
+
         const { to, project } = parseTarget(target);
         return {
           command: {
@@ -811,7 +895,7 @@ export class OutputParser {
       // Auto-close on double blank line (agent forgot >>>)
       // Only if we have actual content to send
       if (consecutiveBlankLines >= 2 && this.fencedInlineBuffer.trim().length > 0) {
-        const body = stripAnsi(this.fencedInlineBuffer.trim());
+        const body = unescapeFenceMarkers(stripAnsi(this.fencedInlineBuffer.trim()));
         const command: ParsedCommand = {
           to: this.fencedInlineTarget,
           kind: this.fencedInlineKind,
@@ -847,7 +931,7 @@ export class OutputParser {
       if (this.inlineRelayPattern.test(stripped) || this.fencedRelayPattern.test(stripped)) {
         // Auto-close and send the incomplete fenced block (if it has content)
         if (this.fencedInlineBuffer.trim().length > 0) {
-          const body = stripAnsi(this.fencedInlineBuffer.trim());
+          const body = unescapeFenceMarkers(stripAnsi(this.fencedInlineBuffer.trim()));
           const command: ParsedCommand = {
             to: this.fencedInlineTarget,
             kind: this.fencedInlineKind,
@@ -879,7 +963,8 @@ export class OutputParser {
       }
 
       // Check if this line closes the fenced block
-      if (FENCE_END.test(stripped)) {
+      // Skip if the >>> is escaped (\>>>)
+      if (FENCE_END.test(stripped) && !isEscapedFenceEnd(stripped)) {
         // If >>> is at end of line (not start), extract content before it
         const endsWithFence = />>>\s*$/.test(stripped) && !/^(?:\s*)?>>>/.test(stripped);
         if (endsWithFence) {
@@ -893,8 +978,8 @@ export class OutputParser {
           }
         }
 
-        // Complete the fenced inline command
-        const body = stripAnsi(this.fencedInlineBuffer.trim());
+        // Complete the fenced inline command - unescape any \<<< and \>>> in content
+        const body = unescapeFenceMarkers(stripAnsi(this.fencedInlineBuffer.trim()));
         this.fencedInlineRaw.push(line);
 
         const command: ParsedCommand = {

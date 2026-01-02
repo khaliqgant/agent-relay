@@ -5,7 +5,7 @@
  * Manages global state via hooks and provides context to child components.
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { Agent, Project } from '../types';
 import { Sidebar } from './layout/Sidebar';
 import { Header } from './layout/Header';
@@ -16,18 +16,35 @@ import { SpawnModal, type SpawnConfig } from './SpawnModal';
 import { NewConversationModal } from './NewConversationModal';
 import { SettingsPanel, defaultSettings, type Settings } from './SettingsPanel';
 import { ConversationHistory } from './ConversationHistory';
-import { MentionAutocomplete, getMentionQuery, completeMentionInValue } from './MentionAutocomplete';
+import { MentionAutocomplete, getMentionQuery, completeMentionInValue, type HumanUser } from './MentionAutocomplete';
 import { FileAutocomplete, getFileQuery, completeFileInValue } from './FileAutocomplete';
 import { WorkspaceSelector, type Workspace } from './WorkspaceSelector';
 import { AddWorkspaceModal } from './AddWorkspaceModal';
 import { LogViewerPanel } from './LogViewerPanel';
 import { TrajectoryViewer } from './TrajectoryViewer';
+import { TypingIndicator } from './TypingIndicator';
+import { OnlineUsersIndicator } from './OnlineUsersIndicator';
+import { UserProfilePanel } from './UserProfilePanel';
+import { CoordinatorPanel } from './CoordinatorPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAgents } from './hooks/useAgents';
 import { useMessages } from './hooks/useMessages';
 import { useOrchestrator } from './hooks/useOrchestrator';
 import { useTrajectory } from './hooks/useTrajectory';
+import { usePresence, type UserPresence } from './hooks/usePresence';
+import { useCloudSessionOptional } from './CloudSessionProvider';
 import { api } from '../lib/api';
+import type { CurrentUser } from './MessageList';
+
+/**
+ * Check if a sender is a human user (not an agent or system name)
+ * Extracts the logic for identifying human users to avoid duplication
+ */
+function isHumanSender(sender: string, agentNames: Set<string>): boolean {
+  return sender !== 'Dashboard' &&
+    sender !== '*' &&
+    !agentNames.has(sender.toLowerCase());
+}
 
 export interface AppProps {
   /** Initial WebSocket URL (optional, defaults to current host) */
@@ -54,6 +71,27 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     spawnAgent: orchestratorSpawnAgent,
     stopAgent: orchestratorStopAgent,
   } = useOrchestrator({ apiUrl: orchestratorUrl });
+
+  // Cloud session for user info (GitHub avatar/username)
+  const cloudSession = useCloudSessionOptional();
+
+  // Derive current user from cloud session (falls back to undefined in non-cloud mode)
+  const currentUser: CurrentUser | undefined = cloudSession?.user
+    ? {
+        displayName: cloudSession.user.githubUsername,
+        avatarUrl: cloudSession.user.avatarUrl,
+      }
+    : undefined;
+
+  // Presence tracking for online users and typing indicators
+  const { onlineUsers, typingUsers, sendTyping, isConnected: isPresenceConnected } = usePresence({
+    currentUser: currentUser
+      ? { username: currentUser.displayName, avatarUrl: currentUser.avatarUrl }
+      : undefined,
+  });
+
+  // User profile panel state
+  const [selectedUserProfile, setSelectedUserProfile] = useState<UserPresence | null>(null);
 
   // View mode state
   const [viewMode, setViewMode] = useState<'local' | 'fleet'>('local');
@@ -93,6 +131,9 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   const { steps: trajectorySteps, status: trajectoryStatus, isLoading: isTrajectoryLoading } = useTrajectory({
     autoPoll: isTrajectoryOpen, // Only poll when panel is open
   });
+
+  // Coordinator panel state
+  const [isCoordinatorOpen, setIsCoordinatorOpen] = useState(false);
 
   // Mobile sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -139,7 +180,37 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     sendError,
   } = useMessages({
     messages: data?.messages ?? [],
+    senderName: currentUser?.displayName,
   });
+
+  // Extract human users from messages (users who are not agents)
+  // This enables @ mentioning other human users in cloud mode
+  const humanUsers = useMemo((): HumanUser[] => {
+    const agentNames = new Set(agents.map((a) => a.name.toLowerCase()));
+    const seenUsers = new Map<string, HumanUser>();
+
+    // Include current user if in cloud mode
+    if (currentUser) {
+      seenUsers.set(currentUser.displayName.toLowerCase(), {
+        username: currentUser.displayName,
+        avatarUrl: currentUser.avatarUrl,
+      });
+    }
+
+    // Extract unique human users from message senders
+    for (const msg of data?.messages ?? []) {
+      const sender = msg.from;
+      if (sender && isHumanSender(sender, agentNames) && !seenUsers.has(sender.toLowerCase())) {
+        seenUsers.set(sender.toLowerCase(), {
+          username: sender,
+          // Note: We don't have avatar URLs for users from messages
+          // unless we fetch them separately
+        });
+      }
+    }
+
+    return Array.from(seenUsers.values());
+  }, [data?.messages, agents, currentUser]);
 
   // Track unread messages when sidebar is closed on mobile
   useEffect(() => {
@@ -201,30 +272,115 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     }
   }, [workspaces, orchestratorAgents, activeWorkspaceId]);
 
-  // Fallback: Fetch bridge/project data when fleet is available (legacy)
+  // Fetch bridge/project data for multi-project mode
   useEffect(() => {
     if (workspaces.length > 0) return; // Skip if using orchestrator
-    if (!data?.fleet?.servers?.length) return;
 
     const fetchProjects = async () => {
       const result = await api.getBridgeData();
       if (result.success && result.data) {
-        const { servers, agents } = result.data;
-        const projectList: Project[] = servers.map((server) => ({
-          id: server.id,
-          path: server.url,
-          name: server.name || server.url.split('/').pop(),
-          agents: agents.filter((a) => a.server === server.id),
-          lead: undefined,
-        }));
-        setProjects(projectList);
+        // Bridge data returns { projects, messages, connected }
+        const bridgeData = result.data as {
+          projects?: Array<{
+            id: string;
+            name?: string;
+            path: string;
+            connected?: boolean;
+            agents?: Array<{ name: string; status: string; task?: string; cli?: string }>;
+            lead?: { name: string; connected: boolean };
+          }>;
+          connected?: boolean;
+          currentProjectPath?: string;
+        };
+
+        if (bridgeData.projects && bridgeData.projects.length > 0) {
+          const projectList: Project[] = bridgeData.projects.map((p) => ({
+            id: p.id,
+            path: p.path,
+            name: p.name || p.path.split('/').pop(),
+            agents: (p.agents || []).map((a) => ({
+              name: a.name,
+              status: a.status === 'online' || a.status === 'active' ? 'online' : 'offline',
+              currentTask: a.task,
+              cli: a.cli,
+            })) as Agent[],
+            lead: p.lead,
+          }));
+          setProjects(projectList);
+          // Set first project as current if none selected
+          if (!currentProject && projectList.length > 0) {
+            setCurrentProject(projectList[0].id);
+          }
+        }
       }
     };
 
+    // Fetch immediately on mount
     fetchProjects();
-    const interval = setInterval(fetchProjects, 30000);
+    // Poll for updates
+    const interval = setInterval(fetchProjects, 5000);
     return () => clearInterval(interval);
-  }, [data?.fleet?.servers?.length, workspaces.length]);
+  }, [workspaces.length, currentProject]);
+
+  // Bridge-level agents (like Architect) that should be shown separately
+  const BRIDGE_AGENT_NAMES = ['architect'];
+
+  // Separate bridge-level agents from regular project agents
+  const { bridgeAgents, projectAgents } = useMemo(() => {
+    const bridge: Agent[] = [];
+    const project: Agent[] = [];
+
+    for (const agent of agents) {
+      if (BRIDGE_AGENT_NAMES.includes(agent.name.toLowerCase())) {
+        bridge.push(agent);
+      } else {
+        project.push(agent);
+      }
+    }
+
+    return { bridgeAgents: bridge, projectAgents: project };
+  }, [agents]);
+
+  // Merge local daemon agents into their project when we have bridge projects
+  // This prevents agents from appearing under "Local" instead of their project folder
+  const mergedProjects = useMemo(() => {
+    if (projects.length === 0) return projects;
+
+    // Get local agent names (excluding bridge agents)
+    const localAgentNames = new Set(projectAgents.map((a) => a.name.toLowerCase()));
+    if (localAgentNames.size === 0) return projects;
+
+    // Find the current project (the one whose daemon we're connected to)
+    // This is typically the first project or the one marked as current
+    return projects.map((project, index) => {
+      // Merge local agents into the current/first project
+      // Local agents should appear in their actual project, not "Local"
+      const isCurrentDaemonProject = index === 0 || project.id === currentProject;
+
+      if (isCurrentDaemonProject) {
+        // Merge local agents with project agents, avoiding duplicates
+        const existingNames = new Set(project.agents.map((a) => a.name.toLowerCase()));
+        const newAgents = projectAgents.filter((a) => !existingNames.has(a.name.toLowerCase()));
+
+        return {
+          ...project,
+          agents: [...project.agents, ...newAgents],
+        };
+      }
+
+      return project;
+    });
+  }, [projects, projectAgents, currentProject]);
+
+  // Determine if local agents should be shown separately
+  // Only show "Local" folder if we don't have bridge projects to merge them into
+  const localAgentsForSidebar = useMemo(() => {
+    if (mergedProjects.length > 0) {
+      // Don't show local agents separately - they're merged into projects
+      return [];
+    }
+    return projectAgents;
+  }, [mergedProjects, projectAgents]);
 
   // Handle workspace selection
   const handleWorkspaceSelect = useCallback(async (workspace: Workspace) => {
@@ -294,6 +450,11 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   // Handle new conversation click
   const handleNewConversationClick = useCallback(() => {
     setIsNewConversationOpen(true);
+  }, []);
+
+  // Handle coordinator click
+  const handleCoordinatorClick = useCallback(() => {
+    setIsCoordinatorOpen(true);
   }, []);
 
   // Handle send from new conversation modal - select the channel after sending
@@ -476,8 +637,9 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
 
         {/* Sidebar */}
         <Sidebar
-          agents={agents}
-          projects={projects}
+          agents={localAgentsForSidebar}
+          bridgeAgents={bridgeAgents}
+          projects={mergedProjects}
           currentProject={currentProject}
           selectedAgent={selectedAgent?.name}
           viewMode={viewMode}
@@ -505,13 +667,25 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           <Header
           currentChannel={currentChannel}
           selectedAgent={selectedAgent}
+          projects={mergedProjects}
+          currentProject={mergedProjects.find(p => p.id === currentProject) || null}
           onCommandPaletteOpen={handleCommandPaletteOpen}
           onSettingsClick={handleSettingsClick}
           onHistoryClick={handleHistoryClick}
           onNewConversationClick={handleNewConversationClick}
+          onCoordinatorClick={handleCoordinatorClick}
           onMenuClick={() => setIsSidebarOpen(true)}
           hasUnreadNotifications={hasUnreadMessages}
         />
+        {/* Online users indicator - only show in cloud mode */}
+        {currentUser && onlineUsers.length > 0 && (
+          <div className="flex items-center justify-end px-4 py-1 bg-bg-tertiary/80 border-b border-border-subtle">
+            <OnlineUsersIndicator
+              onlineUsers={onlineUsers}
+              onUserClick={setSelectedUserProfile}
+            />
+          </div>
+        )}
         </div>
 
         {/* Content Area */}
@@ -542,6 +716,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
                 onThreadClick={(messageId) => setCurrentThread(messageId)}
                 highlightedMessageId={currentThread ?? undefined}
                 agents={data?.agents}
+                currentUser={currentUser}
               />
             )}
           </div>
@@ -570,27 +745,39 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
                     // For topic threads, broadcast to all; for reply chains, reply to the other participant
                     let recipient = '*';
                     if (!isTopicThread && originalMessage) {
-                      // If Dashboard sent the original message, reply to the recipient
+                      // If current user sent the original message, reply to the recipient
                       // If someone else sent it, reply to the sender
-                      recipient = originalMessage.from === 'Dashboard'
+                      const isFromCurrentUser = originalMessage.from === 'Dashboard' ||
+                        (currentUser && originalMessage.from === currentUser.displayName);
+                      recipient = isFromCurrentUser
                         ? originalMessage.to
                         : originalMessage.from;
                     }
                     return sendMessage(recipient, content, currentThread);
                   }}
                   isSending={isSending}
+                  currentUser={currentUser}
                 />
               </div>
             );
           })()}
         </div>
 
+        {/* Typing Indicator */}
+        {typingUsers.length > 0 && (
+          <div className="px-4 bg-bg-tertiary border-t border-border-subtle">
+            <TypingIndicator typingUsers={typingUsers} />
+          </div>
+        )}
+
         {/* Message Composer */}
         <div className="p-4 bg-bg-tertiary border-t border-border-subtle">
           <MessageComposer
             recipient={currentChannel === 'general' ? '*' : currentChannel}
             agents={agents}
+            humanUsers={humanUsers}
             onSend={sendMessage}
+            onTyping={sendTyping}
             isSending={isSending}
             error={sendError}
           />
@@ -707,6 +894,30 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           </svg>
         </button>
       )}
+
+      {/* User Profile Panel */}
+      <UserProfilePanel
+        user={selectedUserProfile}
+        onClose={() => setSelectedUserProfile(null)}
+        onMention={(username) => {
+          // TODO: Focus composer and insert @username
+          // For now, just close the panel
+          setSelectedUserProfile(null);
+        }}
+      />
+
+      {/* Coordinator Panel */}
+      <CoordinatorPanel
+        isOpen={isCoordinatorOpen}
+        onClose={() => setIsCoordinatorOpen(false)}
+        projects={mergedProjects}
+        isCloudMode={!!currentUser}
+        hasArchitect={bridgeAgents.some(a => a.name.toLowerCase() === 'architect')}
+        onArchitectSpawned={() => {
+          // Architect will appear via WebSocket update
+          setIsCoordinatorOpen(false);
+        }}
+      />
     </div>
   );
 }
@@ -729,12 +940,14 @@ interface PendingAttachment {
 interface MessageComposerProps {
   recipient: string;
   agents: Agent[];
+  humanUsers: HumanUser[];
   onSend: (to: string, content: string, thread?: string, attachmentIds?: string[]) => Promise<boolean>;
+  onTyping?: (isTyping: boolean) => void;
   isSending: boolean;
   error: string | null;
 }
 
-function MessageComposer({ recipient, agents, onSend, isSending, error }: MessageComposerProps) {
+function MessageComposer({ recipient, agents, humanUsers, onSend, onTyping, isSending, error }: MessageComposerProps) {
   const [message, setMessage] = useState('');
   const [cursorPosition, setCursorPosition] = useState(0);
   const [showMentions, setShowMentions] = useState(false);
@@ -743,14 +956,8 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Handle file selection
-  const handleFileSelect = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-
-    const imageFiles = Array.from(files).filter(file =>
-      file.type.startsWith('image/')
-    );
-
+  // Process image files (used by both paste and file input)
+  const processImageFiles = useCallback(async (imageFiles: File[]) => {
     for (const file of imageFiles) {
       const id = crypto.randomUUID();
       const preview = URL.createObjectURL(file);
@@ -789,28 +996,55 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
     }
   }, []);
 
-  // Handle paste for clipboard images
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
+  // Handle file selection from file input
+  const handleFileSelect = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
 
-    const imageItems = Array.from(items).filter(item =>
-      item.type.startsWith('image/')
+    const imageFiles = Array.from(files).filter(file =>
+      file.type.startsWith('image/')
     );
 
-    if (imageItems.length > 0) {
-      e.preventDefault();
-      const files = imageItems
-        .map(item => item.getAsFile())
-        .filter((f): f is File => f !== null);
+    if (imageFiles.length > 0) {
+      processImageFiles(imageFiles);
+    }
+  }, [processImageFiles]);
 
-      if (files.length > 0) {
-        const dataTransfer = new DataTransfer();
-        files.forEach(f => dataTransfer.items.add(f));
-        handleFileSelect(dataTransfer.files);
+  // Handle paste for clipboard images
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    // Collect image files from both sources
+    let imageFiles: File[] = [];
+
+    // Method 1: Check clipboardData.files (works for file pastes)
+    if (clipboardData.files && clipboardData.files.length > 0) {
+      imageFiles = Array.from(clipboardData.files).filter(file =>
+        file.type.startsWith('image/')
+      );
+    }
+
+    // Method 2: Check clipboardData.items (works for screenshots/copied images)
+    // This is the primary method for pasted images from clipboard
+    if (imageFiles.length === 0 && clipboardData.items) {
+      const items = Array.from(clipboardData.items);
+      for (const item of items) {
+        // Check if this item is an image
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            imageFiles.push(file);
+          }
+        }
       }
     }
-  }, [handleFileSelect]);
+
+    // Process any found images
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      processImageFiles(imageFiles);
+    }
+  }, [processImageFiles]);
 
   // Remove an attachment
   const removeAttachment = useCallback((id: string) => {
@@ -828,6 +1062,9 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
     const cursorPos = e.target.selectionStart || 0;
     setMessage(value);
     setCursorPosition(cursorPos);
+
+    // Send typing indicator when user has content
+    onTyping?.(value.trim().length > 0);
 
     // Check for file autocomplete first (@ followed by path-like pattern)
     const fileQuery = getFileQuery(value, cursorPos);
@@ -1033,6 +1270,7 @@ function MessageComposer({ recipient, agents, onSend, isSending, error }: Messag
           {/* Agent mention autocomplete */}
           <MentionAutocomplete
             agents={agents}
+            humanUsers={humanUsers}
             inputValue={message}
             cursorPosition={cursorPosition}
             onSelect={handleMentionSelect}

@@ -6,6 +6,7 @@
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { Connection, type ConnectionConfig, DEFAULT_CONFIG } from './connection.js';
 import { Router } from './router.js';
 import type { Envelope, SendPayload, ShadowBindPayload, ShadowUnbindPayload, LogPayload } from '../protocol/types.js';
@@ -13,6 +14,8 @@ import { createStorageAdapter, type StorageAdapter, type StorageConfig } from '.
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
 import { AgentRegistry } from './agent-registry.js';
+import { daemonLog as log } from '../utils/logger.js';
+import { getCloudSync, type CloudSyncService, type RemoteAgent, type CrossMachineMessage } from './cloud-sync.js';
 
 export interface DaemonConfig extends ConnectionConfig {
   socketPath: string;
@@ -23,6 +26,10 @@ export interface DaemonConfig extends ConnectionConfig {
   storageConfig?: StorageConfig;
   /** Directory for team data (agents.json, etc.) */
   teamDir?: string;
+  /** Enable cloud sync for cross-machine agent communication */
+  cloudSync?: boolean;
+  /** Cloud API URL (defaults to https://api.agent-relay.com) */
+  cloudUrl?: string;
 }
 
 export const DEFAULT_SOCKET_PATH = '/tmp/agent-relay.sock';
@@ -43,6 +50,8 @@ export class Daemon {
   private storageInitialized = false;
   private registry?: AgentRegistry;
   private processingStateInterval?: NodeJS.Timeout;
+  private cloudSync?: CloudSyncService;
+  private remoteAgents: RemoteAgent[] = [];
 
   /** Callback for log output from agents (used by dashboard for streaming) */
   onLogOutput?: (agentName: string, data: string, timestamp: number) => void;
@@ -82,7 +91,7 @@ export class Daemon {
       fs.writeFileSync(tempPath, data, 'utf-8');
       fs.renameSync(tempPath, targetPath);
     } catch (err) {
-      console.error('[daemon] Failed to write agents.json:', err);
+      log.error('Failed to write agents.json', { error: String(err) });
     }
   }
 
@@ -99,7 +108,7 @@ export class Daemon {
       fs.writeFileSync(tempPath, data, 'utf-8');
       fs.renameSync(tempPath, targetPath);
     } catch (err) {
-      console.error('[daemon] Failed to write processing-state.json:', err);
+      log.error('Failed to write processing-state.json', { error: String(err) });
     }
   }
 
@@ -123,6 +132,10 @@ export class Daemon {
       storage: this.storage,
       registry: this.registry,
       onProcessingStateChange: () => this.writeProcessingStateFile(),
+      crossMachineHandler: {
+        sendCrossMachineMessage: this.sendCrossMachineMessage.bind(this),
+        isRemoteAgent: this.isRemoteAgent.bind(this),
+      },
     });
     this.storageInitialized = true;
   }
@@ -135,6 +148,9 @@ export class Daemon {
 
     // Initialize storage
     await this.initStorage();
+
+    // Initialize cloud sync if configured
+    await this.initCloudSync();
 
     // Clean up stale socket (only if it's actually a socket)
     if (fs.existsSync(this.config.socketPath)) {
@@ -166,10 +182,181 @@ export class Daemon {
           this.writeProcessingStateFile();
         }, Daemon.PROCESSING_STATE_INTERVAL_MS);
 
-        console.log(`[daemon] Listening on ${this.config.socketPath}`);
+        log.info('Listening', { socketPath: this.config.socketPath });
         resolve();
       });
     });
+  }
+
+  /**
+   * Initialize cloud sync service for cross-machine agent communication.
+   */
+  private async initCloudSync(): Promise<void> {
+    // Check for cloud config file
+    const dataDir = process.env.AGENT_RELAY_DATA_DIR ||
+      path.join(os.homedir(), '.local', 'share', 'agent-relay');
+    const configPath = path.join(dataDir, 'cloud-config.json');
+
+    if (!fs.existsSync(configPath)) {
+      log.info('Cloud sync disabled (not linked to cloud)');
+      return;
+    }
+
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+      this.cloudSync = getCloudSync({
+        apiKey: config.apiKey,
+        cloudUrl: config.cloudUrl || this.config.cloudUrl,
+        enabled: this.config.cloudSync !== false,
+      });
+
+      // Listen for remote agent updates
+      this.cloudSync.on('remote-agents-updated', (agents: RemoteAgent[]) => {
+        this.remoteAgents = agents;
+        log.info('Remote agents updated', { count: agents.length });
+        this.writeRemoteAgentsFile();
+      });
+
+      // Listen for cross-machine messages
+      this.cloudSync.on('cross-machine-message', (msg: CrossMachineMessage) => {
+        this.handleCrossMachineMessage(msg);
+      });
+
+      // Listen for cloud commands (e.g., credential refresh)
+      this.cloudSync.on('command', (cmd: { type: string; payload: unknown }) => {
+        log.info('Cloud command received', { type: cmd.type });
+        // Handle commands like credential updates, config changes, etc.
+      });
+
+      await this.cloudSync.start();
+      log.info('Cloud sync enabled');
+    } catch (err) {
+      log.error('Failed to initialize cloud sync', { error: String(err) });
+    }
+  }
+
+  /**
+   * Write remote agents to file for dashboard consumption.
+   */
+  private writeRemoteAgentsFile(): void {
+    try {
+      const targetPath = path.join(
+        this.config.teamDir ?? path.dirname(this.config.socketPath),
+        'remote-agents.json'
+      );
+      const data = JSON.stringify({
+        agents: this.remoteAgents,
+        updatedAt: Date.now(),
+      }, null, 2);
+      const tempPath = `${targetPath}.tmp`;
+      fs.writeFileSync(tempPath, data, 'utf-8');
+      fs.renameSync(tempPath, targetPath);
+    } catch (err) {
+      log.error('Failed to write remote-agents.json', { error: String(err) });
+    }
+  }
+
+  /**
+   * Handle incoming message from another machine via cloud.
+   */
+  private handleCrossMachineMessage(msg: CrossMachineMessage): void {
+    log.info('Cross-machine message received', {
+      from: `${msg.from.daemonName}:${msg.from.agent}`,
+      to: msg.to,
+    });
+
+    // Find local agent
+    const targetConnection = Array.from(this.connections).find(
+      c => c.agentName === msg.to
+    );
+
+    if (!targetConnection) {
+      log.warn('Target agent not found locally', { agent: msg.to });
+      return;
+    }
+
+    // Inject message to local agent
+    const envelope: Envelope<SendPayload> = {
+      v: 1,
+      type: 'SEND',
+      id: `cross-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      ts: Date.now(),
+      from: `${msg.from.daemonName}:${msg.from.agent}`,
+      to: msg.to,
+      payload: {
+        kind: 'message',
+        body: msg.content,
+        data: {
+          _crossMachine: true,
+          _fromDaemon: msg.from.daemonId,
+          _fromDaemonName: msg.from.daemonName,
+          ...msg.metadata,
+        },
+      },
+    };
+
+    this.router.route(targetConnection as any, envelope as any);
+  }
+
+  /**
+   * Send message to agent on another machine via cloud.
+   */
+  async sendCrossMachineMessage(
+    targetDaemonId: string,
+    targetAgent: string,
+    fromAgent: string,
+    content: string,
+    metadata?: Record<string, unknown>
+  ): Promise<boolean> {
+    if (!this.cloudSync?.isConnected()) {
+      log.warn('Cannot send cross-machine message: not connected to cloud');
+      return false;
+    }
+
+    try {
+      await this.cloudSync.sendCrossMachineMessage(
+        targetDaemonId,
+        targetAgent,
+        fromAgent,
+        content,
+        metadata
+      );
+      return true;
+    } catch (err) {
+      log.error('Failed to send cross-machine message', { error: String(err) });
+      return false;
+    }
+  }
+
+  /**
+   * Get list of remote agents (from other machines).
+   */
+  getRemoteAgents(): RemoteAgent[] {
+    return this.remoteAgents;
+  }
+
+  /**
+   * Check if an agent is on a remote machine.
+   */
+  isRemoteAgent(agentName: string): RemoteAgent | undefined {
+    return this.remoteAgents.find(a => a.name === agentName);
+  }
+
+  /**
+   * Notify cloud sync about local agent changes.
+   */
+  private notifyCloudSync(): void {
+    if (!this.cloudSync?.isConnected()) return;
+
+    const agents = Array.from(this.connections)
+      .filter(c => c.agentName)
+      .map(c => ({
+        name: c.agentName!,
+        status: 'online',
+      }));
+
+    this.cloudSync.updateAgents(agents);
   }
 
   /**
@@ -177,6 +364,12 @@ export class Daemon {
    */
   async stop(): Promise<void> {
     if (!this.running) return;
+
+    // Stop cloud sync
+    if (this.cloudSync) {
+      this.cloudSync.stop();
+      this.cloudSync = undefined;
+    }
 
     // Stop processing state updates
     if (this.processingStateInterval) {
@@ -203,10 +396,10 @@ export class Daemon {
         }
         if (this.storage?.close) {
           this.storage.close().catch((err) => {
-            console.error('[daemon] Failed to close storage', err);
+            log.error('Failed to close storage', { error: String(err) });
           });
         }
-        console.log('[daemon] Stopped');
+        log.info('Stopped');
         resolve();
       });
     });
@@ -216,7 +409,7 @@ export class Daemon {
    * Handle new connection.
    */
   private handleConnection(socket: net.Socket): void {
-    console.log('[daemon] New connection');
+    log.debug('New connection');
 
     const resumeHandler = this.storage?.getSessionByResumeToken
       ? async ({ agent, resumeToken }: { agent: string; resumeToken: string }) => {
@@ -266,7 +459,7 @@ export class Daemon {
     connection.onActive = () => {
       if (connection.agentName) {
         this.router.register(connection);
-        console.log(`[daemon] Agent registered: ${connection.agentName}`);
+        log.info('Agent registered', { agent: connection.agentName });
         // Registry handles persistence internally via save()
         this.registry?.registerOrUpdate({
           name: connection.agentName,
@@ -301,20 +494,23 @@ export class Daemon {
             });
           };
 
-          persistSession().catch(err => console.error('[daemon] Failed to record session start:', err));
+          persistSession().catch(err => log.error('Failed to record session start', { error: String(err) }));
         }
       }
 
       // Replay pending deliveries for resumed sessions
       if (connection.isResumed) {
         this.router.replayPending(connection).catch(err => {
-          console.error('[daemon] Failed to replay pending messages', err);
+          log.error('Failed to replay pending messages', { error: String(err) });
         });
       }
+
+      // Notify cloud sync about agent changes
+      this.notifyCloudSync();
     };
 
     connection.onClose = () => {
-      console.log(`[daemon] Connection closed: ${connection.agentName ?? connection.id}`);
+      log.debug('Connection closed', { agent: connection.agentName ?? connection.id });
       this.connections.delete(connection);
       this.router.unregister(connection);
       // Registry handles persistence internally via touch() -> save()
@@ -325,12 +521,15 @@ export class Daemon {
       // Record session end (disconnect - agent may still mark it closed explicitly)
       if (this.storage instanceof SqliteStorageAdapter) {
         this.storage.endSession(connection.sessionId, { closedBy: 'disconnect' })
-          .catch(err => console.error('[daemon] Failed to record session end:', err));
+          .catch(err => log.error('Failed to record session end', { error: String(err) }));
       }
+
+      // Notify cloud sync about agent changes
+      this.notifyCloudSync();
     };
 
     connection.onError = (error: Error) => {
-      console.error(`[daemon] Connection error: ${error.message}`);
+      log.error('Connection error', { error: error.message });
       this.connections.delete(connection);
       this.router.unregister(connection);
       // Registry handles persistence internally via touch() -> save()
@@ -341,7 +540,7 @@ export class Daemon {
       // Record session end on error
       if (this.storage instanceof SqliteStorageAdapter) {
         this.storage.endSession(connection.sessionId, { closedBy: 'error' })
-          .catch(err => console.error('[daemon] Failed to record session end:', err));
+          .catch(err => log.error('Failed to record session end', { error: String(err) }));
       }
     };
   }
@@ -439,18 +638,19 @@ if (isMainModule) {
   const daemon = new Daemon();
 
   process.on('SIGINT', async () => {
-    console.log('\n[daemon] Shutting down...');
+    log.info('Shutting down (SIGINT)');
     await daemon.stop();
     process.exit(0);
   });
 
   process.on('SIGTERM', async () => {
+    log.info('Shutting down (SIGTERM)');
     await daemon.stop();
     process.exit(0);
   });
 
   daemon.start().catch((err) => {
-    console.error('[daemon] Failed to start:', err);
+    log.error('Failed to start', { error: String(err) });
     process.exit(1);
   });
 }

@@ -15,6 +15,7 @@ export interface AgentRecord {
   model?: string;
   task?: string;
   workingDirectory?: string;
+  team?: string;
   firstSeen: string;
   lastSeen: string;
   messagesSent: number;
@@ -28,6 +29,7 @@ type AgentInput = {
   model?: string;
   task?: string;
   workingDirectory?: string;
+  team?: string;
 };
 
 export class AgentRegistry {
@@ -62,6 +64,7 @@ export class AgentRegistry {
         model: agent.model ?? existing.model,
         task: agent.task ?? existing.task,
         workingDirectory: agent.workingDirectory ?? existing.workingDirectory,
+        team: agent.team ?? existing.team,
         lastSeen: now,
       };
       this.agents.set(agent.name, updated);
@@ -77,6 +80,7 @@ export class AgentRegistry {
       model: agent.model,
       task: agent.task,
       workingDirectory: agent.workingDirectory,
+      team: agent.team,
       firstSeen: now,
       lastSeen: now,
       messagesSent: 0,
@@ -174,6 +178,7 @@ export class AgentRegistry {
           model: raw.model,
           task: raw.task,
           workingDirectory: raw.workingDirectory,
+          team: raw.team,
           firstSeen: raw.firstSeen ?? new Date().toISOString(),
           lastSeen: raw.lastSeen ?? new Date().toISOString(),
           messagesSent: typeof raw.messagesSent === 'number' ? raw.messagesSent : 0,

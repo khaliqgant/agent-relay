@@ -8,6 +8,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { Message, Attachment } from '../types';
 import { getAgentColor, getAgentInitials } from '../lib/colors';
+import type { CurrentUser } from './MessageList';
 
 export interface ThreadPanelProps {
   /** The original message that started the thread */
@@ -20,6 +21,8 @@ export interface ThreadPanelProps {
   onReply: (content: string) => Promise<boolean>;
   /** Whether a reply is currently being sent */
   isSending?: boolean;
+  /** Current user info (for cloud mode - shows avatar/username instead of "Dashboard") */
+  currentUser?: CurrentUser;
 }
 
 export function ThreadPanel({
@@ -28,6 +31,7 @@ export function ThreadPanel({
   onClose,
   onReply,
   isSending = false,
+  currentUser,
 }: ThreadPanelProps) {
   const [replyContent, setReplyContent] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -35,7 +39,10 @@ export function ThreadPanel({
 
   // Auto-scroll when new replies arrive
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Use requestAnimationFrame to ensure DOM has been updated
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
   }, [replies.length]);
 
   // Focus input when panel opens
@@ -88,7 +95,7 @@ export function ThreadPanel({
       <div className="flex-1 overflow-y-auto">
         {/* Original Message */}
         <div className="p-4 border-b border-border">
-          <ThreadMessage message={originalMessage} isOriginal />
+          <ThreadMessage message={originalMessage} isOriginal currentUser={currentUser} />
         </div>
 
         {/* Replies */}
@@ -99,7 +106,7 @@ export function ThreadPanel({
             </div>
           ) : (
             replies.map((reply) => (
-              <ThreadMessage key={reply.id} message={reply} />
+              <ThreadMessage key={reply.id} message={reply} currentUser={currentUser} />
             ))
           )}
           <div ref={bottomRef} />
@@ -135,24 +142,43 @@ export function ThreadPanel({
 interface ThreadMessageProps {
   message: Message;
   isOriginal?: boolean;
+  currentUser?: CurrentUser;
 }
 
-function ThreadMessage({ message, isOriginal }: ThreadMessageProps) {
+function ThreadMessage({ message, isOriginal, currentUser }: ThreadMessageProps) {
   const colors = getAgentColor(message.from);
   const timestamp = formatTimestamp(message.timestamp);
 
+  // Check if this message is from the current user (Dashboard or their GitHub username)
+  const isFromCurrentUser = message.from === 'Dashboard' ||
+    (currentUser && message.from === currentUser.displayName);
+
+  // Display name: use GitHub username if available, otherwise message.from
+  const displayName = isFromCurrentUser && currentUser
+    ? currentUser.displayName
+    : message.from;
+
   return (
     <div className={`flex gap-3 ${isOriginal ? '' : 'pl-2'}`}>
-      <div
-        className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center font-semibold text-xs"
-        style={{ backgroundColor: colors.primary, color: colors.text }}
-      >
-        {getAgentInitials(message.from)}
-      </div>
+      {/* Avatar/Icon */}
+      {isFromCurrentUser && currentUser?.avatarUrl ? (
+        <img
+          src={currentUser.avatarUrl}
+          alt={displayName}
+          className="shrink-0 w-8 h-8 rounded-lg object-cover"
+        />
+      ) : (
+        <div
+          className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center font-semibold text-xs"
+          style={{ backgroundColor: colors.primary, color: colors.text }}
+        >
+          {getAgentInitials(message.from)}
+        </div>
+      )}
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="font-semibold text-sm text-text-primary">{message.from}</span>
+          <span className="font-semibold text-sm text-text-primary">{displayName}</span>
           {message.to !== '*' && !isOriginal && (
             <>
               <span className="text-text-muted text-xs">→</span>
@@ -209,7 +235,7 @@ function ThreadAttachments({ attachments }: ThreadAttachmentsProps) {
             title={`View ${attachment.filename}`}
           >
             <img
-              src={attachment.url}
+              src={attachment.data || attachment.url}
               alt={attachment.filename}
               className="max-h-32 max-w-[200px] rounded-lg border border-border object-cover transition-all duration-150 group-hover:border-accent/50 group-hover:shadow-md"
               loading="lazy"
@@ -242,7 +268,7 @@ function ThreadAttachments({ attachments }: ThreadAttachmentsProps) {
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">
             <img
-              src={lightboxImage.url}
+              src={lightboxImage.data || lightboxImage.url}
               alt={lightboxImage.filename}
               className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
               onClick={(e) => e.stopPropagation()}

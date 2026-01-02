@@ -47,6 +47,8 @@ export interface Attachment {
   size: number;
   /** URL to access the attachment */
   url: string;
+  /** Absolute file path for agents to read the file directly */
+  filePath?: string;
   /** Width for images */
   width?: number;
   /** Height for images */
@@ -70,6 +72,8 @@ export interface Message {
   status?: MessageStatus;
   /** Attachments (images, files) */
   attachments?: Attachment[];
+  /** Channel context for routing (e.g., 'general' for broadcasts) */
+  channel?: string;
 }
 
 export interface Thread {

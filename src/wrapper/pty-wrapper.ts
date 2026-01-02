@@ -73,7 +73,7 @@ export class PtyWrapper extends EventEmitter {
   private sentMessageHashes: Set<string> = new Set();
   private processedSpawnCommands: Set<string> = new Set();
   private processedReleaseCommands: Set<string> = new Set();
-  private messageQueue: Array<{ from: string; body: string; messageId: string; thread?: string; importance?: number }> = [];
+  private messageQueue: Array<{ from: string; body: string; messageId: string; thread?: string; importance?: number; data?: Record<string, unknown>; originalTo?: string }> = [];
   private isInjecting = false;
   private readyForMessages = false;
   private logFilePath?: string;
@@ -131,8 +131,8 @@ export class PtyWrapper extends EventEmitter {
     this.continuity = getContinuityManager({ defaultCli: 'spawned' });
 
     // Handle incoming messages
-    this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
-      this.handleIncomingMessage(from, payload, messageId, meta);
+    this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta, originalTo?: string) => {
+      this.handleIncomingMessage(from, payload, messageId, meta, originalTo);
     };
   }
 
@@ -784,9 +784,10 @@ export class PtyWrapper extends EventEmitter {
 
   /**
    * Handle incoming message from relay
+   * @param originalTo - The original 'to' field from sender. '*' indicates this was a broadcast message.
    */
-  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta): void {
-    this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance });
+  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta, originalTo?: string): void {
+    this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance, data: payload.data, originalTo });
     this.processMessageQueue();
 
     // Dispatch message received hook
@@ -816,11 +817,26 @@ export class PtyWrapper extends EventEmitter {
       const shortId = msg.messageId.substring(0, 8);
       // Strip ANSI escape sequences and orphaned control sequences from message body
       const sanitizedBody = this.stripAnsi(msg.body).replace(/[\r\n]+/g, ' ').trim();
-      // Thread/importance hints to match tmux-wrapper format
+      // Thread/importance/channel hints to match tmux-wrapper format
       const threadHint = msg.thread ? ` [thread:${msg.thread}]` : '';
       const importanceHint = msg.importance !== undefined && msg.importance > 75 ? ' [!!]' :
                              msg.importance !== undefined && msg.importance > 50 ? ' [!]' : '';
-      const injection = `Relay message from ${msg.from} [${shortId}]${threadHint}${importanceHint}: ${sanitizedBody}`;
+
+      // Channel indicator: [#general] for broadcasts - tells agent to reply to * not sender
+      const channelHint = msg.originalTo === '*' ? ' [#general]' : '';
+
+      // Extract attachment file paths if present
+      let attachmentHint = '';
+      if (msg.data?.attachments && Array.isArray(msg.data.attachments)) {
+        const filePaths = msg.data.attachments
+          .map((att: { filePath?: string }) => att.filePath)
+          .filter((p): p is string => typeof p === 'string');
+        if (filePaths.length > 0) {
+          attachmentHint = ` [Attachments: ${filePaths.join(', ')}]`;
+        }
+      }
+
+      const injection = `Relay message from ${msg.from} [${shortId}]${threadHint}${importanceHint}${channelHint}${attachmentHint}: ${sanitizedBody}`;
 
       // Write message to PTY, then send Enter separately after a small delay
       // This matches how TmuxWrapper does it for better CLI compatibility

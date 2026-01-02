@@ -6,6 +6,8 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import './styles.css';
+import { Logo, LogoIcon, LogoHero } from '../react-components/Logo';
 
 // Agent providers with their signature colors
 const PROVIDERS = {
@@ -54,6 +56,7 @@ export function LandingPage() {
 
 function Navigation() {
   const [scrolled, setScrolled] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 50);
@@ -61,11 +64,38 @@ function Navigation() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // Close mobile menu on resize to desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 768) {
+        setMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Prevent body scroll when mobile menu is open
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileMenuOpen]);
+
+  const handleNavClick = () => {
+    setMobileMenuOpen(false);
+  };
+
   return (
-    <nav className={`nav ${scrolled ? 'scrolled' : ''}`}>
+    <nav className={`nav ${scrolled ? 'scrolled' : ''} ${mobileMenuOpen ? 'menu-open' : ''}`}>
       <div className="nav-inner">
         <a href="/" className="nav-logo">
-          <span className="logo-icon">⬢</span>
+          <LogoIcon size={28} withGlow={true} />
           <span className="logo-text">Agent Relay</span>
         </a>
 
@@ -79,6 +109,37 @@ function Navigation() {
         <div className="nav-actions">
           <a href="/login" className="btn-ghost">Sign In</a>
           <a href="/signup" className="btn-primary">Get Started</a>
+        </div>
+
+        <button
+          className="mobile-menu-toggle"
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+        >
+          <span className={`hamburger ${mobileMenuOpen ? 'open' : ''}`}>
+            <span className="hamburger-line" />
+            <span className="hamburger-line" />
+            <span className="hamburger-line" />
+          </span>
+        </button>
+      </div>
+
+      {/* Mobile Menu Overlay */}
+      <div className={`mobile-menu-overlay ${mobileMenuOpen ? 'open' : ''}`} onClick={handleNavClick} />
+
+      {/* Mobile Menu */}
+      <div className={`mobile-menu ${mobileMenuOpen ? 'open' : ''}`}>
+        <div className="mobile-menu-content">
+          <div className="mobile-nav-links">
+            <a href="#demo" onClick={handleNavClick}>Demo</a>
+            <a href="#features" onClick={handleNavClick}>Features</a>
+            <a href="#pricing" onClick={handleNavClick}>Pricing</a>
+            <a href="/docs" onClick={handleNavClick}>Documentation</a>
+          </div>
+          <div className="mobile-nav-actions">
+            <a href="/login" className="btn-ghost btn-full" onClick={handleNavClick}>Sign In</a>
+            <a href="/signup" className="btn-primary btn-full" onClick={handleNavClick}>Get Started</a>
+          </div>
         </div>
       </div>
     </nav>
@@ -530,7 +591,7 @@ function Footer() {
       <div className="footer-inner">
         <div className="footer-brand">
           <a href="/" className="footer-logo">
-            <span className="logo-icon">⬢</span>
+            <LogoIcon size={24} withGlow={true} />
             <span className="logo-text">Agent Relay</span>
           </a>
           <p>Orchestrate AI agents like a symphony.</p>
@@ -561,12 +622,12 @@ function Footer() {
       </div>
 
       <div className="footer-bottom">
-        <p>© 2025 Agent Relay. All rights reserved.</p>
+        <p>© 2026 Agent Relay. All rights reserved.</p>
         <div className="social-links">
-          <a href="https://github.com/agent-relay" aria-label="GitHub">
+          <a href="https://github.com/AgentWorkforce/relay" aria-label="GitHub">
             <GitHubIcon />
           </a>
-          <a href="https://twitter.com/agentrelay" aria-label="Twitter">
+          <a href="https://twitter.com/agent_relay" aria-label="Twitter">
             <TwitterIcon />
           </a>
           <a href="https://discord.gg/agentrelay" aria-label="Discord">

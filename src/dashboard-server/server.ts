@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
@@ -14,6 +15,7 @@ import { MultiProjectClient } from '../bridge/multi-project-client.js';
 import { AgentSpawner } from '../bridge/spawner.js';
 import type { ProjectConfig, SpawnRequest } from '../bridge/types.js';
 import { listTrajectorySteps, getTrajectoryStatus } from '../trajectory/integration.js';
+import { loadTeamsConfig } from '../bridge/teams-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -140,6 +142,8 @@ interface Attachment {
   mimeType: string;
   size: number;
   url: string;
+  /** Absolute file path for agents to read the file directly */
+  filePath?: string;
   width?: number;
   height?: number;
   data?: string;
@@ -256,9 +260,51 @@ export async function startDashboard(
     skipUTF8Validation: true,
     maxPayload: 100 * 1024 * 1024
   });
+  const wssPresence = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: false,
+    skipUTF8Validation: true,
+    maxPayload: 1024 * 1024 // 1MB - presence messages are small
+  });
 
   // Track log subscriptions: agentName -> Set of WebSocket clients
   const logSubscriptions = new Map<string, Set<WebSocket>>();
+
+  // Track online users for presence with multi-tab support
+  // username -> { connections: Set<WebSocket>, userInfo }
+  interface UserPresenceInfo {
+    username: string;
+    avatarUrl?: string;
+    connectedAt: string;
+    lastSeen: string;
+  }
+  interface UserPresenceState {
+    info: UserPresenceInfo;
+    connections: Set<WebSocket>;
+  }
+  const onlineUsers = new Map<string, UserPresenceState>();
+
+  // Validation helpers for presence
+  const isValidUsername = (username: unknown): username is string => {
+    if (typeof username !== 'string') return false;
+    // Username should be 1-39 chars, alphanumeric with hyphens (GitHub username rules)
+    return /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/.test(username);
+  };
+
+  const isValidAvatarUrl = (url: unknown): url is string | undefined => {
+    if (url === undefined || url === null) return true;
+    if (typeof url !== 'string') return false;
+    // Must be a valid HTTPS URL from GitHub or similar known providers
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'https:' &&
+        (parsed.hostname === 'avatars.githubusercontent.com' ||
+         parsed.hostname === 'github.com' ||
+         parsed.hostname.endsWith('.githubusercontent.com'));
+    } catch {
+      return false;
+    }
+  };
 
   // Manually handle upgrade requests and route to correct WebSocketServer
   server.on('upgrade', (request, socket, head) => {
@@ -275,6 +321,10 @@ export async function startDashboard(
     } else if (pathname === '/ws/logs' || pathname.startsWith('/ws/logs/')) {
       wssLogs.handleUpgrade(request, socket, head, (ws) => {
         wssLogs.emit('connection', ws, request);
+      });
+    } else if (pathname === '/ws/presence') {
+      wssPresence.handleUpgrade(request, socket, head, (ws) => {
+        wssPresence.emit('connection', ws, request);
       });
     } else {
       // Unknown path - destroy socket
@@ -295,6 +345,10 @@ export async function startDashboard(
     console.error('[dashboard] Logs WebSocket server error:', err);
   });
 
+  wssPresence.on('error', (err) => {
+    console.error('[dashboard] Presence WebSocket server error:', err);
+  });
+
   if (storage) {
     await storage.init();
   }
@@ -302,14 +356,61 @@ export async function startDashboard(
   // Increase JSON body limit for base64 image uploads (10MB)
   app.use(express.json({ limit: '10mb' }));
 
-  // Create uploads directory for attachments
+  // Create attachments directory in user's home directory (~/.relay/attachments)
+  // This keeps attachments out of source control while still accessible to agents
+  const attachmentsDir = path.join(os.homedir(), '.relay', 'attachments');
+  if (!fs.existsSync(attachmentsDir)) {
+    fs.mkdirSync(attachmentsDir, { recursive: true });
+  }
+
+  // Also keep uploads dir for backwards compatibility (URL-based serving)
   const uploadsDir = path.join(dataDir, 'uploads');
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
 
+  // Auto-evict old attachments (older than 7 days)
+  const ATTACHMENT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+  const evictOldAttachments = async () => {
+    try {
+      const files = await fs.promises.readdir(attachmentsDir);
+      const now = Date.now();
+      let evictedCount = 0;
+
+      for (const file of files) {
+        const filePath = path.join(attachmentsDir, file);
+        try {
+          const stat = await fs.promises.stat(filePath);
+          if (stat.isFile() && (now - stat.mtimeMs) > ATTACHMENT_MAX_AGE_MS) {
+            await fs.promises.unlink(filePath);
+            evictedCount++;
+          }
+        } catch (err) {
+          // Ignore errors for individual files (may have been deleted)
+        }
+      }
+
+      if (evictedCount > 0) {
+        console.log(`[dashboard] Evicted ${evictedCount} old attachment(s)`);
+      }
+    } catch (err) {
+      console.error('[dashboard] Failed to evict old attachments:', err);
+    }
+  };
+
+  // Run eviction on startup and every hour
+  evictOldAttachments();
+  const evictionInterval = setInterval(evictOldAttachments, 60 * 60 * 1000); // 1 hour
+
+  // Clean up interval on process exit
+  process.on('beforeExit', () => {
+    clearInterval(evictionInterval);
+  });
+
   // Serve uploaded files statically
   app.use('/uploads', express.static(uploadsDir));
+  // Serve attachments from ~/.relay/attachments
+  app.use('/attachments', express.static(attachmentsDir));
 
   // In-memory attachment registry (for current session)
   // Attachments are also stored on disk, so this is just for quick lookups
@@ -336,44 +437,77 @@ export async function startDashboard(
     console.error('[dashboard] Dashboard not found at:', dashboardDistDir, 'or', dashboardSourceDir);
   }
 
-  // Relay client for sending messages from dashboard
+  // Relay clients for sending messages from dashboard
+  // Map of senderName -> RelayClient for per-user connections
   const socketPath = path.join(dataDir, 'relay.sock');
-  let relayClient: RelayClient | undefined;
+  const relayClients = new Map<string, RelayClient>();
+  // Track pending client connections to prevent race conditions
+  const pendingConnections = new Map<string, Promise<RelayClient | undefined>>();
 
-  const connectRelayClient = async (): Promise<void> => {
+  // Get or create a relay client for a specific sender
+  const getRelayClient = async (senderName: string = 'Dashboard'): Promise<RelayClient | undefined> => {
+    // Check if we already have a connected client for this sender
+    const existing = relayClients.get(senderName);
+    if (existing && existing.state === 'READY') {
+      return existing;
+    }
+
+    // Check if there's already a pending connection for this sender
+    const pending = pendingConnections.get(senderName);
+    if (pending) {
+      return pending;
+    }
+
     // Only attempt connection if socket exists (daemon is running)
     if (!fs.existsSync(socketPath)) {
       console.log('[dashboard] Relay socket not found, messaging disabled');
-      return;
+      return undefined;
     }
 
-    relayClient = new RelayClient({
-      socketPath,
-      agentName: 'Dashboard',
-      cli: 'dashboard',
-      reconnect: true,
-      maxReconnectAttempts: 5,
-    });
+    // Create connection promise to prevent race conditions
+    const connectionPromise = (async (): Promise<RelayClient | undefined> => {
+      // Create new client for this sender
+      const client = new RelayClient({
+        socketPath,
+        agentName: senderName,
+        cli: 'dashboard',
+        reconnect: true,
+        maxReconnectAttempts: 5,
+      });
 
-    relayClient.onError = (err) => {
-      console.error('[dashboard] Relay client error:', err.message);
-    };
+      client.onError = (err) => {
+        console.error(`[dashboard] Relay client error for ${senderName}:`, err.message);
+      };
 
-    relayClient.onStateChange = (state) => {
-      console.log(`[dashboard] Relay client state: ${state}`);
-    };
+      client.onStateChange = (state) => {
+        console.log(`[dashboard] Relay client for ${senderName} state: ${state}`);
+        // Clean up disconnected clients
+        if (state === 'DISCONNECTED') {
+          relayClients.delete(senderName);
+        }
+      };
 
-    try {
-      await relayClient.connect();
-      console.log('[dashboard] Connected to relay daemon');
-    } catch (err) {
-      console.error('[dashboard] Failed to connect to relay daemon:', err);
-      relayClient = undefined;
-    }
+      try {
+        await client.connect();
+        relayClients.set(senderName, client);
+        console.log(`[dashboard] Connected to relay daemon as ${senderName}`);
+        return client;
+      } catch (err) {
+        console.error(`[dashboard] Failed to connect to relay daemon as ${senderName}:`, err);
+        return undefined;
+      } finally {
+        // Clean up pending connection
+        pendingConnections.delete(senderName);
+      }
+    })();
+
+    // Store the pending connection
+    pendingConnections.set(senderName, connectionPromise);
+    return connectionPromise;
   };
 
-  // Start relay client connection (non-blocking)
-  connectRelayClient().catch(() => {});
+  // Start default relay client connection (non-blocking)
+  getRelayClient('Dashboard').catch(() => {});
 
   // Bridge client for cross-project messaging
   let bridgeClient: MultiProjectClient | undefined;
@@ -465,25 +599,49 @@ export async function startDashboard(
     }
   };
 
-  // Helper to get team members from agents.json
+  // Helper to get team members from teams.json, agents.json, and spawner's active workers
   const getTeamMembers = (teamName: string): string[] => {
-    const agentsPath = path.join(teamDir, 'agents.json');
-    if (!fs.existsSync(agentsPath)) return [];
+    const members = new Set<string>();
 
-    try {
-      const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
-      const members = (data.agents || [])
-        .filter((a: { team?: string }) => a.team === teamName)
-        .map((a: { name: string }) => a.name);
-      return members;
-    } catch {
-      return [];
+    // Check teams.json first - this is the source of truth for team definitions
+    const teamsConfig = loadTeamsConfig(projectRoot || dataDir);
+    if (teamsConfig && teamsConfig.team === teamName) {
+      for (const agent of teamsConfig.agents) {
+        members.add(agent.name);
+      }
     }
+
+    // Check spawner's active workers (they have accurate team info for spawned agents)
+    if (spawner) {
+      const activeWorkers = spawner.getActiveWorkers();
+      for (const worker of activeWorkers) {
+        if (worker.team === teamName) {
+          members.add(worker.name);
+        }
+      }
+    }
+
+    // Also check agents.json for persisted team info
+    const agentsPath = path.join(teamDir, 'agents.json');
+    if (fs.existsSync(agentsPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+        for (const agent of (data.agents || [])) {
+          if (agent.team === teamName) {
+            members.add(agent.name);
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
+    return Array.from(members);
   };
 
   // API endpoint to send messages
   app.post('/api/send', async (req, res) => {
-    const { to, message, thread, attachments: attachmentIds } = req.body;
+    const { to, message, thread, attachments: attachmentIds, from: senderName } = req.body;
 
     if (!to || !message) {
       return res.status(400).json({ error: 'Missing "to" or "message" field' });
@@ -512,12 +670,10 @@ export async function startDashboard(
       targets = [to];
     }
 
+    // Get or create relay client for this sender (defaults to 'Dashboard' for non-cloud mode)
+    const relayClient = await getRelayClient(senderName || 'Dashboard');
     if (!relayClient || relayClient.state !== 'READY') {
-      // Try to reconnect
-      await connectRelayClient();
-      if (!relayClient || relayClient.state !== 'READY') {
-        return res.status(503).json({ error: 'Relay daemon not connected' });
-      }
+      return res.status(503).json({ error: 'Relay daemon not connected' });
     }
 
     try {
@@ -533,15 +689,25 @@ export async function startDashboard(
         }
       }
 
-      // Include attachments in the message data field
-      const messageData = attachments && attachments.length > 0
-        ? { attachments }
-        : undefined;
+      // Include attachments and channel context in the message data field
+      // For broadcasts (to='*'), include channel: 'general' so replies can be routed back
+      const isBroadcast = targets.length === 1 && targets[0] === '*';
+      const messageData: Record<string, unknown> = {};
+
+      if (attachments && attachments.length > 0) {
+        messageData.attachments = attachments;
+      }
+
+      if (isBroadcast) {
+        messageData.channel = 'general';
+      }
+
+      const hasMessageData = Object.keys(messageData).length > 0;
 
       // Send to all targets (single agent, team members, or broadcast)
       let allSent = true;
       for (const target of targets) {
-        const sent = relayClient.sendMessage(target, message, 'message', messageData, thread);
+        const sent = relayClient.sendMessage(target, message, 'message', hasMessageData ? messageData : undefined, thread);
         if (!sent) {
           allSent = false;
           console.error(`[dashboard] Failed to send message to ${target}`);
@@ -614,30 +780,34 @@ export async function startDashboard(
       const base64Data = data.replace(/^data:[^;]+;base64,/, '');
       const buffer = Buffer.from(base64Data, 'base64');
 
-      // Generate unique ID for the attachment
+      // Generate unique ID and filename for the attachment
       const attachmentId = crypto.randomUUID();
+      const timestamp = Date.now();
       const ext = mimeType.split('/')[1].replace('svg+xml', 'svg');
-      const safeFilename = `${attachmentId}.${ext}`;
-      const filePath = path.join(uploadsDir, safeFilename);
+      // Use format: {messageId}-{timestamp}.{ext} for unique, identifiable filenames
+      const safeFilename = `${attachmentId.substring(0, 8)}-${timestamp}.${ext}`;
 
-      // Write file to disk
-      fs.writeFileSync(filePath, buffer);
+      // Save to ~/.relay/attachments/ directory for agents to access
+      const attachmentFilePath = path.join(attachmentsDir, safeFilename);
+      fs.writeFileSync(attachmentFilePath, buffer);
 
-      // Create attachment record
+      // Create attachment record with file path for agents
       const attachment: Attachment = {
         id: attachmentId,
         filename: filename,
         mimeType: mimeType,
         size: buffer.length,
-        url: `/uploads/${safeFilename}`,
-        // Include base64 data for agents that can't access the URL
+        url: `/attachments/${safeFilename}`,
+        // Include absolute file path so agents can read the file directly
+        filePath: attachmentFilePath,
+        // Include base64 data for agents that can't access the file
         data: data,
       };
 
       // Store in registry for lookup when sending messages
       attachmentRegistry.set(attachmentId, attachment);
 
-      console.log(`[dashboard] Uploaded attachment: ${filename} (${buffer.length} bytes) -> ${safeFilename}`);
+      console.log(`[dashboard] Uploaded attachment: ${filename} (${buffer.length} bytes) -> ${attachmentFilePath}`);
 
       res.json({
         success: true,
@@ -647,6 +817,7 @@ export async function startDashboard(
           mimeType: attachment.mimeType,
           size: attachment.size,
           url: attachment.url,
+          filePath: attachment.filePath,
         },
       });
     } catch (err) {
@@ -675,6 +846,7 @@ export async function startDashboard(
         mimeType: attachment.mimeType,
         size: attachment.size,
         url: attachment.url,
+        filePath: attachment.filePath,
       },
     });
   });
@@ -697,12 +869,13 @@ export async function startDashboard(
         const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
         // Convert agents.json format to team.json format
         return {
-          agents: data.agents.map((a: { name: string; connectedAt?: string; cli?: string; lastSeen?: string }) => ({
+          agents: data.agents.map((a: { name: string; connectedAt?: string; cli?: string; lastSeen?: string; team?: string }) => ({
             name: a.name,
             role: 'Agent',
             cli: a.cli ?? 'Unknown',
             lastSeen: a.lastSeen ?? a.connectedAt,
             lastActive: a.lastSeen ?? a.connectedAt,
+            team: a.team,
           })),
         };
       } catch (e) {
@@ -758,12 +931,26 @@ export async function startDashboard(
     }
   };
 
+  // Helper to check if an agent name is internal/system (should be hidden from UI)
+  // Convention: agent names starting with __ are internal (e.g., __spawner__, __DashboardBridge__)
+  const isInternalAgent = (name: string): boolean => {
+    return name.startsWith('__');
+  };
+
   const mapStoredMessages = (rows: StoredMessage[]): Message[] => rows
+    // Filter out messages from/to internal system agents (e.g., __spawner__)
+    .filter((row) => !isInternalAgent(row.from) && !isInternalAgent(row.to))
     .map((row) => {
-      // Extract attachments from the data field if present
+      // Extract attachments and channel from the data field if present
       let attachments: Attachment[] | undefined;
-      if (row.data && typeof row.data === 'object' && 'attachments' in row.data) {
-        attachments = (row.data as { attachments: Attachment[] }).attachments;
+      let channel: string | undefined;
+      if (row.data && typeof row.data === 'object') {
+        if ('attachments' in row.data) {
+          attachments = (row.data as { attachments: Attachment[] }).attachments;
+        }
+        if ('channel' in row.data) {
+          channel = (row.data as { channel: string }).channel;
+        }
       }
 
       return {
@@ -777,6 +964,7 @@ export async function startDashboard(
         replyCount: row.replyCount,
         status: row.status,
         attachments,
+        channel,
       };
     });
 
@@ -858,6 +1046,7 @@ export async function startDashboard(
         lastSeen: a.lastSeen,
         lastActive: a.lastActive,
         needsAttention: false,
+        team: a.team,
       });
     });
 
@@ -935,6 +1124,19 @@ export async function startDashboard(
           if (worker.team) {
             agent.team = worker.team;
           }
+        }
+      }
+    }
+
+    // Set team from teams.json for agents that don't have a team yet
+    // This ensures agents defined in teams.json are associated with their team
+    // even if they weren't spawned via auto-spawn
+    const teamsConfig = loadTeamsConfig(projectRoot || dataDir);
+    if (teamsConfig) {
+      for (const teamAgent of teamsConfig.agents) {
+        const agent = agentsMap.get(teamAgent.name);
+        if (agent && !agent.team) {
+          agent.team = teamsConfig.team;
         }
       }
     }
@@ -1330,6 +1532,180 @@ export async function startDashboard(
   // Expose broadcastLogOutput for PTY wrappers to call
   (global as any).__broadcastLogOutput = broadcastLogOutput;
 
+  // ===== Presence WebSocket Handler =====
+
+  // Helper to broadcast to all presence clients
+  const broadcastPresence = (message: object, exclude?: WebSocket) => {
+    const payload = JSON.stringify(message);
+    wssPresence.clients.forEach((client) => {
+      if (client !== exclude && client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
+  };
+
+  // Helper to get online users list (without ws references)
+  const getOnlineUsersList = (): UserPresenceInfo[] => {
+    return Array.from(onlineUsers.values()).map((state) => state.info);
+  };
+
+  wssPresence.on('connection', (ws) => {
+    console.log('[dashboard] Presence WebSocket client connected');
+    let clientUsername: string | undefined;
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+
+        if (msg.type === 'presence') {
+          if (msg.action === 'join' && msg.user?.username) {
+            const username = msg.user.username;
+            const avatarUrl = msg.user.avatarUrl;
+
+            // Validate inputs
+            if (!isValidUsername(username)) {
+              console.warn(`[dashboard] Invalid username rejected: ${username}`);
+              return;
+            }
+            if (!isValidAvatarUrl(avatarUrl)) {
+              console.warn(`[dashboard] Invalid avatar URL rejected for user ${username}`);
+              return;
+            }
+
+            clientUsername = username;
+            const now = new Date().toISOString();
+
+            // Check if user already has connections (multi-tab support)
+            const existing = onlineUsers.get(username);
+            if (existing) {
+              // Add this connection to existing user
+              existing.connections.add(ws);
+              existing.info.lastSeen = now;
+              console.log(`[dashboard] User ${username} opened new tab (${existing.connections.size} connections)`);
+            } else {
+              // New user - create presence state
+              onlineUsers.set(username, {
+                info: {
+                  username,
+                  avatarUrl,
+                  connectedAt: now,
+                  lastSeen: now,
+                },
+                connections: new Set([ws]),
+              });
+
+              console.log(`[dashboard] User ${username} came online`);
+
+              // Broadcast join to all other clients (only for truly new users)
+              broadcastPresence({
+                type: 'presence_join',
+                user: {
+                  username,
+                  avatarUrl,
+                  connectedAt: now,
+                  lastSeen: now,
+                },
+              }, ws);
+            }
+
+            // Send current online users list to the new client
+            ws.send(JSON.stringify({
+              type: 'presence_list',
+              users: getOnlineUsersList(),
+            }));
+
+          } else if (msg.action === 'leave') {
+            // Security: Only allow leaving your own username
+            // Must have authenticated first
+            if (!clientUsername) {
+              console.warn(`[dashboard] Security: Unauthenticated leave attempt`);
+              return;
+            }
+            if (msg.username !== clientUsername) {
+              console.warn(`[dashboard] Security: User ${clientUsername} tried to remove ${msg.username}`);
+              return;
+            }
+
+            // Remove this connection from the user's set
+            const username = clientUsername; // Narrow type for TypeScript
+            const userState = onlineUsers.get(username);
+            if (userState) {
+              userState.connections.delete(ws);
+
+              // Only broadcast leave if no more connections
+              if (userState.connections.size === 0) {
+                onlineUsers.delete(username);
+                console.log(`[dashboard] User ${username} went offline`);
+
+                broadcastPresence({
+                  type: 'presence_leave',
+                  username,
+                });
+              } else {
+                console.log(`[dashboard] User ${username} closed tab (${userState.connections.size} remaining)`);
+              }
+            }
+          }
+        } else if (msg.type === 'typing') {
+          // Must have authenticated first
+          if (!clientUsername) {
+            console.warn(`[dashboard] Security: Unauthenticated typing attempt`);
+            return;
+          }
+          // Validate typing message comes from authenticated user
+          if (msg.username !== clientUsername) {
+            console.warn(`[dashboard] Security: Typing message username mismatch`);
+            return;
+          }
+
+          // Update last seen
+          const username = clientUsername; // Narrow type for TypeScript
+          const userState = onlineUsers.get(username);
+          if (userState) {
+            userState.info.lastSeen = new Date().toISOString();
+          }
+
+          // Broadcast typing indicator to all other clients
+          broadcastPresence({
+            type: 'typing',
+            username,
+            avatarUrl: userState?.info.avatarUrl,
+            isTyping: msg.isTyping,
+          }, ws);
+        }
+      } catch (err) {
+        console.error('[dashboard] Invalid presence message:', err);
+      }
+    });
+
+    ws.on('error', (err) => {
+      console.error('[dashboard] Presence WebSocket client error:', err);
+    });
+
+    ws.on('close', () => {
+      // Clean up on disconnect with multi-tab support
+      if (clientUsername) {
+        const userState = onlineUsers.get(clientUsername);
+        if (userState) {
+          userState.connections.delete(ws);
+
+          // Only broadcast leave if no more connections
+          if (userState.connections.size === 0) {
+            onlineUsers.delete(clientUsername);
+            console.log(`[dashboard] User ${clientUsername} disconnected`);
+
+            broadcastPresence({
+              type: 'presence_leave',
+              username: clientUsername,
+            });
+          } else {
+            console.log(`[dashboard] User ${clientUsername} closed connection (${userState.connections.size} remaining)`);
+          }
+        }
+      }
+    });
+  });
+
   app.get('/api/data', (req, res) => {
     getAllData().then((data) => res.json(data)).catch((err) => {
       console.error('Failed to fetch dashboard data', err);
@@ -1347,8 +1723,9 @@ export async function startDashboard(
     const memUsage = process.memoryUsage();
     const socketExists = fs.existsSync(socketPath);
 
-    // Check relay client connectivity
-    const relayConnected = relayClient?.state === 'READY';
+    // Check relay client connectivity (check if default Dashboard client is connected)
+    const defaultClient = relayClients.get('Dashboard');
+    const relayConnected = defaultClient?.state === 'READY';
 
     // If socket doesn't exist, daemon may not be running properly
     if (!socketExists) {
@@ -1376,7 +1753,8 @@ export async function startDashboard(
     const uptime = process.uptime();
     const memUsage = process.memoryUsage();
     const socketExists = fs.existsSync(socketPath);
-    const relayConnected = relayClient?.state === 'READY';
+    const defaultClient = relayClients.get('Dashboard');
+    const relayConnected = defaultClient?.state === 'READY';
 
     if (!socketExists) {
       return res.status(503).json({
@@ -1634,6 +2012,9 @@ export async function startDashboard(
 
       let messages = await storage.getMessages(query);
 
+      // Filter out messages from/to internal system agents (e.g., __spawner__)
+      messages = messages.filter(m => !isInternalAgent(m.from) && !isInternalAgent(m.to));
+
       // Client-side search filter (basic substring match)
       const searchTerm = req.query.search as string | undefined;
       if (searchTerm && searchTerm.trim()) {
@@ -1688,6 +2069,9 @@ export async function startDashboard(
       for (const msg of messages) {
         // Skip broadcasts for conversation pairing
         if (msg.to === '*' || msg.is_broadcast) continue;
+
+        // Skip messages from/to internal system agents (e.g., __spawner__)
+        if (isInternalAgent(msg.from) || isInternalAgent(msg.to)) continue;
 
         // Create normalized key (sorted participants)
         const participants = [msg.from, msg.to].sort();
@@ -1925,6 +2309,104 @@ export async function startDashboard(
       res.status(500).json({
         success: false,
         name,
+        error: err.message,
+      });
+    }
+  });
+
+  /**
+   * POST /api/spawn/architect - Spawn an Architect agent for bridge mode
+   * Body: { cli?: string }
+   */
+  app.post('/api/spawn/architect', async (req, res) => {
+    if (!spawner) {
+      return res.status(503).json({
+        success: false,
+        error: 'Spawner not enabled. Start dashboard with enableSpawner: true',
+      });
+    }
+
+    const { cli = 'claude' } = req.body;
+
+    // Check if Architect already exists
+    const activeWorkers = spawner.getActiveWorkers();
+    if (activeWorkers.some(w => w.name.toLowerCase() === 'architect')) {
+      return res.status(409).json({
+        success: false,
+        error: 'Architect agent already running',
+      });
+    }
+
+    // Get bridge state for project context
+    const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
+    let projectContext = 'No bridge projects connected.';
+
+    if (fs.existsSync(bridgeStatePath)) {
+      try {
+        const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
+        if (bridgeState.projects && bridgeState.projects.length > 0) {
+          projectContext = bridgeState.projects
+            .map((p: { id: string; path: string; name?: string; lead?: { name: string } }) =>
+              `- ${p.id}: ${p.path} (Lead: ${p.lead?.name || 'none'})`
+            )
+            .join('\n');
+        }
+      } catch (e) {
+        console.error('[api] Failed to read bridge state:', e);
+      }
+    }
+
+    // Build the architect prompt
+    const architectPrompt = `You are the Architect, a cross-project coordinator overseeing multiple codebases.
+
+## Connected Projects
+${projectContext}
+
+## Your Role
+- Coordinate high-level work across all projects
+- Assign tasks to project leads
+- Ensure consistency and resolve cross-project dependencies
+- Review overall architecture decisions
+
+## Cross-Project Messaging
+
+Use this syntax to message agents in specific projects:
+
+\`\`\`
+->relay:project-id:AgentName <<<
+Your message to this agent>>>
+
+->relay:project-id:* <<<
+Broadcast to all agents in a project>>>
+
+->relay:*:* <<<
+Broadcast to ALL agents in ALL projects>>>
+\`\`\`
+
+## Getting Started
+1. Check in with each project lead to understand current status
+2. Identify cross-project dependencies
+3. Coordinate work across teams
+
+Start by greeting the project leads and asking for status updates.`;
+
+    try {
+      const result = await spawner.spawn({
+        name: 'Architect',
+        cli,
+        task: architectPrompt,
+      });
+
+      if (result.success) {
+        broadcastData().catch(() => {});
+      }
+
+      res.json(result);
+    } catch (err: any) {
+      console.error('[api] Architect spawn error:', err);
+      res.status(500).json({
+        success: false,
+        name: 'Architect',
         error: err.message,
       });
     }

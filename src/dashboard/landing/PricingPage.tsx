@@ -8,6 +8,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import './styles.css';
+import { LogoIcon } from '../react-components/Logo';
 
 // Plan data with full details
 const PLANS = [
@@ -196,7 +198,7 @@ function Navigation() {
     <nav className={`nav ${scrolled ? 'scrolled' : ''}`}>
       <div className="nav-inner">
         <a href="/" className="nav-logo">
-          <span className="logo-icon">⬢</span>
+          <LogoIcon size={28} withGlow={true} />
           <span className="logo-text">Agent Relay</span>
         </a>
 
@@ -443,7 +445,9 @@ function CtaSection() {
             <div className="orbit-ring ring-1" />
             <div className="orbit-ring ring-2" />
             <div className="orbit-ring ring-3" />
-            <div className="orbit-center">⬢</div>
+            <div className="orbit-center">
+              <LogoIcon size={40} withGlow={true} />
+            </div>
             <div className="orbit-dot dot-1">◈</div>
             <div className="orbit-dot dot-2">⬡</div>
             <div className="orbit-dot dot-3">◇</div>
@@ -460,7 +464,7 @@ function Footer() {
       <div className="footer-inner">
         <div className="footer-brand">
           <a href="/" className="footer-logo">
-            <span className="logo-icon">⬢</span>
+            <LogoIcon size={24} withGlow={true} />
             <span className="logo-text">Agent Relay</span>
           </a>
           <p>Orchestrate AI agents like a symphony.</p>
@@ -493,10 +497,10 @@ function Footer() {
       <div className="footer-bottom">
         <p>© 2025 Agent Relay. All rights reserved.</p>
         <div className="social-links">
-          <a href="https://github.com/agent-relay" aria-label="GitHub">
+          <a href="https://github.com/AgentWorkforce/relay" aria-label="GitHub">
             <GitHubIcon />
           </a>
-          <a href="https://twitter.com/agentrelay" aria-label="Twitter">
+          <a href="https://twitter.com/agent_relay" aria-label="Twitter">
             <TwitterIcon />
           </a>
           <a href="https://discord.gg/agentrelay" aria-label="Discord">

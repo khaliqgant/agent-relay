@@ -512,9 +512,11 @@ program
   .command('agents')
   .description('List connected agents and spawned workers')
   .option('--all', 'Include internal/CLI agents')
+  .option('--remote', 'Include agents from other linked machines (requires cloud link)')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const { getProjectPaths } = await import('../utils/project-namespace.js');
+    const os = await import('node:os');
     const paths = getProjectPaths();
     const agentsPath = path.join(paths.teamDir, 'agents.json');
 
@@ -535,6 +537,8 @@ program
       lastSeen?: string;
       team?: string;
       pid?: number;
+      location?: string; // 'local' or daemon name for remote
+      daemonId?: string;
     }
 
     const combined: CombinedAgent[] = [];
@@ -549,6 +553,7 @@ program
         lastSeen: agent.lastSeen,
         team: worker?.team,
         pid: worker?.pid,
+        location: 'local',
       });
     });
 
@@ -562,9 +567,60 @@ program
           cli: worker.cli || '-',
           team: worker.team,
           pid: worker.pid,
+          location: 'local',
         });
       }
     });
+
+    // Include remote agents if --remote flag is set
+    if (options.remote) {
+      const dataDir = process.env.AGENT_RELAY_DATA_DIR ||
+        path.join(os.homedir(), '.local', 'share', 'agent-relay');
+      const configPath = path.join(dataDir, 'cloud-config.json');
+
+      if (fs.existsSync(configPath)) {
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          const response = await fetch(`${config.cloudUrl}/api/daemons/agents`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${config.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ agents: [] }),
+          });
+
+          if (response.ok) {
+            const data = await response.json() as {
+              allAgents: Array<{
+                name: string;
+                status: string;
+                daemonId: string;
+                daemonName: string;
+              }>;
+            };
+
+            // Add remote agents (exclude local ones by name)
+            const localNames = new Set(combined.map(a => a.name));
+            for (const agent of data.allAgents) {
+              if (!localNames.has(agent.name)) {
+                combined.push({
+                  name: agent.name,
+                  status: agent.status.toUpperCase(),
+                  cli: '-',
+                  location: agent.daemonName,
+                  daemonId: agent.daemonId,
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[warn] Failed to fetch remote agents:', (err as Error).message);
+        }
+      } else {
+        console.error('[warn] Cloud not linked. Run `agent-relay cloud link` to see remote agents.');
+      }
+    }
 
     if (options.json) {
       console.log(JSON.stringify(combined, null, 2));
@@ -577,21 +633,39 @@ program
       return;
     }
 
-    console.log('NAME            STATUS   CLI       TEAM');
-    console.log('─'.repeat(50));
-    combined.forEach((agent) => {
-      const name = agent.name.padEnd(15);
-      const status = agent.status.padEnd(8);
-      const cli = agent.cli.padEnd(9);
-      const team = agent.team ?? '-';
-      console.log(`${name} ${status} ${cli} ${team}`);
-    });
+    const hasRemote = combined.some(a => a.location !== 'local');
+    if (hasRemote) {
+      console.log('NAME            STATUS   CLI       LOCATION');
+      console.log('─'.repeat(55));
+      combined.forEach((agent) => {
+        const name = agent.name.padEnd(15);
+        const status = agent.status.padEnd(8);
+        const cli = agent.cli.padEnd(9);
+        const location = agent.location ?? 'local';
+        console.log(`${name} ${status} ${cli} ${location}`);
+      });
+    } else {
+      console.log('NAME            STATUS   CLI       TEAM');
+      console.log('─'.repeat(50));
+      combined.forEach((agent) => {
+        const name = agent.name.padEnd(15);
+        const status = agent.status.padEnd(8);
+        const cli = agent.cli.padEnd(9);
+        const team = agent.team ?? '-';
+        console.log(`${name} ${status} ${cli} ${team}`);
+      });
+    }
 
     if (workers.length > 0) {
       console.log('');
       console.log('Commands:');
       console.log('  agent-relay agents:logs <name>   - View spawned agent output');
       console.log('  agent-relay agents:kill <name>   - Kill a spawned agent');
+    }
+
+    if (!options.remote) {
+      console.log('');
+      console.log('Tip: Use --remote to include agents from other linked machines.');
     }
   });
 
@@ -811,6 +885,7 @@ program
   .description('Bridge multiple projects as orchestrator')
   .argument('[projects...]', 'Project paths to bridge')
   .option('--cli <tool>', 'CLI tool override for all projects')
+  .option('--architect [cli]', 'Spawn an architect agent to coordinate all projects (default: claude)')
   .action(async (projectPaths: string[], options) => {
     const { resolveProjects, validateDaemons } = await import('../bridge/config.js');
     const { MultiProjectClient } = await import('../bridge/multi-project-client.js');
@@ -957,9 +1032,114 @@ program
     console.log('Connected to all projects.');
     console.log('');
     console.log('Cross-project messaging:');
-    console.log('  @relay:projectId:agent Message');
-    console.log('  @relay:*:lead Broadcast to all leads');
+    console.log('  ->relay:projectId:agent Message');
+    console.log('  ->relay:*:lead Broadcast to all leads');
     console.log('');
+
+    // Spawn architect agent if --architect flag is set
+    let architectWrapper: any = null;
+    if (options.architect !== undefined) {
+      const { TmuxWrapper } = await import('../wrapper/tmux-wrapper.js');
+
+      // Determine CLI to use (default to claude)
+      const architectCli = typeof options.architect === 'string' ? options.architect : 'claude';
+
+      // Use first project as the base for the architect
+      const baseProject = valid[0];
+      const basePaths = getProjectPaths(baseProject.path);
+
+      // Build project context for the architect
+      const projectContext = valid.map(p => `- ${p.id}: ${p.path} (Lead: ${p.leadName})`).join('\n');
+
+      // Create architect system prompt
+      const architectPrompt = `You are the Architect, a cross-project coordinator overseeing multiple codebases.
+
+## Connected Projects
+${projectContext}
+
+## Your Role
+- Coordinate high-level work across all projects
+- Assign tasks to project leads
+- Ensure consistency and resolve cross-project dependencies
+- Review overall architecture decisions
+
+## Cross-Project Messaging
+
+Use this syntax to message agents in specific projects:
+
+\`\`\`
+->relay:${valid[0].id}:${valid[0].leadName} <<<
+Your message to this project's lead>>>
+
+->relay:${valid.length > 1 ? valid[1].id : valid[0].id}:* <<<
+Broadcast to all agents in a project>>>
+
+->relay:*:* <<<
+Broadcast to ALL agents in ALL projects>>>
+\`\`\`
+
+Format: \`->relay:project-id:agent-name\`
+
+## Getting Started
+1. Check in with each project lead to understand current status
+2. Identify cross-project dependencies
+3. Coordinate work across teams
+
+Start by greeting the project leads and asking for status updates.`;
+
+      console.log('Spawning Architect agent...');
+      console.log(`  CLI: ${architectCli}`);
+      console.log(`  Base project: ${baseProject.path}`);
+      console.log('');
+
+      // Determine command and args based on CLI
+      let command: string;
+      let args: string[] = [];
+
+      if (architectCli === 'claude' || architectCli.startsWith('claude:')) {
+        command = 'claude';
+        args = ['--dangerously-skip-permissions'];
+        // Add model if specified (e.g., claude:opus)
+        if (architectCli.includes(':')) {
+          const model = architectCli.split(':')[1];
+          args.push('--model', model);
+        }
+      } else if (architectCli === 'codex') {
+        command = 'codex';
+        args = ['--dangerously-skip-permissions'];
+      } else {
+        command = architectCli;
+      }
+
+      try {
+        architectWrapper = new TmuxWrapper({
+          name: 'Architect',
+          command,
+          args,
+          socketPath: basePaths.socketPath,
+          debug: false,
+          useInbox: true,
+          inboxDir: basePaths.dataDir,
+        });
+
+        await architectWrapper.start();
+
+        // Wait for agent to be ready, then inject the prompt
+        setTimeout(async () => {
+          try {
+            await architectWrapper.injectMessage(architectPrompt);
+            console.log('Architect agent started and initialized.');
+            console.log('Attach to session: tmux attach -t relay-Architect');
+            console.log('');
+          } catch (err) {
+            console.error('Failed to inject architect prompt:', err);
+          }
+        }, 3000);
+
+      } catch (err) {
+        console.error('Failed to spawn Architect agent:', err);
+      }
+    }
 
     // Handle messages from projects
     client.onMessage = (projectId, from, payload, messageId) => {
@@ -1779,6 +1959,222 @@ program
       console.error(`Failed to run trail: ${err.message}`);
       process.exit(1);
     });
+  });
+
+cloudCommand
+  .command('agents')
+  .description('List agents across all linked machines')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const os = await import('node:os');
+
+    const dataDir = process.env.AGENT_RELAY_DATA_DIR ||
+      path.join(os.homedir(), '.local', 'share', 'agent-relay');
+    const configPath = path.join(dataDir, 'cloud-config.json');
+
+    if (!fs.existsSync(configPath)) {
+      console.error('Not linked to cloud. Run `agent-relay cloud link` first.');
+      process.exit(1);
+    }
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+    try {
+      // Get agents from cloud
+      const response = await fetch(`${config.cloudUrl}/api/daemons/agents`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ agents: [] }), // Report no agents, just fetch list
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error(`Failed to fetch agents: ${error}`);
+        process.exit(1);
+      }
+
+      const data = await response.json() as {
+        allAgents: Array<{
+          name: string;
+          status: string;
+          daemonId: string;
+          daemonName: string;
+          machineId: string;
+        }>;
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(data.allAgents, null, 2));
+        return;
+      }
+
+      if (!data.allAgents.length) {
+        console.log('No agents found across linked machines.');
+        console.log('Make sure daemons are running on linked machines.');
+        return;
+      }
+
+      console.log('');
+      console.log('Agents across all linked machines:');
+      console.log('');
+      console.log('NAME            STATUS   DAEMON              MACHINE');
+      console.log('─'.repeat(65));
+
+      // Group by daemon
+      const byDaemon = new Map<string, typeof data.allAgents>();
+      for (const agent of data.allAgents) {
+        const existing = byDaemon.get(agent.daemonName) || [];
+        existing.push(agent);
+        byDaemon.set(agent.daemonName, existing);
+      }
+
+      for (const [daemonName, agents] of byDaemon.entries()) {
+        for (const agent of agents) {
+          const name = agent.name.padEnd(15);
+          const status = agent.status.padEnd(8);
+          const daemon = daemonName.padEnd(18);
+          const machine = agent.machineId.substring(0, 20);
+          console.log(`${name} ${status} ${daemon} ${machine}`);
+        }
+      }
+
+      console.log('');
+      console.log(`Total: ${data.allAgents.length} agents on ${byDaemon.size} machines`);
+      console.log('');
+    } catch (err: any) {
+      console.error(`Failed to fetch agents: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+cloudCommand
+  .command('send')
+  .description('Send a message to an agent on any linked machine')
+  .argument('<agent>', 'Target agent name')
+  .argument('<message>', 'Message to send')
+  .option('--from <name>', 'Sender name', 'cli')
+  .action(async (agent: string, message: string, options: { from: string }) => {
+    const os = await import('node:os');
+
+    const dataDir = process.env.AGENT_RELAY_DATA_DIR ||
+      path.join(os.homedir(), '.local', 'share', 'agent-relay');
+    const configPath = path.join(dataDir, 'cloud-config.json');
+
+    if (!fs.existsSync(configPath)) {
+      console.error('Not linked to cloud. Run `agent-relay cloud link` first.');
+      process.exit(1);
+    }
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+    console.log(`Sending message to ${agent}...`);
+
+    try {
+      // First, find which daemon the agent is on
+      const agentsResponse = await fetch(`${config.cloudUrl}/api/daemons/agents`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ agents: [] }),
+      });
+
+      if (!agentsResponse.ok) {
+        const error = await agentsResponse.text();
+        console.error(`Failed to find agent: ${error}`);
+        process.exit(1);
+      }
+
+      const agentsData = await agentsResponse.json() as {
+        allAgents: Array<{
+          name: string;
+          status: string;
+          daemonId: string;
+          daemonName: string;
+        }>;
+      };
+
+      const targetAgent = agentsData.allAgents.find(a => a.name === agent);
+      if (!targetAgent) {
+        console.error(`Agent "${agent}" not found.`);
+        console.log('Available agents:');
+        for (const a of agentsData.allAgents) {
+          console.log(`  - ${a.name} (on ${a.daemonName})`);
+        }
+        process.exit(1);
+      }
+
+      // Send the message
+      const sendResponse = await fetch(`${config.cloudUrl}/api/daemons/message`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          targetDaemonId: targetAgent.daemonId,
+          targetAgent: agent,
+          message: {
+            from: options.from,
+            content: message,
+          },
+        }),
+      });
+
+      if (!sendResponse.ok) {
+        const error = await sendResponse.text();
+        console.error(`Failed to send message: ${error}`);
+        process.exit(1);
+      }
+
+      console.log('');
+      console.log(`✓ Message sent to ${agent} on ${targetAgent.daemonName}`);
+      console.log('');
+    } catch (err: any) {
+      console.error(`Failed to send message: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+cloudCommand
+  .command('daemons')
+  .description('List all linked daemon instances')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const os = await import('node:os');
+
+    const dataDir = process.env.AGENT_RELAY_DATA_DIR ||
+      path.join(os.homedir(), '.local', 'share', 'agent-relay');
+    const configPath = path.join(dataDir, 'cloud-config.json');
+
+    if (!fs.existsSync(configPath)) {
+      console.error('Not linked to cloud. Run `agent-relay cloud link` first.');
+      process.exit(1);
+    }
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+    try {
+      // Get daemons list (requires browser auth, so we use a workaround)
+      // For now, just show what we know about our own daemon
+      console.log('');
+      console.log('Linked Daemon:');
+      console.log('');
+      console.log(`  Machine: ${config.machineName}`);
+      console.log(`  ID: ${config.machineId}`);
+      console.log(`  Cloud: ${config.cloudUrl}`);
+      console.log(`  Linked: ${new Date(config.linkedAt).toLocaleString()}`);
+      console.log('');
+      console.log('Note: To see all linked daemons, visit your cloud dashboard.');
+      console.log('');
+    } catch (err: any) {
+      console.error(`Failed: ${err.message}`);
+      process.exit(1);
+    }
   });
 
 program.parse();

@@ -5,15 +5,20 @@
  * and quick actions. Redesigned to match landing page aesthetic.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Agent, Project } from '../../types';
 import type { ThreadInfo } from '../hooks/useMessages';
 import { AgentList } from '../AgentList';
 import { ProjectList } from '../ProjectList';
 import { ThreadList } from '../ThreadList';
+import { LogoIcon } from '../Logo';
+
+const THREADS_COLLAPSED_KEY = 'agent-relay-threads-collapsed';
 
 export interface SidebarProps {
   agents: Agent[];
+  /** Bridge-level agents like Architect that span multiple projects */
+  bridgeAgents?: Agent[];
   projects?: Project[];
   currentProject?: string;
   selectedAgent?: string;
@@ -41,6 +46,7 @@ export interface SidebarProps {
 
 export function Sidebar({
   agents,
+  bridgeAgents = [],
   projects = [],
   currentProject,
   selectedAgent,
@@ -61,6 +67,24 @@ export function Sidebar({
   onClose,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [isThreadsCollapsed, setIsThreadsCollapsed] = useState(() => {
+    // Initialize from localStorage
+    try {
+      const stored = localStorage.getItem(THREADS_COLLAPSED_KEY);
+      return stored === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Persist collapsed state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(THREADS_COLLAPSED_KEY, String(isThreadsCollapsed));
+    } catch {
+      // localStorage not available
+    }
+  }, [isThreadsCollapsed]);
 
   // Determine if we should show unified project view
   const hasProjects = projects.length > 0;
@@ -72,7 +96,7 @@ export function Sidebar({
       {/* Header */}
       <div className="p-4 border-b border-border-subtle">
         <div className="flex items-center gap-3 mb-3">
-          <span className="text-2xl text-accent-cyan drop-shadow-[0_0_8px_rgba(0,217,255,0.5)]">⬢</span>
+          <LogoIcon size={28} withGlow={true} />
           <h1 className="text-lg font-display font-semibold m-0 text-text-primary">Agent Relay</h1>
           <ConnectionIndicator isConnected={isConnected} />
           {/* Mobile close button */}
@@ -142,6 +166,8 @@ export function Sidebar({
             currentThread={currentThread}
             onThreadSelect={(threadId) => onThreadSelect?.(threadId)}
             totalUnreadCount={totalUnreadThreadCount}
+            isCollapsed={isThreadsCollapsed}
+            onToggleCollapse={() => setIsThreadsCollapsed(!isThreadsCollapsed)}
           />
         </div>
       )}
@@ -152,6 +178,7 @@ export function Sidebar({
           <ProjectList
             projects={projects}
             localAgents={agents}
+            bridgeAgents={bridgeAgents}
             currentProject={currentProject}
             selectedAgent={selectedAgent}
             searchQuery={searchQuery}

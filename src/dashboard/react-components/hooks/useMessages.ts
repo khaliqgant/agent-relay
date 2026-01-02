@@ -11,6 +11,8 @@ import type { Message, SendMessageRequest } from '../../types';
 export interface UseMessagesOptions {
   messages: Message[];
   currentChannel?: string;
+  /** Optional sender name for cloud mode (GitHub username). Falls back to 'Dashboard' if not provided. */
+  senderName?: string;
 }
 
 export interface ThreadInfo {
@@ -50,6 +52,7 @@ export interface UseMessagesReturn {
 export function useMessages({
   messages,
   currentChannel: initialChannel = 'general',
+  senderName,
 }: UseMessagesOptions): UseMessagesReturn {
   const [currentChannel, setCurrentChannel] = useState(initialChannel);
   const [currentThreadInternal, setCurrentThreadInternal] = useState<string | null>(null);
@@ -119,8 +122,10 @@ export function useMessages({
 
       // Count unread messages in thread
       // Consider messages as "read" if they arrived before we last viewed this thread
+      // Exclude messages from "Dashboard" - users shouldn't get notifications for their own messages
       const seenTimestamp = seenThreads.get(threadId);
       const unreadCount = threadMsgs.filter((m) => {
+        if (m.from === 'Dashboard') return false; // Don't count own messages as unread
         if (m.isRead) return false; // Already marked as read
         if (seenTimestamp) {
           // If we've seen this thread, only count messages after that time
@@ -193,12 +198,17 @@ export function useMessages({
       setSendError(null);
 
       try {
-        const request: SendMessageRequest = {
+        const request: SendMessageRequest & { from?: string } = {
           to,
           message: content,
           thread,
           attachments: attachmentIds,
         };
+
+        // Include sender name for cloud mode (GitHub username)
+        if (senderName) {
+          request.from = senderName;
+        }
 
         const response = await fetch('/api/send', {
           method: 'POST',
@@ -221,7 +231,7 @@ export function useMessages({
         setIsSending(false);
       }
     },
-    []
+    [senderName]
   );
 
   return {

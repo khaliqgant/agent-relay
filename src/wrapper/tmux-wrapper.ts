@@ -131,7 +131,7 @@ export class TmuxWrapper {
   private activityState: 'active' | 'idle' | 'disconnected' = 'disconnected';
   private recentlySentMessages: Map<string, number> = new Map();
   private sentMessageHashes: Set<string> = new Set(); // Permanent dedup
-  private messageQueue: Array<{ from: string; body: string; messageId: string; thread?: string; importance?: number }> = [];
+  private messageQueue: Array<{ from: string; body: string; messageId: string; thread?: string; importance?: number; data?: Record<string, unknown>; originalTo?: string }> = [];
   private isInjecting = false;
   // Track processed output to avoid re-parsing
   private processedOutputLength = 0;
@@ -237,8 +237,8 @@ export class TmuxWrapper {
     this.continuity = getContinuityManager({ defaultCli: this.cliType });
 
     // Handle incoming messages from relay
-    this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta) => {
-      this.handleIncomingMessage(from, payload, messageId, meta);
+    this.client.onMessage = (from: string, payload: SendPayload, messageId: string, meta?: SendMeta, originalTo?: string) => {
+      this.handleIncomingMessage(from, payload, messageId, meta, originalTo);
     };
 
     this.client.onStateChange = (state) => {
@@ -1149,21 +1149,24 @@ export class TmuxWrapper {
 
   /**
    * Handle incoming message from relay
+   * @param originalTo - The original 'to' field from sender. '*' indicates this was a broadcast message.
+   *                     Agents should reply to originalTo to maintain channel routing (e.g., respond to #general, not DM).
    */
-  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta): void {
+  private handleIncomingMessage(from: string, payload: SendPayload, messageId: string, meta?: SendMeta, originalTo?: string): void {
     if (this.hasSeenIncoming(messageId)) {
       this.logStderr(`← ${from}: duplicate delivery (${messageId.substring(0, 8)})`);
       return;
     }
 
     const truncatedBody = payload.body.substring(0, Math.min(DEBUG_LOG_TRUNCATE_LENGTH, payload.body.length));
-    this.logStderr(`← ${from}: ${truncatedBody}...`);
+    const channelInfo = originalTo === '*' ? ' [broadcast]' : '';
+    this.logStderr(`← ${from}${channelInfo}: ${truncatedBody}...`);
 
     // Record in trajectory via trail
     this.trajectory?.message('received', from, this.config.name, payload.body);
 
-    // Queue for injection
-    this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance });
+    // Queue for injection - include originalTo so we can inform the agent how to route responses
+    this.messageQueue.push({ from, body: payload.body, messageId, thread: payload.thread, importance: meta?.importance, data: payload.data, originalTo });
 
     // Write to inbox if enabled
     if (this.inbox) {
@@ -1267,13 +1270,29 @@ export class TmuxWrapper {
       }
 
       // Standard injection for all CLIs including Gemini
-      // Format: Relay message from Sender [abc12345] [thread:xxx] [!]: content
-      // Thread/importance hints are compact and optional to not break TUIs
+      // Format: Relay message from Sender [abc12345] [thread:xxx] [!] [#general]: content
+      // Thread/importance/channel hints are compact and optional to not break TUIs
       const threadHint = msg.thread ? ` [thread:${msg.thread}]` : '';
       // Importance indicator: [!!] for high (>75), [!] for medium (>50), none for low/default
       const importanceHint = msg.importance !== undefined && msg.importance > 75 ? ' [!!]' :
                              msg.importance !== undefined && msg.importance > 50 ? ' [!]' : '';
-      const injection = `Relay message from ${msg.from} ${idTag}${threadHint}${importanceHint}: ${sanitizedBody}${truncationHint}`;
+
+      // Channel indicator: [#general] for broadcasts - tells agent to reply to * not sender
+      // This ensures responses to #general messages go back to #general, not as DMs
+      const channelHint = msg.originalTo === '*' ? ' [#general]' : '';
+
+      // Extract attachment file paths if present
+      let attachmentHint = '';
+      if (msg.data?.attachments && Array.isArray(msg.data.attachments)) {
+        const filePaths = msg.data.attachments
+          .map((att: { filePath?: string }) => att.filePath)
+          .filter((p): p is string => typeof p === 'string');
+        if (filePaths.length > 0) {
+          attachmentHint = ` [Attachments: ${filePaths.join(', ')}]`;
+        }
+      }
+
+      const injection = `Relay message from ${msg.from} ${idTag}${threadHint}${importanceHint}${channelHint}${attachmentHint}: ${sanitizedBody}${truncationHint}`;
 
       // Paste message as a bracketed paste to avoid interleaving with active output
       await this.pasteLiteral(injection);

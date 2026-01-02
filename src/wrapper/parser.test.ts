@@ -519,6 +519,123 @@ Let me know if that works.
     });
   });
 
+  describe('Instructional text filtering', () => {
+    it('skips inline commands that look like PROTOCOL instructions', () => {
+      const result = parser.parse('->relay:AgentName message. PROTOCOL: (1) Wait for task via relay...\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:AgentName message. PROTOCOL: (1) Wait for task via relay...\n');
+    });
+
+    it('skips inline commands containing escaped relay prefix in body', () => {
+      const result = parser.parse('->relay:docs SEND: \\->relay:AgentName message\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:docs SEND: \\->relay:AgentName message\n');
+    });
+
+    it('skips inline commands with Agent Relay header', () => {
+      const result = parser.parse('->relay:Test [Agent Relay] You are connected\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:Test [Agent Relay] You are connected\n');
+    });
+
+    it('skips inline commands with Example: marker', () => {
+      const result = parser.parse('->relay:docs Example: use this pattern\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:docs Example: use this pattern\n');
+    });
+
+    it('skips inline commands with MULTI-LINE: instruction', () => {
+      const result = parser.parse('->relay:Target MULTI-LINE: use <<< and >>> markers\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:Target MULTI-LINE: use <<< and >>> markers\n');
+    });
+
+    it('skips inline commands with AgentName placeholder', () => {
+      const result = parser.parse('->relay:docs AgentName Hello there\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:docs AgentName Hello there\n');
+    });
+
+    it('skips thinking commands with PROTOCOL instruction', () => {
+      const result = parser.parse('->thinking:docs PROTOCOL: (1) Wait for task\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->thinking:docs PROTOCOL: (1) Wait for task\n');
+    });
+
+    it('does not skip real commands with normal body', () => {
+      const result = parser.parse('->relay:agent2 Hello, can you help me with this task?\n');
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0].to).toBe('agent2');
+      expect(result.commands[0].body).toBe('Hello, can you help me with this task?');
+    });
+
+    it('does not skip commands that happen to contain partial instruction words', () => {
+      // "protocol" in lowercase mid-sentence should NOT trigger filter
+      const result = parser.parse('->relay:agent2 We need to follow the protocol for this task\n');
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0].to).toBe('agent2');
+    });
+  });
+
+  describe('Spawn and release command filtering', () => {
+    it('does not parse spawn command as relay message', () => {
+      // Spawn commands should be handled by the wrapper's spawn subsystem, not parsed as messages
+      const result = parser.parse('->relay:spawn Developer claude "task description"\n');
+
+      // Should NOT be parsed as a relay message to target "spawn"
+      expect(result.commands).toHaveLength(0);
+      // Should be passed through for the wrapper to handle
+      expect(result.output).toBe('->relay:spawn Developer claude "task description"\n');
+    });
+
+    it('does not parse spawn command without task as relay message', () => {
+      const result = parser.parse('->relay:spawn Worker codex\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:spawn Worker codex\n');
+    });
+
+    it('does not parse release command as relay message', () => {
+      const result = parser.parse('->relay:release Developer\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:release Developer\n');
+    });
+
+    it('does not parse spawn command with prefixes as relay message', () => {
+      // TUI output may have bullet prefixes
+      const result = parser.parse('• ->relay:spawn Worker claude "task"\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('• ->relay:spawn Worker claude "task"\n');
+    });
+
+    it('still parses regular relay messages to spawn-like agent names', () => {
+      // An agent named "spawner" should still receive messages
+      const result = parser.parse('->relay:spawner Please do something\n');
+
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0].to).toBe('spawner');
+      expect(result.commands[0].body).toBe('Please do something');
+    });
+
+    it('handles spawn command case-insensitively', () => {
+      const result = parser.parse('->relay:SPAWN Worker claude\n');
+
+      expect(result.commands).toHaveLength(0);
+      expect(result.output).toBe('->relay:SPAWN Worker claude\n');
+    });
+  });
+
   describe('Edge cases', () => {
     it('inline commands must be complete in single chunk (no cross-chunk buffering)', () => {
       // Inline relay commands split across chunks are NOT detected
