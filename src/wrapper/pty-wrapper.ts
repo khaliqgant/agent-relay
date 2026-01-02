@@ -604,6 +604,11 @@ export class PtyWrapper extends EventEmitter {
       const threadId = match[3];      // Thread ID
       const startIdx = match.index + match[0].length;
 
+      // Skip spawn/release commands - they are handled by parseSpawnReleaseCommands
+      if (/^spawn$/i.test(target) || /^release$/i.test(target)) {
+        continue;
+      }
+
       // Find the closing >>>
       const endIdx = content.indexOf('>>>', startIdx);
       if (endIdx === -1) continue;
@@ -647,6 +652,12 @@ export class PtyWrapper extends EventEmitter {
       // Find the relay prefix in the line
       const prefixIdx = line.indexOf(this.relayPrefix);
       if (prefixIdx === -1) continue;
+
+      // Skip spawn/release commands - they are handled by parseSpawnReleaseCommands
+      const afterPrefixForCheck = line.substring(prefixIdx + this.relayPrefix.length);
+      if (/^spawn\s+/i.test(afterPrefixForCheck) || /^release\s+/i.test(afterPrefixForCheck)) {
+        continue;
+      }
 
       // Extract everything after the prefix
       const afterPrefix = line.substring(prefixIdx + this.relayPrefix.length);
