@@ -9,7 +9,7 @@ import { EventEmitter } from 'events';
 import { createLogger } from '../resiliency/logger.js';
 import { getSupervisor } from '../resiliency/supervisor.js';
 import { detectProvider } from '../resiliency/provider-context.js';
-import { PtyWrapper, type PtyWrapperConfig } from '../wrapper/pty-wrapper.js';
+import { PtyWrapper, type PtyWrapperConfig, type SummaryEvent, type SessionEndEvent } from '../wrapper/pty-wrapper.js';
 import { resolveCommand } from '../utils/command-resolver.js';
 import type {
   Agent,
@@ -17,6 +17,15 @@ import type {
   DaemonEvent,
   SpawnAgentRequest,
 } from './types.js';
+
+/**
+ * Optional cloud persistence handler.
+ * When set, agent-manager forwards PtyWrapper events to this handler.
+ */
+export interface CloudPersistenceHandler {
+  onSummary: (agentId: string, event: SummaryEvent) => Promise<void>;
+  onSessionEnd: (agentId: string, event: SessionEndEvent) => Promise<void>;
+}
 
 const logger = createLogger('agent-manager');
 
@@ -40,6 +49,7 @@ export class AgentManager extends EventEmitter {
   });
   private dataDir: string;
   private logsDir: string;
+  private cloudPersistence?: CloudPersistenceHandler;
 
   constructor(dataDir: string) {
     super();
@@ -58,6 +68,16 @@ export class AgentManager extends EventEmitter {
     this.supervisor.start();
 
     logger.info('Agent manager initialized');
+  }
+
+  /**
+   * Set cloud persistence handler for forwarding PtyWrapper events.
+   * When set, 'summary' and 'session-end' events from agents are forwarded
+   * to the handler for cloud persistence (PostgreSQL/Redis).
+   */
+  setCloudPersistence(handler: CloudPersistenceHandler): void {
+    this.cloudPersistence = handler;
+    logger.info('Cloud persistence handler set');
   }
 
   /**
@@ -131,6 +151,9 @@ export class AgentManager extends EventEmitter {
 
       agent.pid = pty.pid;
       agent.pty = pty;
+
+      // Subscribe to PtyWrapper events for cloud persistence
+      this.bindPtyEvents(agent.id, pty);
 
       // Inject initial task
       if (task && task.trim()) {
@@ -364,6 +387,9 @@ export class AgentManager extends EventEmitter {
       agent.status = 'running';
       agent.spawnedAt = new Date();
 
+      // Re-bind events for the new PTY
+      this.bindPtyEvents(agent.id, pty);
+
       logger.info('Agent restarted', { id: agentId, name: agent.name, pid: agent.pid });
 
       this.emitEvent({
@@ -399,6 +425,91 @@ export class AgentManager extends EventEmitter {
         });
       }
     }
+  }
+
+  /**
+   * Bind PtyWrapper events to cloud persistence and daemon events.
+   *
+   * Events bound:
+   * - 'summary': Agent output a [[SUMMARY]] block
+   * - 'session-end': Agent output a [[SESSION_END]] block
+   * - 'injection-failed': Message injection failed after retries
+   */
+  private bindPtyEvents(agentId: string, pty: PtyWrapper): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+
+    // Forward summary events
+    pty.on('summary', async (event: SummaryEvent) => {
+      logger.info('Agent summary', {
+        agentId,
+        name: event.agentName,
+        task: event.summary.currentTask,
+      });
+
+      // Emit daemon event
+      this.emitEvent({
+        type: 'agent:summary',
+        workspaceId: agent.workspaceId,
+        agentId,
+        data: { summary: event.summary },
+        timestamp: new Date(),
+      });
+
+      // Forward to cloud persistence if configured
+      if (this.cloudPersistence) {
+        try {
+          await this.cloudPersistence.onSummary(agentId, event);
+        } catch (err) {
+          logger.error('Cloud persistence failed for summary', { agentId, error: String(err) });
+        }
+      }
+    });
+
+    // Forward session-end events
+    pty.on('session-end', async (event: SessionEndEvent) => {
+      logger.info('Agent session ended', {
+        agentId,
+        name: event.agentName,
+        summary: event.marker.summary,
+      });
+
+      // Emit daemon event
+      this.emitEvent({
+        type: 'agent:session-end',
+        workspaceId: agent.workspaceId,
+        agentId,
+        data: { marker: event.marker },
+        timestamp: new Date(),
+      });
+
+      // Forward to cloud persistence if configured
+      if (this.cloudPersistence) {
+        try {
+          await this.cloudPersistence.onSessionEnd(agentId, event);
+        } catch (err) {
+          logger.error('Cloud persistence failed for session-end', { agentId, error: String(err) });
+        }
+      }
+    });
+
+    // Log injection failures
+    pty.on('injection-failed', (event) => {
+      logger.warn('Message injection failed', {
+        agentId,
+        messageId: event.messageId,
+        from: event.from,
+        attempts: event.attempts,
+      });
+
+      this.emitEvent({
+        type: 'agent:injection-failed',
+        workspaceId: agent.workspaceId,
+        agentId,
+        data: event,
+        timestamp: new Date(),
+      });
+    });
   }
 
   /**
