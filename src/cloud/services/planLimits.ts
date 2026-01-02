@@ -18,6 +18,8 @@ export interface PlanLimits {
   maxConcurrentAgents: number;
   maxComputeHoursPerMonth: number;
   coordinatorsEnabled: boolean;
+  /** Cloud session persistence (summaries, session tracking) - Pro+ only */
+  sessionPersistence: boolean;
 }
 
 /**
@@ -35,6 +37,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     maxConcurrentAgents: 2,
     maxComputeHoursPerMonth: 10,
     coordinatorsEnabled: false,
+    sessionPersistence: false,
   },
   pro: {
     maxWorkspaces: 5,
@@ -42,6 +45,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     maxConcurrentAgents: 10,
     maxComputeHoursPerMonth: 100,
     coordinatorsEnabled: true,
+    sessionPersistence: true,
   },
   team: {
     maxWorkspaces: 20,
@@ -49,6 +53,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     maxConcurrentAgents: 50,
     maxComputeHoursPerMonth: 500,
     coordinatorsEnabled: true,
+    sessionPersistence: true,
   },
   enterprise: {
     maxWorkspaces: Infinity,
@@ -56,6 +61,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     maxConcurrentAgents: Infinity,
     maxComputeHoursPerMonth: Infinity,
     coordinatorsEnabled: true,
+    sessionPersistence: true,
   },
 };
 
@@ -253,6 +259,38 @@ export async function canUseCoordinator(userId: string): Promise<{
     return {
       allowed: false,
       reason: 'Coordinator agents require a Pro plan or higher',
+      requiredPlan: 'pro',
+    };
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * Check if user can use cloud session persistence
+ *
+ * Session persistence enables:
+ * - [[SUMMARY]] blocks saved to cloud database
+ * - [[SESSION_END]] markers for session tracking
+ * - Session recovery and handoff between agents
+ */
+export async function canUseSessionPersistence(userId: string): Promise<{
+  allowed: boolean;
+  reason?: string;
+  requiredPlan?: string;
+}> {
+  const user = await db.users.findById(userId);
+  if (!user) {
+    return { allowed: false, reason: 'User not found' };
+  }
+
+  const plan = (user.plan as PlanType) || 'free';
+  const limits = getPlanLimits(plan);
+
+  if (!limits.sessionPersistence) {
+    return {
+      allowed: false,
+      reason: 'Cloud session persistence requires a Pro plan or higher',
       requiredPlan: 'pro',
     };
   }

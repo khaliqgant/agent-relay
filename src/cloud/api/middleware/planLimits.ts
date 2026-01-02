@@ -10,6 +10,7 @@ import {
   canAddRepo,
   canSpawnAgent,
   canUseCoordinator,
+  canUseSessionPersistence,
 } from '../../services/planLimits.js';
 
 /**
@@ -221,5 +222,52 @@ export async function checkCoordinatorAccess(
   } catch (error) {
     console.error('Error checking coordinator access:', error);
     res.status(500).json({ error: 'Failed to check coordinator access' });
+  }
+}
+
+/**
+ * Middleware to check session persistence access
+ *
+ * Use this middleware on endpoints that enable cloud session persistence.
+ * Session persistence is only available on Pro plan and above.
+ */
+export async function checkSessionPersistenceAccess(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const userId = req.session.userId;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  try {
+    const check = await canUseSessionPersistence(userId);
+
+    if (!check.allowed) {
+      const response: PlanLimitError = {
+        error: check.reason || 'Session persistence not available',
+        code: 'FEATURE_NOT_AVAILABLE',
+        details: {
+          plan: 'current',
+          resource: 'sessionPersistence',
+          requiredPlan: check.requiredPlan,
+        },
+        upgrade: {
+          message: 'Upgrade to Pro to enable cloud session persistence',
+          url: '/settings/billing',
+        },
+      };
+
+      res.status(402).json(response);
+      return;
+    }
+
+    next();
+  } catch (error) {
+    console.error('Error checking session persistence access:', error);
+    res.status(500).json({ error: 'Failed to check session persistence access' });
   }
 }
