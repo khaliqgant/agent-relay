@@ -34,6 +34,10 @@ export type {
   NewSubscription,
   UsageRecord,
   NewUsageRecord,
+  AgentSession,
+  NewAgentSession,
+  AgentSummary,
+  NewAgentSummary,
 } from './schema.js';
 
 // Re-export schema for direct table access
@@ -868,6 +872,114 @@ export const repositoryQueries: RepositoryQueries = {
   async delete(id: string): Promise<void> {
     const db = getDb();
     await db.delete(schema.repositories).where(eq(schema.repositories.id, id));
+  },
+};
+
+// ============================================================================
+// Agent Session Queries (cloud persistence for PtyWrapper)
+// ============================================================================
+
+export interface AgentSessionQueries {
+  findById(id: string): Promise<schema.AgentSession | null>;
+  findByWorkspaceId(workspaceId: string): Promise<schema.AgentSession[]>;
+  findActiveByWorkspace(workspaceId: string): Promise<schema.AgentSession[]>;
+  create(data: schema.NewAgentSession): Promise<schema.AgentSession>;
+  endSession(id: string, endMarker?: { summary?: string; completedTasks?: string[] }): Promise<void>;
+  delete(id: string): Promise<void>;
+}
+
+export const agentSessionQueries: AgentSessionQueries = {
+  async findById(id: string): Promise<schema.AgentSession | null> {
+    const db = getDb();
+    const result = await db.select().from(schema.agentSessions).where(eq(schema.agentSessions.id, id));
+    return result[0] ?? null;
+  },
+
+  async findByWorkspaceId(workspaceId: string): Promise<schema.AgentSession[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.agentSessions)
+      .where(eq(schema.agentSessions.workspaceId, workspaceId))
+      .orderBy(desc(schema.agentSessions.startedAt));
+  },
+
+  async findActiveByWorkspace(workspaceId: string): Promise<schema.AgentSession[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.agentSessions)
+      .where(and(
+        eq(schema.agentSessions.workspaceId, workspaceId),
+        eq(schema.agentSessions.status, 'active')
+      ));
+  },
+
+  async create(data: schema.NewAgentSession): Promise<schema.AgentSession> {
+    const db = getDb();
+    const result = await db.insert(schema.agentSessions).values(data).returning();
+    return result[0];
+  },
+
+  async endSession(id: string, endMarker?: { summary?: string; completedTasks?: string[] }): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.agentSessions)
+      .set({
+        status: 'ended',
+        endedAt: new Date(),
+        endMarker: endMarker ?? null,
+      })
+      .where(eq(schema.agentSessions.id, id));
+  },
+
+  async delete(id: string): Promise<void> {
+    const db = getDb();
+    await db.delete(schema.agentSessions).where(eq(schema.agentSessions.id, id));
+  },
+};
+
+// ============================================================================
+// Agent Summary Queries (cloud persistence for [[SUMMARY]] blocks)
+// ============================================================================
+
+export interface AgentSummaryQueries {
+  findBySessionId(sessionId: string): Promise<schema.AgentSummary[]>;
+  findLatestByAgent(agentName: string): Promise<schema.AgentSummary | null>;
+  create(data: schema.NewAgentSummary): Promise<schema.AgentSummary>;
+  deleteBySession(sessionId: string): Promise<void>;
+}
+
+export const agentSummaryQueries: AgentSummaryQueries = {
+  async findBySessionId(sessionId: string): Promise<schema.AgentSummary[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.agentSummaries)
+      .where(eq(schema.agentSummaries.sessionId, sessionId))
+      .orderBy(schema.agentSummaries.createdAt);
+  },
+
+  async findLatestByAgent(agentName: string): Promise<schema.AgentSummary | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.agentSummaries)
+      .where(eq(schema.agentSummaries.agentName, agentName))
+      .orderBy(desc(schema.agentSummaries.createdAt))
+      .limit(1);
+    return result[0] ?? null;
+  },
+
+  async create(data: schema.NewAgentSummary): Promise<schema.AgentSummary> {
+    const db = getDb();
+    const result = await db.insert(schema.agentSummaries).values(data).returning();
+    return result[0];
+  },
+
+  async deleteBySession(sessionId: string): Promise<void> {
+    const db = getDb();
+    await db.delete(schema.agentSummaries).where(eq(schema.agentSummaries.sessionId, sessionId));
   },
 };
 
