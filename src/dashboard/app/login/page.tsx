@@ -74,16 +74,7 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      // Get a session token from our backend
-      const sessionResult = await cloudApi.getNangoLoginSession();
-      if (!sessionResult.success) {
-        throw new Error(sessionResult.error || 'Failed to create login session');
-      }
-
-      const { sessionToken } = sessionResult.data;
-      setState('connecting');
-
-      // Create Nango instance and open Connect UI with event handling
+      // Create Nango instance and open Connect UI first (shows loading state)
       const nango = new Nango();
 
       const handleEvent = (event: ConnectUIEvent) => {
@@ -96,9 +87,7 @@ export default function LoginPage() {
           }
         } else if (event.type === 'close') {
           // User closed without connecting
-          if (state === 'connecting') {
-            setState('idle');
-          }
+          setState('idle');
         } else if (event.type === 'error') {
           setState('error');
           setError(event.payload.errorMessage || 'Connection failed');
@@ -108,18 +97,30 @@ export default function LoginPage() {
         }
       };
 
+      // Open Connect UI (shows loading until token is set)
       connectUIRef.current = nango.openConnectUI({
-        sessionToken,
         onEvent: handleEvent,
       });
-
       connectUIRef.current.open();
+      setState('connecting');
+
+      // Get session token from backend and set it
+      const sessionResult = await cloudApi.getNangoLoginSession();
+      if (!sessionResult.success) {
+        if (connectUIRef.current) {
+          connectUIRef.current.close();
+        }
+        throw new Error(sessionResult.error || 'Failed to create login session');
+      }
+
+      // Set the session token - this enables the Connect UI
+      connectUIRef.current.setSessionToken(sessionResult.data.sessionToken);
     } catch (err) {
       console.error('Login error:', err);
       setState('error');
       setError(err instanceof Error ? err.message : 'Login failed');
     }
-  }, [startPolling, state]);
+  }, [startPolling]);
 
   // Retry login
   const handleRetry = useCallback(() => {

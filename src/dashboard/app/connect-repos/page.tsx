@@ -102,20 +102,7 @@ export default function ConnectReposPage() {
     setError(null);
 
     try {
-      // Get a repo session token from our backend
-      const sessionResult = await cloudApi.getNangoRepoSession();
-      if (!sessionResult.success) {
-        if (sessionResult.sessionExpired) {
-          window.location.href = '/login';
-          return;
-        }
-        throw new Error(sessionResult.error || 'Failed to create session');
-      }
-
-      const { sessionToken } = sessionResult.data;
-      setState('connecting');
-
-      // Create Nango instance and open Connect UI with event handling
+      // Create Nango instance and open Connect UI first (shows loading state)
       const nango = new Nango();
 
       const handleEvent = (event: ConnectUIEvent) => {
@@ -128,9 +115,7 @@ export default function ConnectReposPage() {
           }
         } else if (event.type === 'close') {
           // User closed without connecting
-          if (state === 'connecting') {
-            setState('idle');
-          }
+          setState('idle');
         } else if (event.type === 'error') {
           setState('error');
           setError(event.payload.errorMessage || 'Connection failed');
@@ -140,18 +125,34 @@ export default function ConnectReposPage() {
         }
       };
 
+      // Open Connect UI (shows loading until token is set)
       connectUIRef.current = nango.openConnectUI({
-        sessionToken,
         onEvent: handleEvent,
       });
-
       connectUIRef.current.open();
+      setState('connecting');
+
+      // Get repo session token from backend and set it
+      const sessionResult = await cloudApi.getNangoRepoSession();
+      if (!sessionResult.success) {
+        if (connectUIRef.current) {
+          connectUIRef.current.close();
+        }
+        if (sessionResult.sessionExpired) {
+          window.location.href = '/login';
+          return;
+        }
+        throw new Error(sessionResult.error || 'Failed to create session');
+      }
+
+      // Set the session token - this enables the Connect UI
+      connectUIRef.current.setSessionToken(sessionResult.data.sessionToken);
     } catch (err) {
       console.error('Connect error:', err);
       setState('error');
       setError(err instanceof Error ? err.message : 'Failed to connect');
     }
-  }, [startPolling, state]);
+  }, [startPolling]);
 
   // Handle retry
   const handleRetry = useCallback(() => {
