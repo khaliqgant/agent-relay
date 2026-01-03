@@ -298,7 +298,7 @@ export function AgentCard({
       {agent.currentTask && !agent.isProcessing && (
         <div className="mt-2 p-2 bg-bg-hover rounded text-xs">
           <span className="text-text-muted mr-1">Working on:</span>
-          <span className="text-text-primary">{agent.currentTask}</span>
+          <span className="text-text-primary line-clamp-2" title={agent.currentTask}>{agent.currentTask}</span>
         </div>
       )}
 
