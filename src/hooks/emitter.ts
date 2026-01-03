@@ -7,22 +7,22 @@
  * - Can preload handlers from a config object
  */
 
-export type HookHandlerResult = unknown | { stop?: boolean };
-export type HookHandler = (...args: unknown[]) => HookHandlerResult | Promise<HookHandlerResult>;
+export type EmitterHandlerResult = unknown | { stop?: boolean };
+export type EmitterHandler = (...args: unknown[]) => EmitterHandlerResult | Promise<EmitterHandlerResult>;
 
 export interface EmitResult {
   /** Raw results from each handler in order */
-  results: HookHandlerResult[];
+  results: EmitterHandlerResult[];
   /** Whether propagation was stopped by a handler */
   stopped: boolean;
 }
 
-export type HookHandlerConfig = Record<string, HookHandler | HookHandler[]>;
+export type EmitterHandlerConfig = Record<string, EmitterHandler | EmitterHandler[]>;
 
 export class HookEmitter {
-  private handlers = new Map<string, HookHandler[]>();
+  private handlers = new Map<string, EmitterHandler[]>();
 
-  constructor(config?: HookHandlerConfig) {
+  constructor(config?: EmitterHandlerConfig) {
     if (config) {
       this.load(config);
     }
@@ -32,7 +32,7 @@ export class HookEmitter {
    * Register a handler for an event.
    * Returns an unsubscribe function to remove the handler.
    */
-  on(event: string, handler: HookHandler): () => void {
+  on(event: string, handler: EmitterHandler): () => void {
     const list = this.handlers.get(event) ?? [];
     list.push(handler);
     this.handlers.set(event, list);
@@ -48,7 +48,7 @@ export class HookEmitter {
    * If a handler returns `{ stop: true }`, propagation halts.
    */
   async emit(event: string, ...args: unknown[]): Promise<EmitResult> {
-    const results: HookHandlerResult[] = [];
+    const results: EmitterHandlerResult[] = [];
     const handlers = this.handlers.get(event) ?? [];
     let stopped = false;
 
@@ -69,7 +69,7 @@ export class HookEmitter {
    * Load handlers from a configuration object.
    * Values can be a single handler or an array of handlers.
    */
-  load(config: HookHandlerConfig): void {
+  load(config: EmitterHandlerConfig): void {
     for (const [event, handler] of Object.entries(config)) {
       const handlers = Array.isArray(handler) ? handler : [handler];
       for (const h of handlers) {
@@ -78,7 +78,7 @@ export class HookEmitter {
     }
   }
 
-  private shouldStop(result: HookHandlerResult): boolean {
+  private shouldStop(result: EmitterHandlerResult): boolean {
     return typeof result === 'object' && result !== null && 'stop' in result && (result as any).stop === true;
   }
 }
