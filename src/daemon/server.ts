@@ -16,6 +16,7 @@ import { getProjectPaths } from '../utils/project-namespace.js';
 import { AgentRegistry } from './agent-registry.js';
 import { daemonLog as log } from '../utils/logger.js';
 import { getCloudSync, type CloudSyncService, type RemoteAgent, type CrossMachineMessage } from './cloud-sync.js';
+import { v4 as uuid } from 'uuid';
 
 export interface DaemonConfig extends ConnectionConfig {
   socketPath: string;
@@ -280,7 +281,7 @@ export class Daemon {
     const envelope: SendEnvelope = {
       v: 1,
       type: 'SEND',
-      id: `cross-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: uuid(),
       ts: Date.now(),
       from: `${msg.from.daemonName}:${msg.from.agent}`,
       to: msg.to,

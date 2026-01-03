@@ -144,9 +144,9 @@
       }
     },
     "@agent-relay/agent-relay-protocol#agents.md:AGENTS.md": {
-      "version": "1.0.0",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fagent-relay-protocol/1.0.0.tar.gz",
-      "integrity": "sha256-e304a52e77a51e8e9eb58d65afc3ddb3398512ed14cb0b5119acb221d7775376",
+      "version": "1.0.1",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fagent-relay-protocol/1.0.1.tar.gz",
+      "integrity": "sha256-64f1f0eb15985079ac30594e8c7a5f41012f8efec80d8c5dc2059f11e2565f65",
       "format": "agents.md",
       "subtype": "snippet",
       "sourceFormat": "generic",
@@ -171,5 +171,5 @@
       "installedPath": ".claude/skills/browser-testing-with-screenshots/SKILL.md"
     }
   },
-  "generated": "2026-01-03T15:20:06.020Z"
+  "generated": "2026-01-03T15:28:59.485Z"
 }

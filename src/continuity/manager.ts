@@ -14,6 +14,8 @@ import { HandoffStore } from './handoff-store.js';
 import {
   parseSaveContent,
   parseHandoffContent,
+  isPlaceholderValue,
+  filterPlaceholders,
   type ParsedHandoffContent,
 } from './parser.js';
 import {
@@ -382,28 +384,66 @@ export class ContinuityManager {
   // =========================================================================
 
   /**
-   * Get startup context for an agent (for injection on spawn)
+   * Get startup context for an agent (for injection on spawn).
+   * Applies defensive filtering to remove any placeholder values.
    */
   async getStartupContext(agentName: string): Promise<StartupContext | null> {
     await this.initialize();
 
-    const ledger = await this.ledgerStore.load(agentName);
+    let ledger = await this.ledgerStore.load(agentName);
     const handoff = await this.handoffStore.getLatest(agentName);
 
     if (!ledger && !handoff) {
       return null;
     }
 
+    // Defensive filtering: clean any placeholder values that may have slipped through
+    if (ledger) {
+      ledger = this.filterLedgerPlaceholders(ledger);
+    }
+
     const context: StartupContext = {
       ledger: ledger || undefined,
-      handoff: handoff || undefined,
-      learnings: handoff?.learnings,
+      handoff: handoff ? this.filterHandoffPlaceholders(handoff) : undefined,
+      learnings: handoff?.learnings ? filterPlaceholders(handoff.learnings) : undefined,
       formatted: '',
     };
 
     context.formatted = formatStartupContext(context);
 
     return context;
+  }
+
+  /**
+   * Filter placeholder values from a ledger (defensive)
+   */
+  private filterLedgerPlaceholders(ledger: Ledger): Ledger {
+    return {
+      ...ledger,
+      currentTask: isPlaceholderValue(ledger.currentTask) ? '' : ledger.currentTask,
+      completed: filterPlaceholders(ledger.completed),
+      inProgress: filterPlaceholders(ledger.inProgress),
+      blocked: filterPlaceholders(ledger.blocked),
+      uncertainItems: filterPlaceholders(ledger.uncertainItems),
+      fileContext: ledger.fileContext.filter(f => !isPlaceholderValue(f.path)),
+      keyDecisions: ledger.keyDecisions.filter(d => !isPlaceholderValue(d.decision)),
+    };
+  }
+
+  /**
+   * Filter placeholder values from a handoff (defensive)
+   */
+  private filterHandoffPlaceholders(handoff: Handoff): Handoff {
+    return {
+      ...handoff,
+      taskDescription: isPlaceholderValue(handoff.taskDescription) ? '' : handoff.taskDescription,
+      summary: isPlaceholderValue(handoff.summary) ? '' : handoff.summary,
+      completedWork: filterPlaceholders(handoff.completedWork),
+      nextSteps: filterPlaceholders(handoff.nextSteps),
+      fileReferences: handoff.fileReferences.filter(f => !isPlaceholderValue(f.path)),
+      decisions: handoff.decisions.filter(d => !isPlaceholderValue(d.decision)),
+      learnings: handoff.learnings ? filterPlaceholders(handoff.learnings) : undefined,
+    };
   }
 
   /**
@@ -537,6 +577,65 @@ export class ContinuityManager {
   // =========================================================================
   // Cleanup
   // =========================================================================
+
+  /**
+   * Clean placeholder data from all ledgers.
+   * Removes known placeholder/template values that were incorrectly saved.
+   * Returns the number of ledgers that were cleaned.
+   */
+  async cleanupPlaceholders(): Promise<{ cleaned: number; agents: string[] }> {
+    await this.initialize();
+
+    const agents = await this.ledgerStore.listAgents();
+    const cleanedAgents: string[] = [];
+
+    for (const agentName of agents) {
+      const ledger = await this.ledgerStore.load(agentName);
+      if (!ledger) continue;
+
+      let modified = false;
+
+      // Clean currentTask
+      if (ledger.currentTask && isPlaceholderValue(ledger.currentTask)) {
+        ledger.currentTask = '';
+        modified = true;
+      }
+
+      // Clean arrays
+      const originalCompleted = ledger.completed.length;
+      ledger.completed = filterPlaceholders(ledger.completed);
+      if (ledger.completed.length !== originalCompleted) modified = true;
+
+      const originalInProgress = ledger.inProgress.length;
+      ledger.inProgress = filterPlaceholders(ledger.inProgress);
+      if (ledger.inProgress.length !== originalInProgress) modified = true;
+
+      const originalBlocked = ledger.blocked.length;
+      ledger.blocked = filterPlaceholders(ledger.blocked);
+      if (ledger.blocked.length !== originalBlocked) modified = true;
+
+      const originalUncertain = ledger.uncertainItems.length;
+      ledger.uncertainItems = filterPlaceholders(ledger.uncertainItems);
+      if (ledger.uncertainItems.length !== originalUncertain) modified = true;
+
+      // Clean file context
+      const originalFiles = ledger.fileContext.length;
+      ledger.fileContext = ledger.fileContext.filter(f => !isPlaceholderValue(f.path));
+      if (ledger.fileContext.length !== originalFiles) modified = true;
+
+      // Clean decisions
+      const originalDecisions = ledger.keyDecisions.length;
+      ledger.keyDecisions = ledger.keyDecisions.filter(d => !isPlaceholderValue(d.decision));
+      if (ledger.keyDecisions.length !== originalDecisions) modified = true;
+
+      if (modified) {
+        await this.ledgerStore.save(agentName, ledger);
+        cleanedAgents.push(agentName);
+      }
+    }
+
+    return { cleaned: cleanedAgents.length, agents: cleanedAgents };
+  }
 
   /**
    * Clear all continuity data for an agent

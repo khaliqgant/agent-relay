@@ -58,6 +58,8 @@ export {
   parseSaveContent,
   parseHandoffContent,
   extractAllCommands,
+  isPlaceholderValue,
+  filterPlaceholders,
   type ParsedHandoffContent,
 } from './parser.js';
 

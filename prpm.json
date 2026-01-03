@@ -43,7 +43,7 @@
     },
     {
       "name": "agent-relay-protocol",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "Internal protocol snippet with session persistence, continuity, and trajectory tracking for dashboard integration",
       "format": "generic",
       "subtype": "snippet",

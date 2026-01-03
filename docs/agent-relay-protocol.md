@@ -61,8 +61,7 @@ Current task: Implementing user authentication
 Completed: User model, JWT utils, Login endpoint
 In progress: Logout endpoint, Token refresh
 Key decisions: Using refresh tokens for security
-Files: src/auth/jwt.ts:10-50, src/models/user.ts
->>>
+Files: src/auth/jwt.ts:10-50, src/models/user.ts>>>
 ```
 
 To also create a permanent handoff document (recommended before long operations):
@@ -73,8 +72,7 @@ Current task: Implementing auth module
 Completed: User model, JWT utils
 Next steps: Login endpoint, Session middleware
 Key decisions: JWT with refresh tokens, bcrypt for passwords
-Files: src/auth/*.ts
->>>
+Files: src/auth/*.ts>>>
 ```
 
 ### Load Previous Context

@@ -35,6 +35,57 @@ const PATTERNS = {
 };
 
 /**
+ * Known placeholder/template values that should be filtered out.
+ * These appear in documentation examples and startup messages.
+ */
+const PLACEHOLDER_VALUES = new Set([
+  '...',
+  '....',
+  'What you\'ve done',
+  'What you\'re working on',
+  'What you\'re working on now',
+  'What\'s remaining',
+  'task1',
+  'task2',
+  'task3',
+  'Important context for session recovery',
+  'src/file1.ts',
+  'src/file2.ts',
+  'item1',
+  'item2',
+]);
+
+/**
+ * Check if a value is a placeholder/template string that should be filtered out.
+ */
+export function isPlaceholderValue(value: string): boolean {
+  if (!value) return true;
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+
+  // Exact match against known placeholders
+  if (PLACEHOLDER_VALUES.has(trimmed)) return true;
+
+  // Check for ellipsis-only values
+  if (/^\.{2,}$/.test(trimmed)) return true;
+
+  // Check for template-like patterns: [...]
+  if (/^\[\.{3}\]$/.test(trimmed)) return true;
+
+  // Check for placeholder array syntax: [...]
+  if (trimmed === '[...]') return true;
+
+  return false;
+}
+
+/**
+ * Filter an array to remove placeholder values.
+ */
+export function filterPlaceholders<T extends string>(items: T[]): T[] {
+  return items.filter(item => !isPlaceholderValue(item));
+}
+
+/**
  * Parse a continuity command from agent output
  */
 export function parseContinuityCommand(output: string): ContinuityCommand | null {
@@ -125,11 +176,15 @@ function mapSectionToField(section: string): string | null {
 }
 
 /**
- * Add an item to the appropriate ledger section
+ * Add an item to the appropriate ledger section.
+ * Filters out placeholder/template values.
  */
 function addItemToSection(result: Partial<Ledger>, section: string, item: string): void {
   const field = mapSectionToField(section);
   if (!field) return;
+
+  // Filter out placeholder values
+  if (isPlaceholderValue(item)) return;
 
   switch (field) {
     case 'completed':
@@ -160,32 +215,36 @@ function addItemToSection(result: Partial<Ledger>, section: string, item: string
 }
 
 /**
- * Process a field-value pair from bold markdown or plain text
+ * Process a field-value pair from bold markdown or plain text.
+ * Filters out placeholder/template values.
  */
 function processFieldValue(result: Partial<Ledger>, field: string, value: string): void {
   switch (field) {
     case 'current task':
     case 'task':
     case 'working on':
-      result.currentTask = value;
+      // Only set if not a placeholder
+      if (!isPlaceholderValue(value)) {
+        result.currentTask = value;
+      }
       break;
 
     case 'completed':
     case 'done':
     case 'finished':
-      result.completed = parseListValue(value);
+      result.completed = filterPlaceholders(parseListValue(value));
       break;
 
     case 'in progress':
     case 'working':
     case 'ongoing':
-      result.inProgress = parseListValue(value);
+      result.inProgress = filterPlaceholders(parseListValue(value));
       break;
 
     case 'blocked':
     case 'blockers':
     case 'stuck':
-      result.blocked = parseListValue(value);
+      result.blocked = filterPlaceholders(parseListValue(value));
       break;
 
     case 'key decision':
@@ -199,19 +258,19 @@ function processFieldValue(result: Partial<Ledger>, field: string, value: string
     case 'unconfirmed':
     case 'needs verification':
     case 'to verify':
-      result.uncertainItems = parseListValue(value);
+      result.uncertainItems = filterPlaceholders(parseListValue(value));
       break;
 
     case 'files':
     case 'file context':
     case 'relevant files':
-      result.fileContext = parseFileRefs(value);
+      result.fileContext = parseFileRefs(value).filter(f => !isPlaceholderValue(f.path));
       break;
 
     case 'next':
     case 'next steps':
     case 'todo':
-      result.inProgress = [...(result.inProgress || []), ...parseListValue(value)];
+      result.inProgress = [...(result.inProgress || []), ...filterPlaceholders(parseListValue(value))];
       break;
 
     case 'phase':
@@ -467,7 +526,8 @@ export function parseHandoffContent(content: string): ParsedHandoffContent {
 }
 
 /**
- * Add an item to the appropriate handoff section
+ * Add an item to the appropriate handoff section.
+ * Filters out placeholder/template values.
  */
 function addItemToHandoffSection(
   result: ParsedHandoffContent,
@@ -493,6 +553,9 @@ function addItemToHandoffSection(
   const field = sectionMap[section];
   if (!field) return;
 
+  // Filter out placeholder values
+  if (isPlaceholderValue(item)) return;
+
   switch (field) {
     case 'completedWork':
       result.completedWork.push(item);
@@ -513,7 +576,8 @@ function addItemToHandoffSection(
 }
 
 /**
- * Process a field-value pair for handoff content
+ * Process a field-value pair for handoff content.
+ * Filters out placeholder/template values.
  */
 function processHandoffFieldValue(
   result: ParsedHandoffContent,
@@ -522,37 +586,41 @@ function processHandoffFieldValue(
 ): void {
   switch (field) {
     case 'summary':
-      result.summary = value;
+      if (!isPlaceholderValue(value)) {
+        result.summary = value;
+      }
       break;
 
     case 'task':
     case 'task description':
-      result.taskDescription = value;
+      if (!isPlaceholderValue(value)) {
+        result.taskDescription = value;
+      }
       break;
 
     case 'completed':
     case 'done':
-      result.completedWork = parseListValue(value);
+      result.completedWork = filterPlaceholders(parseListValue(value));
       break;
 
     case 'next':
     case 'next steps':
     case 'todo':
-      result.nextSteps = parseListValue(value);
+      result.nextSteps = filterPlaceholders(parseListValue(value));
       break;
 
     case 'decisions':
     case 'key decisions':
-      result.decisions = parseDecisions(value);
+      result.decisions = parseDecisions(value).filter(d => !isPlaceholderValue(d.decision));
       break;
 
     case 'files':
-      result.fileReferences = parseFileRefs(value);
+      result.fileReferences = parseFileRefs(value).filter(f => !isPlaceholderValue(f.path));
       break;
 
     case 'learnings':
     case 'learned':
-      result.learnings = parseListValue(value);
+      result.learnings = filterPlaceholders(parseListValue(value));
       break;
   }
 }
