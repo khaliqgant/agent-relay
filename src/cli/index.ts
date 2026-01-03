@@ -64,6 +64,7 @@ program
   .option('-n, --name <name>', 'Agent name (auto-generated if not set)')
   .option('-q, --quiet', 'Disable debug output', false)
   .option('--prefix <pattern>', 'Relay prefix pattern (default: ->relay:)')
+  .option('--dashboard-port <port>', 'Dashboard port for spawn/release API (auto-detected if not set)')
   .option('--shadow <name>', 'Spawn a shadow agent with this name that monitors the primary')
   .option('--shadow-role <role>', 'Shadow role: reviewer, auditor, or triggers (comma-separated: SESSION_END,CODE_WRITTEN,REVIEW_REQUEST,EXPLICIT_ASK,ALL_MESSAGES)')
   .argument('[command...]', 'Command to wrap (e.g., claude)')
@@ -100,8 +101,30 @@ program
     const { TmuxWrapper } = await import('../wrapper/tmux-wrapper.js');
     const { AgentSpawner } = await import('../bridge/spawner.js');
 
-    // Create spawner so any agent can spawn workers
-    const spawner = new AgentSpawner(paths.projectRoot);
+    // Determine dashboard port for spawn/release API
+    // Priority: CLI flag > env var > auto-detect default port
+    let dashboardPort: number | undefined;
+    if (options.dashboardPort) {
+      dashboardPort = parseInt(options.dashboardPort, 10);
+    } else {
+      // Try to detect if dashboard is running at default port
+      const defaultPort = parseInt(DEFAULT_DASHBOARD_PORT, 10);
+      try {
+        const response = await fetch(`http://localhost:${defaultPort}/api/status`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(500), // Quick timeout for detection
+        });
+        if (response.ok) {
+          dashboardPort = defaultPort;
+          console.error(`Dashboard detected: http://localhost:${dashboardPort}`);
+        }
+      } catch {
+        // Dashboard not running - spawn/release will use fallback callbacks
+      }
+    }
+
+    // Create spawner as fallback for direct spawn (if dashboard API not available)
+    const spawner = new AgentSpawner(paths.projectRoot, undefined, dashboardPort);
 
     const wrapper = new TmuxWrapper({
       name: agentName,
@@ -112,7 +135,9 @@ program
       relayPrefix: options.prefix,
       useInbox: true,
       inboxDir: paths.dataDir, // Use the project-specific data directory for the inbox
-      // Wire up spawn/release callbacks so any agent can spawn workers
+      // Use dashboard API for spawn/release when available (preferred - works from any context)
+      dashboardPort,
+      // Wire up spawn/release callbacks as fallback (if no dashboardPort)
       onSpawn: async (workerName: string, workerCli: string, task: string) => {
         console.error(`[${agentName}] Spawning ${workerName} (${workerCli})...`);
         const result = await spawner.spawn({

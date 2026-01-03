@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-01-03T15:51:54.282Z",
+  "lastUpdated": "2026-01-03T15:55:06.290Z",
   "trajectories": {
     "traj_ozd98si6a7ns": {
       "title": "Fix thinking indicator showing on all messages",
@@ -228,9 +228,10 @@
     },
     "traj_prdza7a5cxp5": {
       "title": "Fix notification filtering to use dynamic user",
-      "status": "active",
+      "status": "completed",
       "startedAt": "2026-01-03T15:51:54.280Z",
-      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/active/traj_prdza7a5cxp5.json"
+      "completedAt": "2026-01-03T15:55:06.279Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_prdza7a5cxp5.json"
     }
   }
 }
