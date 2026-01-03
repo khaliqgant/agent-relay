@@ -809,6 +809,8 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           onCoordinatorClick={handleCoordinatorClick}
           onFleetClick={() => setIsFleetViewActive(!isFleetViewActive)}
           isFleetViewActive={isFleetViewActive}
+          onTrajectoryClick={() => setIsTrajectoryOpen(true)}
+          hasActiveTrajectory={trajectoryStatus?.active}
           onMenuClick={() => setIsSidebarOpen(true)}
           hasUnreadNotifications={hasUnreadMessages}
         />

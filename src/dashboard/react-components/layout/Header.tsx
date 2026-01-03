@@ -29,6 +29,10 @@ export interface HeaderProps {
   onFleetClick?: () => void;
   /** Whether fleet view is currently active */
   isFleetViewActive?: boolean;
+  /** Trajectory viewer toggle */
+  onTrajectoryClick?: () => void;
+  /** Whether there's an active trajectory */
+  hasActiveTrajectory?: boolean;
   /** Mobile: open sidebar handler */
   onMenuClick?: () => void;
   /** Show notification badge on mobile menu button */
@@ -48,6 +52,8 @@ export function Header({
   onCoordinatorClick,
   onFleetClick,
   isFleetViewActive,
+  onTrajectoryClick,
+  hasActiveTrajectory,
   onMenuClick,
   hasUnreadNotifications,
 }: HeaderProps) {
@@ -190,6 +196,24 @@ export function Header({
           </button>
         )}
 
+        {/* Trajectory Viewer toggle */}
+        {onTrajectoryClick && (
+          <button
+            className={`flex items-center justify-center p-2 border rounded-lg cursor-pointer transition-all duration-150 relative ${
+              hasActiveTrajectory
+                ? 'bg-accent-purple/20 border-accent-purple text-accent-purple'
+                : 'bg-bg-tertiary border-border-subtle text-text-secondary hover:bg-bg-elevated hover:border-border-medium hover:text-accent-purple'
+            }`}
+            onClick={onTrajectoryClick}
+            title="Trajectory Viewer"
+          >
+            <TrajectoryIcon />
+            {hasActiveTrajectory && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-accent-purple rounded-full animate-pulse" />
+            )}
+          </button>
+        )}
+
         <a
           href="/metrics"
           className="flex items-center justify-center p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-orange no-underline"
@@ -254,6 +278,15 @@ function FleetIcon() {
       <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
       <line x1="8" y1="21" x2="16" y2="21" />
       <line x1="12" y1="17" x2="12" y2="21" />
+    </svg>
+  );
+}
+
+function TrajectoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }
