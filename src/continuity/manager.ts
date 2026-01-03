@@ -487,22 +487,49 @@ export class ContinuityManager {
 
   /**
    * Auto-save current state (called by wrapper on agent exit)
+   * @param agentName - Name of the agent
+   * @param reason - Why the save is happening
+   * @param sessionEndData - Optional data from [[SESSION_END]] block to populate handoff
    */
   async autoSave(
     agentName: string,
-    reason: 'crash' | 'restart' | 'session_end'
+    reason: 'crash' | 'restart' | 'session_end',
+    sessionEndData?: { summary?: string; completedTasks?: string[] }
   ): Promise<void> {
     await this.initialize();
 
+    const triggerReason: HandoffTrigger =
+      reason === 'crash'
+        ? 'crash'
+        : reason === 'restart'
+          ? 'auto_restart'
+          : 'session_end';
+
+    // If we have SESSION_END data, use it to create handoff directly
+    // This fixes the issue where ledger is empty but SESSION_END has content
+    if (sessionEndData && (sessionEndData.summary || sessionEndData.completedTasks?.length)) {
+      const handoff: Handoff = {
+        id: '',
+        agentName,
+        cli: this.defaultCli,
+        summary: sessionEndData.summary || '',
+        taskDescription: '',
+        completedWork: sessionEndData.completedTasks || [],
+        nextSteps: [],
+        fileReferences: [],
+        decisions: [],
+        relatedHandoffs: [],
+        createdAt: new Date(),
+        triggerReason,
+      };
+
+      await this.handoffStore.save(handoff);
+      return;
+    }
+
+    // Fall back to ledger-based handoff if no SESSION_END data
     const ledger = await this.ledgerStore.load(agentName);
     if (ledger) {
-      const triggerReason: HandoffTrigger =
-        reason === 'crash'
-          ? 'crash'
-          : reason === 'restart'
-            ? 'auto_restart'
-            : 'session_end';
-
       await this.createHandoffFromLedger(ledger, triggerReason);
     }
   }

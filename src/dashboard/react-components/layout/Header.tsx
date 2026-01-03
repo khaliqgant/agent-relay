@@ -18,6 +18,8 @@ export interface HeaderProps {
   projects?: Project[];
   /** Currently active project */
   currentProject?: Project | null;
+  /** Recently accessed projects for quick switching */
+  recentProjects?: Project[];
   /** Callback when user switches project */
   onProjectChange?: (project: Project) => void;
   onCommandPaletteOpen?: () => void;
@@ -44,6 +46,7 @@ export function Header({
   selectedAgent,
   projects = [],
   currentProject,
+  recentProjects = [],
   onProjectChange,
   onCommandPaletteOpen,
   onSettingsClick,
@@ -80,6 +83,7 @@ export function Header({
         <div className="max-md:hidden mr-3">
           <RepoContextHeader
             projects={projects}
+            recentProjects={recentProjects}
             currentProject={currentProject ?? null}
             onProjectChange={onProjectChange}
           />
@@ -285,8 +289,7 @@ function FleetIcon() {
 function TrajectoryIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
+      <path d="M3 12h4l3 9 4-18 3 9h4" />
     </svg>
   );
 }

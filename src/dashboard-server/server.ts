@@ -2898,9 +2898,37 @@ Start by greeting the project leads and asking for status updates.`;
           hasBridgeProjects = true;
 
           for (const project of bridgeState.projects) {
-            // For bridge projects, merge local agents if this is the current project
-            // (identified by matching path to our data directory's parent)
-            const projectAgents = project.agents || [];
+            // Enrich with actual online agents from agents.json (same logic as getBridgeData)
+            // This fixes the bug where stale agents were counted
+            let projectAgents: { name: string; status: string }[] = [];
+
+            if (project.path) {
+              const projectHash = crypto.createHash('sha256').update(project.path).digest('hex').slice(0, 12);
+              const projectDataDir = path.join(path.dirname(dataDir), projectHash);
+              const projectTeamDir = path.join(projectDataDir, 'team');
+              const agentsPath = path.join(projectTeamDir, 'agents.json');
+
+              if (fs.existsSync(agentsPath)) {
+                try {
+                  const agentsData = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+                  if (agentsData.agents && Array.isArray(agentsData.agents)) {
+                    // Filter to only show online agents (seen within 30 seconds)
+                    const thirtySecondsAgo = Date.now() - 30 * 1000;
+                    projectAgents = agentsData.agents
+                      .filter((a: { lastSeen?: string }) => {
+                        if (!a.lastSeen) return false;
+                        return new Date(a.lastSeen).getTime() > thirtySecondsAgo;
+                      })
+                      .map((a: { name: string; cli?: string }) => ({
+                        name: a.name,
+                        status: 'online',
+                      }));
+                  }
+                } catch (e) {
+                  console.warn(`[api] Failed to read agents for ${project.path}:`, e);
+                }
+              }
+            }
 
             servers.push({
               id: project.id,

@@ -1,8 +1,8 @@
 /**
  * TrajectoryViewer Component
  *
- * Displays an agent's action history as a timeline,
- * showing tool calls, decisions, and state changes.
+ * Displays an agent's action history as a refined timeline,
+ * with a distinctive futuristic aesthetic emphasizing clarity and flow.
  * Uses Tailwind CSS with Mission Control theme.
  */
 
@@ -59,41 +59,94 @@ export function TrajectoryViewer({
     });
   };
 
-  const typeFilters: { value: TrajectoryStep['type'] | 'all'; label: string }[] = [
-    { value: 'all', label: 'All' },
-    { value: 'tool_call', label: 'Tools' },
-    { value: 'decision', label: 'Decisions' },
-    { value: 'message', label: 'Messages' },
-    { value: 'phase_transition', label: 'Phases' },
-    { value: 'error', label: 'Errors' },
+  const typeFilters: { value: TrajectoryStep['type'] | 'all'; label: string; icon: React.ReactNode }[] = [
+    { value: 'all', label: 'All', icon: <FilterAllIcon /> },
+    { value: 'tool_call', label: 'Tools', icon: <ToolIcon /> },
+    { value: 'decision', label: 'Decisions', icon: <DecisionIcon /> },
+    { value: 'message', label: 'Messages', icon: <MessageIcon /> },
+    { value: 'state_change', label: 'State', icon: <StateIcon /> },
+    { value: 'phase_transition', label: 'Phases', icon: <PhaseIcon /> },
+    { value: 'error', label: 'Errors', icon: <ErrorIcon /> },
   ];
 
+  // Calculate phase distribution for the mini progress bar
+  const phaseStats = useMemo(() => {
+    const phases = steps.filter(s => s.phase).reduce((acc, s) => {
+      if (s.phase) acc[s.phase] = (acc[s.phase] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    const total = Object.values(phases).reduce((a, b) => a + b, 0);
+    return { phases, total };
+  }, [steps]);
+
   return (
-    <div className="bg-bg-card rounded-lg border border-border overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-tertiary">
-        <div className="flex items-center gap-2">
-          <TimelineIcon />
-          <span className="font-medium text-sm text-text-primary">Trajectory</span>
-          <span className="text-xs text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full">
-            {steps.length} steps
-          </span>
-          {agentName && (
-            <span className="text-xs text-text-secondary">• {agentName}</span>
+    <div className="bg-gradient-to-b from-bg-card to-bg-tertiary rounded-xl border border-border/50 overflow-hidden shadow-lg backdrop-blur-sm">
+      {/* Header with gradient accent line */}
+      <div className="relative">
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-accent-purple via-accent-cyan to-accent-purple opacity-60" />
+        
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border/30">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-accent-purple/20 to-accent-cyan/20 flex items-center justify-center border border-accent-purple/30">
+                <TrajectoryHeaderIcon />
+              </div>
+              {steps.some(s => s.status === 'running') && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-accent-cyan rounded-full animate-pulse shadow-[0_0_8px_rgba(0,217,255,0.6)]" />
+              )}
+            </div>
+            <div className="flex flex-col">
+              <span className="font-semibold text-sm text-text-primary tracking-wide">Trajectory</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-text-muted font-mono">
+                  {steps.length} {steps.length === 1 ? 'step' : 'steps'}
+                </span>
+                {agentName && (
+                  <>
+                    <span className="text-text-dim">|</span>
+                    <span className="text-[11px] text-accent-cyan/80 font-medium truncate max-w-[120px]">{agentName}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          {/* Mini phase progress indicator */}
+          {phaseStats.total > 0 && !compact && (
+            <div className="flex items-center gap-1.5">
+              {(['plan', 'design', 'execute', 'review', 'observe'] as const).map(phase => {
+                const count = phaseStats.phases[phase] || 0;
+                const color = getPhaseColor(phase);
+                return count > 0 ? (
+                  <div
+                    key={phase}
+                    className="h-1.5 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.max(8, (count / phaseStats.total) * 48)}px`,
+                      backgroundColor: color || 'var(--color-border)',
+                    }}
+                    title={`${phase}: ${count}`}
+                  />
+                ) : null;
+              })}
+            </div>
           )}
         </div>
+
+        {/* Filter tabs */}
         {!compact && (
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1 px-4 py-2 bg-bg-elevated/50 border-b border-border/20 overflow-x-auto scrollbar-thin">
             {typeFilters.map((f) => (
               <button
                 key={f.value}
-                className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg transition-all duration-200 whitespace-nowrap ${
                   filter === f.value
-                    ? 'bg-accent text-bg-deep'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover border border-border'
+                    ? 'bg-accent-purple/20 text-accent-purple border border-accent-purple/30 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
+                    : 'text-text-muted hover:text-text-secondary hover:bg-bg-hover/50'
                 }`}
                 onClick={() => setFilter(f.value)}
               >
+                <span className="opacity-70">{f.icon}</span>
                 {f.label}
               </button>
             ))}
@@ -102,28 +155,46 @@ export function TrajectoryViewer({
       </div>
 
       {/* Timeline */}
-      <div className="overflow-y-auto p-4" style={{ maxHeight }}>
+      <div className="overflow-y-auto px-4 py-3 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ maxHeight }}>
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-10 text-text-muted">
-            <Spinner />
-            <span className="text-sm">Loading trajectory...</span>
+          <div className="flex flex-col items-center justify-center gap-4 py-12 text-text-muted">
+            <div className="relative">
+              <Spinner />
+              <div className="absolute inset-0 bg-accent-cyan/10 rounded-full blur-xl" />
+            </div>
+            <span className="text-sm font-medium">Loading trajectory...</span>
           </div>
         ) : filteredSteps.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-10 text-text-muted">
-            <EmptyIcon />
-            <span className="text-sm">No steps to display</span>
+          <div className="flex flex-col items-center justify-center gap-4 py-12 text-text-muted">
+            <div className="w-16 h-16 rounded-2xl bg-bg-elevated/50 flex items-center justify-center border border-border/30">
+              <EmptyIcon />
+            </div>
+            <div className="text-center">
+              {steps.length === 0 ? (
+                <>
+                  <p className="text-sm font-medium text-text-secondary">No steps recorded</p>
+                  <p className="text-xs text-text-dim mt-1">Steps will appear here as the agent works</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-text-secondary">No matching steps</p>
+                  <p className="text-xs text-text-dim mt-1">Try a different filter or select "All"</p>
+                </>
+              )}
+            </div>
           </div>
         ) : (
-          <div className="flex flex-col">
+          <div className="flex flex-col gap-0.5">
             {filteredSteps.map((step, index) => (
               <TrajectoryStepItem
                 key={step.id}
                 step={step}
                 isExpanded={expandedSteps.has(step.id)}
                 isLast={index === filteredSteps.length - 1}
+                isFirst={index === 0}
                 compact={compact}
                 onToggle={() => toggleStep(step.id)}
-                onClick={() => onStepClick?.(step)}
+                onClick={onStepClick ? () => onStepClick(step) : undefined}
               />
             ))}
           </div>
@@ -137,15 +208,17 @@ interface TrajectoryStepItemProps {
   step: TrajectoryStep;
   isExpanded: boolean;
   isLast: boolean;
+  isFirst?: boolean;
   compact?: boolean;
   onToggle: () => void;
-  onClick: () => void;
+  onClick?: () => void;
 }
 
 function TrajectoryStepItem({
   step,
   isExpanded,
   isLast,
+  isFirst = false,
   compact = false,
   onToggle,
   onClick,
@@ -154,44 +227,83 @@ function TrajectoryStepItem({
   const icon = getStepIcon(step.type);
   const statusColor = getStatusColor(step.status);
   const phaseColor = getPhaseColor(step.phase);
+  const typeColor = getTypeColor(step.type);
+  const hasMetadata = step.metadata && Object.keys(step.metadata).length > 0;
+  const hasDetailContent = !!step.description || hasMetadata || !!onClick;
 
   return (
-    <div className="flex gap-3">
-      {/* Timeline line and dot */}
-      <div className="flex flex-col items-center w-6">
+    <div className="flex gap-3 group">
+      {/* Timeline line and node */}
+      <div className="flex flex-col items-center w-7 relative">
+        {/* Connecting line above (if not first) */}
+        {!isFirst && (
+          <div 
+            className="absolute top-0 w-px h-2 transition-colors"
+            style={{ backgroundColor: phaseColor ? `${phaseColor}40` : 'var(--color-border)' }}
+          />
+        )}
+        
+        {/* Node */}
         <div
-          className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 z-10 ${
-            step.status === 'running' ? 'animate-pulse' : ''
+          className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 z-10 mt-2 transition-all duration-200 ${
+            step.status === 'running' 
+              ? 'animate-pulse shadow-[0_0_12px_rgba(0,217,255,0.4)]' 
+              : 'group-hover:scale-110'
           }`}
           style={{
-            backgroundColor: statusColor || phaseColor || 'var(--color-bg-elevated)',
-            borderColor: statusColor || phaseColor || 'var(--color-accent)',
-            color: statusColor || phaseColor ? '#fff' : 'var(--color-accent)',
+            background: statusColor 
+              ? `linear-gradient(135deg, ${statusColor}40, ${statusColor}20)`
+              : phaseColor 
+                ? `linear-gradient(135deg, ${phaseColor}30, ${phaseColor}10)`
+                : `linear-gradient(135deg, ${typeColor}30, ${typeColor}10)`,
+            borderWidth: '1px',
+            borderStyle: 'solid',
+            borderColor: statusColor || phaseColor || typeColor || 'var(--color-border)',
+            color: statusColor || phaseColor || typeColor || 'var(--color-text-secondary)',
           }}
         >
           {icon}
         </div>
-        {!isLast && <div className="w-0.5 flex-1 bg-border my-1" />}
+        
+        {/* Connecting line below (if not last) */}
+        {!isLast && (
+          <div 
+            className="w-px flex-1 mt-1 transition-colors"
+            style={{ 
+              background: `linear-gradient(to bottom, ${phaseColor || typeColor || 'var(--color-border)'}40, transparent)` 
+            }}
+          />
+        )}
       </div>
 
       {/* Content */}
-      <div className={`flex-1 min-w-0 ${isLast ? '' : 'pb-4'}`}>
+      <div className={`flex-1 min-w-0 pt-1 ${isLast ? 'pb-1' : 'pb-3'}`}>
         <button
-          className="w-full flex items-center justify-between gap-3 px-3 py-2 bg-bg-tertiary border border-border rounded-md hover:bg-bg-hover hover:border-border-medium transition-colors text-left"
+          className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-left border ${
+            isExpanded 
+              ? 'bg-bg-elevated/80 border-border/60 shadow-sm' 
+              : 'bg-bg-tertiary/50 border-transparent hover:bg-bg-elevated/60 hover:border-border/40'
+          }`}
           onClick={onToggle}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-medium text-text-primary truncate">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="text-[13px] font-medium text-text-primary truncate">
               {step.title}
             </span>
-            <span className="text-[10px] text-text-muted bg-bg-elevated px-1.5 py-0.5 rounded flex-shrink-0">
+            <span 
+              className="text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0"
+              style={{
+                backgroundColor: `${typeColor}15`,
+                color: typeColor,
+              }}
+            >
               {formatType(step.type)}
             </span>
             {step.phase && phaseColor && (
               <span
-                className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0"
+                className="text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0"
                 style={{
-                  backgroundColor: `${phaseColor}20`,
+                  backgroundColor: `${phaseColor}15`,
                   color: phaseColor,
                 }}
               >
@@ -201,36 +313,46 @@ function TrajectoryStepItem({
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {step.duration !== undefined && (
-              <span className="text-[10px] font-mono text-text-secondary">
+              <span className="text-[10px] font-mono text-text-muted px-1.5 py-0.5 bg-bg-elevated/50 rounded">
                 {formatDuration(step.duration)}
               </span>
             )}
-            <span className="text-[10px] text-text-muted">{timestamp}</span>
+            <span className="text-[10px] text-text-dim">{timestamp}</span>
             {!compact && <ChevronIcon isExpanded={isExpanded} />}
           </div>
         </button>
 
         {/* Expanded details */}
-        {isExpanded && !compact && (
-          <div className="mt-2 p-3 bg-bg-tertiary border border-border rounded-md">
+        {isExpanded && !compact && hasDetailContent && (
+          <div className="mt-2 ml-1 pl-3 border-l-2 border-border/30">
             {step.description && (
-              <p className="text-sm text-text-secondary mb-3 leading-relaxed">
+              <p className="text-[13px] text-text-secondary mb-3 leading-relaxed">
                 {step.description}
               </p>
             )}
-            {step.metadata && Object.keys(step.metadata).length > 0 && (
-              <div className="bg-bg-elevated rounded p-3 mb-3 overflow-x-auto">
-                <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap break-words">
+            {hasMetadata && (
+              <div className="bg-bg-elevated/50 rounded-lg p-3 mb-3 overflow-x-auto border border-border/20">
+                <pre className="text-[11px] font-mono text-text-muted whitespace-pre-wrap break-words leading-relaxed">
                   {JSON.stringify(step.metadata, null, 2)}
                 </pre>
               </div>
             )}
-            <button
-              className="px-3 py-1.5 text-xs text-text-secondary bg-bg-elevated border border-border rounded hover:bg-bg-hover hover:text-text-primary transition-colors"
-              onClick={onClick}
-            >
-              View Details
-            </button>
+            {onClick && (
+              <button
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-accent-cyan bg-accent-cyan/10 border border-accent-cyan/20 rounded-md hover:bg-accent-cyan/20 hover:border-accent-cyan/30 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClick();
+                }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                View Details
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -292,6 +414,25 @@ function getPhaseColor(phase?: TrajectoryStep['phase']): string | null {
   }
 }
 
+function getTypeColor(type: TrajectoryStep['type']): string {
+  switch (type) {
+    case 'tool_call':
+      return '#00d9ff'; // cyan
+    case 'decision':
+      return '#a855f7'; // purple
+    case 'message':
+      return '#3b82f6'; // blue
+    case 'state_change':
+      return '#10b981'; // emerald
+    case 'phase_transition':
+      return '#f59e0b'; // amber
+    case 'error':
+      return '#ef4444'; // red
+    default:
+      return '#6b7280'; // gray
+  }
+}
+
 function getStepIcon(type: TrajectoryStep['type']): React.ReactNode {
   switch (type) {
     case 'tool_call':
@@ -311,19 +452,27 @@ function getStepIcon(type: TrajectoryStep['type']): React.ReactNode {
   }
 }
 
-// Icon components (small, 10x10)
-function TimelineIcon() {
+// Icon components
+function TrajectoryHeaderIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-text-secondary">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-accent-purple">
+      <path d="M3 12h4l3 9 4-18 3 9h4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function FilterAllIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v4m0 12v4m-7.07-14.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
     </svg>
   );
 }
 
 function ToolIcon() {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
     </svg>
   );
@@ -331,15 +480,15 @@ function ToolIcon() {
 
 function DecisionIcon() {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7-6.3-4.6L5.7 21l2.3-7-6-4.6h7.6z" />
     </svg>
   );
 }
 
 function MessageIcon() {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
@@ -347,27 +496,28 @@ function MessageIcon() {
 
 function StateIcon() {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <path d="M9 12h6m-3-3v6" />
     </svg>
   );
 }
 
 function PhaseIcon() {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
-      <path d="M12 6v6l4 2" stroke="white" strokeWidth="2" fill="none" />
+      <path d="M12 6v6l4 2" />
     </svg>
   );
 }
 
 function ErrorIcon() {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="12" stroke="white" strokeWidth="2" />
-      <circle cx="12" cy="16" r="1" fill="white" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <circle cx="12" cy="16" r="0.5" fill="currentColor" />
     </svg>
   );
 }

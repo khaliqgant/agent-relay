@@ -9,7 +9,7 @@ import helmet from 'helmet';
 import crypto from 'crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createClient } from 'redis';
+import { createClient, RedisClientType } from 'redis';
 import { RedisStore } from 'connect-redis';
 import { getConfig } from './config.js';
 import { runMigrations } from './db/index.js';
@@ -20,6 +20,7 @@ const __dirname = path.dirname(__filename);
 declare module 'express-session' {
   interface SessionData {
     csrfToken?: string;
+    userId?: string;
   }
 }
 
@@ -49,14 +50,14 @@ export async function createServer(): Promise<CloudServer> {
   app.set('trust proxy', 1);
 
   // Redis client for sessions
-  const redisClient = createClient({ url: config.redisUrl });
+  const redisClient: RedisClientType = createClient({ url: config.redisUrl });
   redisClient.on('error', (err) => {
     console.error('[redis] error', err);
   });
   redisClient.on('reconnecting', () => {
     console.warn('[redis] reconnecting...');
   });
-  await (redisClient as any).connect();
+  await redisClient.connect();
 
   // Middleware
   // Configure helmet to allow Next.js inline scripts
@@ -101,7 +102,7 @@ export async function createServer(): Promise<CloudServer> {
     const started = Date.now();
     res.on('finish', () => {
       const duration = Date.now() - started;
-      const user = (req.session as any)?.userId ?? 'anon';
+      const user = req.session?.userId ?? 'anon';
       console.log(
         `[audit] ${req.method} ${req.originalUrl} ${res.statusCode} user=${user} ip=${req.ip} ${duration}ms`
       );

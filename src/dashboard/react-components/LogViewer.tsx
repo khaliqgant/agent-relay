@@ -74,20 +74,13 @@ export function LogViewer({
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter((log) =>
-        log.content.toLowerCase().includes(query)
+        sanitizeLogContent(log.content).toLowerCase().includes(query)
       );
     }
 
     // Filter out empty, whitespace-only, and spinner-fragment lines
     result = result.filter((log) => {
-      // Strip ANSI codes and check if there's actual content
-      const stripped = log.content
-        .replace(/\x1b\[[0-9;]*m/g, '')  // Strip color codes
-        .replace(/\x1b\][^\x07]*\x07/g, '')  // Strip OSC sequences
-        .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')  // Strip CSI sequences
-        .replace(/\r/g, '')  // Remove carriage returns
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')  // Remove other control chars
-        .trim();
+      const stripped = sanitizeLogContent(log.content).trim();
 
       // Filter out empty lines
       if (stripped.length === 0) return false;
@@ -450,10 +443,6 @@ export function LogViewer({
   );
 }
 
-// Threshold for collapsible content (characters)
-const COLLAPSE_THRESHOLD = 200;
-const COLLAPSED_PREVIEW_LENGTH = 150;
-
 // Log line component
 interface LogLineItemProps {
   log: LogLine;
@@ -472,16 +461,13 @@ function LogLineItem({
   searchQuery = '',
   lineNumber,
 }: LogLineItemProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
   const timestamp = new Date(log.timestamp).toLocaleTimeString('en-US', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
   });
-
-  // Determine if content should be collapsible
-  const isCollapsible = !compact && log.content.length > COLLAPSE_THRESHOLD;
+  const sanitizedContent = sanitizeLogContent(log.content);
 
   const getTypeStyles = () => {
     switch (log.type) {
@@ -497,13 +483,13 @@ function LogLineItem({
   };
 
   // Highlight search matches in content
-  const highlightContent = (content: string) => {
+  const highlightContent = () => {
     if (!searchQuery || !searchQuery.trim()) {
-      return parseAnsiColors(content);
+      return sanitizedContent;
     }
 
     const regex = new RegExp(`(${escapeRegExp(searchQuery)})`, 'gi');
-    const parts = content.split(regex);
+    const parts = sanitizedContent.split(regex);
 
     return parts.map((part, i) => {
       if (part.toLowerCase() === searchQuery.toLowerCase()) {
@@ -516,22 +502,17 @@ function LogLineItem({
           </mark>
         );
       }
-      return parseAnsiColors(part);
+      return part;
     });
   };
 
   if (compact) {
     return (
       <div className={`${getTypeStyles()} leading-5 whitespace-pre-wrap break-all min-w-0 overflow-hidden`}>
-        {parseAnsiColors(log.content)}
+        {sanitizedContent}
       </div>
     );
   }
-
-  // Get the content to display based on collapsed state
-  const displayContent = isCollapsible && !isExpanded
-    ? log.content.slice(0, COLLAPSED_PREVIEW_LENGTH) + '...'
-    : log.content;
 
   return (
     <div
@@ -555,16 +536,8 @@ function LogLineItem({
         <span
           className={`whitespace-pre-wrap break-all leading-relaxed ${getTypeStyles()}`}
         >
-          {highlightContent(displayContent)}
+          {highlightContent()}
         </span>
-        {isCollapsible && (
-          <button
-            className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-[#21262d] text-[#8b949e] hover:text-accent-cyan hover:bg-[#30363d] transition-all duration-200"
-            onClick={() => setIsExpanded(!isExpanded)}
-          >
-            {isExpanded ? '▲ Collapse' : `▼ Show more (${log.content.length} chars)`}
-          </button>
-        )}
       </div>
       {log.type === 'stderr' && (
         <span

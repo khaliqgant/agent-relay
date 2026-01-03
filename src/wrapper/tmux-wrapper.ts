@@ -16,7 +16,7 @@ import { exec, execSync, spawn, ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { RelayClient } from './client.js';
-import { OutputParser, type ParsedCommand, parseSummaryWithDetails, parseSessionEndFromOutput } from './parser.js';
+import { OutputParser, type ParsedCommand, parseSummaryWithDetails, parseSessionEndFromOutput, type SessionEndMarker } from './parser.js';
 import { InboxManager } from './inbox.js';
 import type { SendPayload, SendMeta } from '../protocol/types.js';
 import { SqliteStorageAdapter } from '../storage/sqlite-adapter.js';
@@ -156,6 +156,7 @@ export class TmuxWrapper {
   private lastSummaryHash = ''; // Dedup summary saves
   private lastSummaryRawContent = ''; // Dedup invalid JSON error logging
   private sessionEndProcessed = false; // Track if we've already processed session end
+  private sessionEndData?: SessionEndMarker; // Store SESSION_END data for handoff
   private pendingRelayCommands: ParsedCommand[] = [];
   private queuedMessageHashes: Set<string> = new Set(); // For offline queue dedup
   private readonly MAX_PENDING_RELAY_COMMANDS = 50;
@@ -1069,12 +1070,17 @@ export class TmuxWrapper {
    * [[SESSION_END]]
    * {"summary": "Completed auth module", "completedTasks": ["login", "logout"]}
    * [[/SESSION_END]]
+   *
+   * Also stores the data for use in autoSave to populate handoff (fixes empty handoff issue).
    */
   private parseSessionEndAndClose(content: string): void {
     if (this.sessionEndProcessed) return; // Only process once per session
 
     const sessionEnd = parseSessionEndFromOutput(content);
     if (!sessionEnd) return;
+
+    // Store SESSION_END data for use in autoSave (fixes empty handoff issue)
+    this.sessionEndData = sessionEnd;
 
     // Get session ID from client connection - if not available yet, don't set flag
     // so we can retry when sessionId becomes available
@@ -1604,6 +1610,7 @@ export class TmuxWrapper {
     this.sessionEndProcessed = false;
     this.lastSummaryHash = '';
     this.lastSummaryRawContent = '';
+    this.sessionEndData = undefined;
   }
 
   /**
@@ -1775,8 +1782,9 @@ export class TmuxWrapper {
     this.activityState = 'disconnected';
 
     // Auto-save continuity state before shutdown (fire and forget)
+    // Pass sessionEndData to populate handoff (fixes empty handoff issue)
     if (this.continuity) {
-      this.continuity.autoSave(this.config.name, 'session_end').catch((err) => {
+      this.continuity.autoSave(this.config.name, 'session_end', this.sessionEndData).catch((err) => {
         this.logStderr(`[CONTINUITY] Auto-save failed: ${err.message}`, true);
       });
     }

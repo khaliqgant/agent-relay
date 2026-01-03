@@ -21,3 +21,9 @@ export {
   type CloudUser,
 } from './useSession';
 export { useTrajectory } from './useTrajectory';
+export {
+  useRecentRepos,
+  type UseRecentReposOptions,
+  type UseRecentReposReturn,
+  type RecentRepo,
+} from './useRecentRepos';

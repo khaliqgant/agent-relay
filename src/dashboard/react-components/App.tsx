@@ -34,6 +34,7 @@ import { useAgents } from './hooks/useAgents';
 import { useMessages } from './hooks/useMessages';
 import { useOrchestrator } from './hooks/useOrchestrator';
 import { useTrajectory } from './hooks/useTrajectory';
+import { useRecentRepos } from './hooks/useRecentRepos';
 import { usePresence, type UserPresence } from './hooks/usePresence';
 import { useCloudSessionOptional } from './CloudSessionProvider';
 import { api, convertApiDecision } from '../lib/api';
@@ -134,6 +135,9 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   const { steps: trajectorySteps, status: trajectoryStatus, isLoading: isTrajectoryLoading } = useTrajectory({
     autoPoll: isTrajectoryOpen, // Only poll when panel is open
   });
+
+  // Recent repos tracking
+  const { recentRepos, addRecentRepo, getRecentProjects } = useRecentRepos();
 
   // Coordinator panel state
   const [isCoordinatorOpen, setIsCoordinatorOpen] = useState(false);
@@ -426,6 +430,9 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   const handleProjectSelect = useCallback((project: Project) => {
     setCurrentProject(project.id);
 
+    // Track as recently accessed
+    addRecentRepo(project);
+
     // Switch workspace if using orchestrator
     if (workspaces.length > 0) {
       switchWorkspace(project.id).catch((err) => {
@@ -438,7 +445,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
       setCurrentChannel(project.agents[0].name);
     }
     closeSidebarOnMobile();
-  }, [selectAgent, setCurrentChannel, closeSidebarOnMobile, workspaces.length, switchWorkspace]);
+  }, [selectAgent, setCurrentChannel, closeSidebarOnMobile, workspaces.length, switchWorkspace, addRecentRepo]);
 
   // Handle agent selection
   const handleAgentSelect = useCallback((agent: Agent) => {
@@ -730,6 +737,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         setIsCommandPaletteOpen(false);
         setIsSpawnModalOpen(false);
         setIsNewConversationOpen(false);
+        setIsTrajectoryOpen(false);
       }
     };
 
@@ -801,6 +809,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           selectedAgent={selectedAgent}
           projects={mergedProjects}
           currentProject={mergedProjects.find(p => p.id === currentProject) || null}
+          recentProjects={getRecentProjects(mergedProjects)}
           onProjectChange={handleProjectSelect}
           onCommandPaletteOpen={handleCommandPaletteOpen}
           onSettingsClick={handleSettingsClick}
@@ -1011,16 +1020,22 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         />
       )}
 
-      {/* Trajectory Panel */}
+      {/* Trajectory Panel - Centered overlay */}
       {isTrajectoryOpen && (
-        <div className="fixed right-4 bottom-4 w-[400px] max-h-[500px] z-50 shadow-modal">
-          <div className="relative">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setIsTrajectoryOpen(false)}
+        >
+          <div 
+            className="relative w-[480px] max-w-[90vw] max-h-[80vh] shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               onClick={() => setIsTrajectoryOpen(false)}
-              className="absolute -top-2 -right-2 w-6 h-6 bg-bg-elevated border border-border rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-bg-hover z-10"
+              className="absolute -top-3 -right-3 w-8 h-8 bg-bg-elevated border border-border rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-bg-hover hover:border-accent-purple/50 transition-all z-10 shadow-lg"
               title="Close trajectory"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
             </button>
@@ -1028,7 +1043,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
               agentName={trajectoryStatus?.task?.slice(0, 30) || 'Current'}
               steps={trajectorySteps}
               isLoading={isTrajectoryLoading}
-              maxHeight="400px"
+              maxHeight="60vh"
             />
           </div>
         </div>
@@ -1041,9 +1056,8 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           className="fixed right-4 bottom-4 w-12 h-12 bg-accent text-bg-deep rounded-full shadow-glow-cyan flex items-center justify-center hover:scale-105 transition-transform z-50"
           title={`Trajectory: ${trajectoryStatus.phase || 'active'}`}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 12h4l3 9 4-18 3 9h4" />
           </svg>
         </button>
       )}

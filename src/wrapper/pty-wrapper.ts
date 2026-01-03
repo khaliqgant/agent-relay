@@ -146,6 +146,7 @@ export class PtyWrapper extends EventEmitter {
   private lastSummaryTime = Date.now(); // Track when last summary was output
   private outputsSinceSummary = 0; // Count outputs since last summary
   private detectedTask?: string; // Auto-detected task from agent config
+  private sessionEndData?: SessionEndMarker; // Store SESSION_END data for handoff
 
   constructor(config: PtyWrapperConfig) {
     super();
@@ -1327,9 +1328,10 @@ export class PtyWrapper extends EventEmitter {
     this.running = false;
 
     // Auto-save continuity state before stopping
+    // Pass sessionEndData to populate handoff (fixes empty handoff issue)
     if (this.continuity) {
       try {
-        await this.continuity.autoSave(this.config.name, 'session_end');
+        await this.continuity.autoSave(this.config.name, 'session_end', this.sessionEndData);
       } catch (err) {
         console.error(`[pty:${this.config.name}] Continuity auto-save failed:`, err);
       }
@@ -1363,10 +1365,11 @@ export class PtyWrapper extends EventEmitter {
     this.running = false;
 
     // Auto-save continuity state before killing (with timeout to avoid hanging)
+    // Pass sessionEndData if available (may have been parsed before kill)
     if (this.continuity) {
       try {
         await Promise.race([
-          this.continuity.autoSave(this.config.name, 'crash'),
+          this.continuity.autoSave(this.config.name, 'crash', this.sessionEndData),
           sleep(2000), // 2s timeout for crash saves
         ]);
       } catch (err) {
@@ -1500,6 +1503,7 @@ export class PtyWrapper extends EventEmitter {
   /**
    * Check for [[SESSION_END]] blocks and emit 'session-end' event.
    * Allows cloud services to handle session closure without hardcoding storage.
+   * Also stores the data for use in autoSave to populate handoff.
    */
   private checkForSessionEndAndEmit(content: string): void {
     if (this.sessionEndProcessed) return; // Only emit once per session
@@ -1508,6 +1512,9 @@ export class PtyWrapper extends EventEmitter {
     if (!sessionEnd) return;
 
     this.sessionEndProcessed = true;
+
+    // Store SESSION_END data for use in autoSave (fixes empty handoff issue)
+    this.sessionEndData = sessionEnd;
 
     // Emit event for external handlers
     this.emit('session-end', {
@@ -1523,6 +1530,7 @@ export class PtyWrapper extends EventEmitter {
   resetSessionState(): void {
     this.sessionEndProcessed = false;
     this.lastSummaryRawContent = '';
+    this.sessionEndData = undefined;
   }
 
   /**

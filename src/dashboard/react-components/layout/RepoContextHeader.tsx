@@ -11,6 +11,8 @@ import type { Project } from '../../types';
 export interface RepoContextHeaderProps {
   /** All connected projects */
   projects: Project[];
+  /** Recently accessed projects (subset of projects) */
+  recentProjects?: Project[];
   /** Currently active project */
   currentProject: Project | null;
   /** Callback when user selects a project */
@@ -19,6 +21,7 @@ export interface RepoContextHeaderProps {
 
 export function RepoContextHeader({
   projects,
+  recentProjects = [],
   currentProject,
   onProjectChange,
 }: RepoContextHeaderProps) {
@@ -28,6 +31,15 @@ export function RepoContextHeader({
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const hasMultipleProjects = projects.length > 1;
+
+  // Get IDs of recent projects for filtering
+  const recentIds = new Set(recentProjects.map((p) => p.id));
+
+  // Projects not in recent list
+  const otherProjects = projects.filter((p) => !recentIds.has(p.id));
+
+  // Combined list for keyboard navigation: recent first, then others
+  const allItems = [...recentProjects, ...otherProjects];
 
   // Format project name for display (extract org/repo from path)
   const formatProjectName = (project: Project | null): string => {
@@ -68,7 +80,7 @@ export function RepoContextHeader({
         case 'ArrowDown':
           event.preventDefault();
           setFocusedIndex((prev) => {
-            const next = prev < projects.length - 1 ? prev + 1 : 0;
+            const next = prev < allItems.length - 1 ? prev + 1 : 0;
             buttonRefs.current[next]?.focus();
             return next;
           });
@@ -76,14 +88,14 @@ export function RepoContextHeader({
         case 'ArrowUp':
           event.preventDefault();
           setFocusedIndex((prev) => {
-            const next = prev > 0 ? prev - 1 : projects.length - 1;
+            const next = prev > 0 ? prev - 1 : allItems.length - 1;
             buttonRefs.current[next]?.focus();
             return next;
           });
           break;
         case 'Enter':
-          if (focusedIndex >= 0 && focusedIndex < projects.length) {
-            onProjectChange(projects[focusedIndex]);
+          if (focusedIndex >= 0 && focusedIndex < allItems.length) {
+            onProjectChange(allItems[focusedIndex]);
             setIsOpen(false);
             setFocusedIndex(-1);
           }
@@ -93,18 +105,18 @@ export function RepoContextHeader({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, focusedIndex, projects, onProjectChange]);
+  }, [isOpen, focusedIndex, allItems, onProjectChange]);
 
   // Reset focus when dropdown opens
   useEffect(() => {
     if (isOpen) {
       // Focus current project or first item
-      const currentIndex = projects.findIndex((p) => p.id === currentProject?.id);
+      const currentIndex = allItems.findIndex((p) => p.id === currentProject?.id);
       setFocusedIndex(currentIndex >= 0 ? currentIndex : 0);
     } else {
       setFocusedIndex(-1);
     }
-  }, [isOpen, projects, currentProject]);
+  }, [isOpen, allItems, currentProject]);
 
   // Don't render if no projects
   if (projects.length === 0) return null;
@@ -141,69 +153,158 @@ export function RepoContextHeader({
             </span>
           </div>
 
-          {/* Project List */}
-          <div className="max-h-[300px] overflow-y-auto py-1" role="listbox">
-            {projects.map((project, index) => {
-              const isActive = currentProject?.id === project.id;
-              const isFocused = focusedIndex === index;
-              const displayName = formatProjectName(project);
-              const agentCount = project.agents?.length || 0;
-
-              return (
-                <button
-                  key={project.id}
-                  ref={(el) => { buttonRefs.current[index] = el; }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors border-none cursor-pointer ${
-                    isActive
-                      ? 'bg-accent-cyan/10 text-accent-cyan'
-                      : isFocused
-                        ? 'bg-bg-hover text-text-primary'
-                        : 'bg-transparent text-text-primary hover:bg-bg-hover'
-                  }`}
-                  onClick={() => {
-                    onProjectChange(project);
-                    setIsOpen(false);
-                  }}
-                  role="option"
-                  aria-selected={isActive}
-                  tabIndex={isFocused ? 0 : -1}
-                >
-                  <RepoIcon className={isActive ? 'text-accent-cyan' : 'text-text-muted'} />
-
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">
-                      {displayName}
-                    </div>
-                    <div className="text-xs text-text-muted truncate">
-                      {project.path}
-                    </div>
-                  </div>
-
-                  {/* Agent count badge */}
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    isActive
-                      ? 'bg-accent-cyan/20 text-accent-cyan'
-                      : 'bg-bg-tertiary text-text-muted'
-                  }`}>
-                    {agentCount} {agentCount === 1 ? 'agent' : 'agents'}
+          <div className="max-h-[300px] overflow-y-auto" role="listbox">
+            {/* Recent Projects Section */}
+            {recentProjects.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 bg-bg-tertiary/50">
+                  <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider flex items-center gap-1.5">
+                    <ClockIcon />
+                    Recent
                   </span>
+                </div>
+                <div className="py-1">
+                  {recentProjects.map((project, index) => (
+                    <ProjectItem
+                      key={project.id}
+                      project={project}
+                      index={index}
+                      isActive={currentProject?.id === project.id}
+                      isFocused={focusedIndex === index}
+                      formatProjectName={formatProjectName}
+                      buttonRefs={buttonRefs}
+                      onSelect={() => {
+                        onProjectChange(project);
+                        setIsOpen(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
 
-                  {/* Lead indicator */}
-                  {project.lead?.connected && (
-                    <span className="w-2 h-2 rounded-full bg-success animate-pulse" title={`Lead: ${project.lead.name}`} />
-                  )}
-
-                  {/* Checkmark for active */}
-                  {isActive && (
-                    <CheckIcon />
-                  )}
-                </button>
-              );
-            })}
+            {/* All Projects Section */}
+            {otherProjects.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 bg-bg-tertiary/50">
+                  <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">
+                    {recentProjects.length > 0 ? 'All Projects' : 'Projects'}
+                  </span>
+                </div>
+                <div className="py-1">
+                  {otherProjects.map((project, index) => {
+                    const globalIndex = recentProjects.length + index;
+                    return (
+                      <ProjectItem
+                        key={project.id}
+                        project={project}
+                        index={globalIndex}
+                        isActive={currentProject?.id === project.id}
+                        isFocused={focusedIndex === globalIndex}
+                        formatProjectName={formatProjectName}
+                        buttonRefs={buttonRefs}
+                        onSelect={() => {
+                          onProjectChange(project);
+                          setIsOpen(false);
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+interface ProjectItemProps {
+  project: Project;
+  index: number;
+  isActive: boolean;
+  isFocused: boolean;
+  formatProjectName: (project: Project) => string;
+  buttonRefs: React.MutableRefObject<(HTMLButtonElement | null)[]>;
+  onSelect: () => void;
+}
+
+function ProjectItem({
+  project,
+  index,
+  isActive,
+  isFocused,
+  formatProjectName,
+  buttonRefs,
+  onSelect,
+}: ProjectItemProps) {
+  const displayName = formatProjectName(project);
+  const agentCount = project.agents?.length || 0;
+
+  return (
+    <button
+      ref={(el) => { buttonRefs.current[index] = el; }}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors border-none cursor-pointer ${
+        isActive
+          ? 'bg-accent-cyan/10 text-accent-cyan'
+          : isFocused
+            ? 'bg-bg-hover text-text-primary'
+            : 'bg-transparent text-text-primary hover:bg-bg-hover'
+      }`}
+      onClick={onSelect}
+      role="option"
+      aria-selected={isActive}
+      tabIndex={isFocused ? 0 : -1}
+    >
+      <RepoIcon className={isActive ? 'text-accent-cyan' : 'text-text-muted'} />
+
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm truncate">
+          {displayName}
+        </div>
+        <div className="text-xs text-text-muted truncate">
+          {project.path}
+        </div>
+      </div>
+
+      {/* Agent count badge */}
+      <span className={`text-xs px-2 py-0.5 rounded-full ${
+        isActive
+          ? 'bg-accent-cyan/20 text-accent-cyan'
+          : 'bg-bg-tertiary text-text-muted'
+      }`}>
+        {agentCount} {agentCount === 1 ? 'agent' : 'agents'}
+      </span>
+
+      {/* Lead indicator */}
+      {project.lead?.connected && (
+        <span className="w-2 h-2 rounded-full bg-success animate-pulse" title={`Lead: ${project.lead.name}`} />
+      )}
+
+      {/* Checkmark for active */}
+      {isActive && (
+        <CheckIcon />
+      )}
+    </button>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
   );
 }
 

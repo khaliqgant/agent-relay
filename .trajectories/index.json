@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-01-03T12:06:18.152Z",
+  "lastUpdated": "2026-01-03T14:11:06.007Z",
   "trajectories": {
     "traj_ozd98si6a7ns": {
       "title": "Fix thinking indicator showing on all messages",
@@ -71,6 +71,82 @@
       "startedAt": "2026-01-03T12:06:12.855Z",
       "completedAt": "2026-01-03T12:06:18.137Z",
       "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_m2xkjv0w2sq7.json"
+    },
+    "traj_6fgiwdoklvym": {
+      "title": "Wire up TrajectoryViewer component",
+      "status": "abandoned",
+      "startedAt": "2026-01-03T13:25:38.257Z",
+      "completedAt": "2026-01-03T13:28:41.392Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_6fgiwdoklvym.json"
+    },
+    "traj_9921cuhel0pj": {
+      "title": "Fix empty continuity handoff files",
+      "status": "abandoned",
+      "startedAt": "2026-01-03T13:28:47.101Z",
+      "completedAt": "2026-01-03T13:30:03.924Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_9921cuhel0pj.json"
+    },
+    "traj_rt4fiw3ecp50": {
+      "title": "Fix trajectory agents array population",
+      "status": "abandoned",
+      "startedAt": "2026-01-03T13:30:08.415Z",
+      "completedAt": "2026-01-03T13:31:22.829Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_rt4fiw3ecp50.json"
+    },
+    "traj_ysjc8zaeqtd3": {
+      "title": "Add recent repos quick access",
+      "status": "completed",
+      "startedAt": "2026-01-03T13:31:22.891Z",
+      "completedAt": "2026-01-03T13:33:18.061Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_ysjc8zaeqtd3.json"
+    },
+    "traj_x14t8w8rn7xg": {
+      "title": "Fix trajectory agents array population",
+      "status": "abandoned",
+      "startedAt": "2026-01-03T13:36:06.506Z",
+      "completedAt": "2026-01-03T13:36:55.892Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_x14t8w8rn7xg.json"
+    },
+    "traj_z0vcw1wrzide": {
+      "title": "Fix trajectory agents array population",
+      "status": "completed",
+      "startedAt": "2026-01-03T13:37:00.860Z",
+      "completedAt": "2026-01-03T13:38:16.320Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_z0vcw1wrzide.json"
+    },
+    "traj_d2hhz3k0vrhn": {
+      "title": "Coordinate backend logic with Frontend",
+      "status": "abandoned",
+      "startedAt": "2026-01-03T13:40:25.915Z",
+      "completedAt": "2026-01-03T13:48:57.609Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_d2hhz3k0vrhn.json"
+    },
+    "traj_qft54mi7nfor": {
+      "title": "Remove any type casts from cloud server",
+      "status": "completed",
+      "startedAt": "2026-01-03T13:48:58.864Z",
+      "completedAt": "2026-01-03T13:50:23.677Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_qft54mi7nfor.json"
+    },
+    "traj_noq5zbvnrdvz": {
+      "title": "Improve trajectory viewer design",
+      "status": "completed",
+      "startedAt": "2026-01-03T13:58:14.470Z",
+      "completedAt": "2026-01-03T14:01:47.410Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_noq5zbvnrdvz.json"
+    },
+    "traj_1rp3rges5811": {
+      "title": "Improve trajectory viewer design",
+      "status": "completed",
+      "startedAt": "2026-01-03T14:09:55.255Z",
+      "completedAt": "2026-01-03T14:10:29.755Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_1rp3rges5811.json"
+    },
+    "traj_gjdre5voouod": {
+      "title": "Fix LogViewer ANSI stripping and Show more removal",
+      "status": "active",
+      "startedAt": "2026-01-03T14:11:06.005Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/active/traj_gjdre5voouod.json"
     }
   }
 }
