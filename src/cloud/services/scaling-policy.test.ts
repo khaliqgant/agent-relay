@@ -140,15 +140,53 @@ describe('ScalingPolicyService', () => {
       expect(decision.reason).toContain('Cooldown active');
     });
 
-    it('blocks scaling at maximum workspace limit', () => {
+    it('blocks horizontal scaling at maximum workspace limit but allows in-workspace scaling', () => {
+      // At max workspaces with high agent count - should trigger in-workspace scaling, not scale_up
       const context = createContext({
         currentWorkspaceCount: 3,
         maxWorkspaces: 3,
+        workspaceMetrics: [
+          {
+            workspaceId: 'ws-1',
+            totalMemoryBytes: 300 * 1024 * 1024,
+            averageMemoryBytes: 300 * 1024 * 1024,
+            peakMemoryBytes: 400 * 1024 * 1024,
+            memoryTrendPerMinute: 2 * 1024 * 1024,
+            agentCount: 14, // High agent count would trigger scale_up, but we're at max
+            healthyAgentCount: 14,
+            cpuPercent: 40,
+            uptimeMs: 3600000,
+          },
+          {
+            workspaceId: 'ws-2',
+            totalMemoryBytes: 300 * 1024 * 1024,
+            averageMemoryBytes: 300 * 1024 * 1024,
+            peakMemoryBytes: 400 * 1024 * 1024,
+            memoryTrendPerMinute: 2 * 1024 * 1024,
+            agentCount: 14,
+            healthyAgentCount: 14,
+            cpuPercent: 40,
+            uptimeMs: 3600000,
+          },
+          {
+            workspaceId: 'ws-3',
+            totalMemoryBytes: 300 * 1024 * 1024,
+            averageMemoryBytes: 300 * 1024 * 1024,
+            peakMemoryBytes: 400 * 1024 * 1024,
+            memoryTrendPerMinute: 2 * 1024 * 1024,
+            agentCount: 14,
+            healthyAgentCount: 14,
+            cpuPercent: 40,
+            uptimeMs: 3600000,
+          },
+        ],
       });
 
       const decision = service.evaluate(context);
-      expect(decision.shouldScale).toBe(false);
-      expect(decision.reason).toBe('At maximum workspace limit (3)');
+      // scale_up is blocked, but rebalance policy should still work
+      expect(decision.shouldScale).toBe(true);
+      expect(decision.action?.type).toBe('rebalance');
+      expect(decision.triggeredPolicy).toBe('agent-rebalance');
     });
 
     it('triggers scale up on high memory usage', () => {

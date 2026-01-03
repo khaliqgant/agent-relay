@@ -367,18 +367,6 @@ export class ScalingPolicyService extends EventEmitter {
       }
     }
 
-    // Check workspace limit
-    if (context.currentWorkspaceCount >= context.maxWorkspaces) {
-      return {
-        shouldScale: false,
-        action: null,
-        reason: `At maximum workspace limit (${context.maxWorkspaces})`,
-        triggeredPolicy: null,
-        metrics,
-        timestamp: new Date(),
-      };
-    }
-
     // Evaluate policies in priority order
     for (const policy of policies) {
       if (!policy.enabled) continue;
@@ -386,9 +374,15 @@ export class ScalingPolicyService extends EventEmitter {
       const conditionsMet = this.evaluateConditions(policy.conditions, metrics, thresholds, context.userId);
 
       if (conditionsMet) {
-        // Check instance limits
-        if (policy.action.type === 'scale_up' && context.currentWorkspaceCount >= policy.maxInstances) {
-          continue;
+        // Check instance limits for horizontal scaling only
+        if (policy.action.type === 'scale_up') {
+          // Block if at workspace limit (for adding new workspaces)
+          if (context.currentWorkspaceCount >= context.maxWorkspaces) {
+            continue; // Try next policy (could be in-workspace scaling)
+          }
+          if (context.currentWorkspaceCount >= policy.maxInstances) {
+            continue;
+          }
         }
         if (policy.action.type === 'scale_down' && context.currentWorkspaceCount <= policy.minInstances) {
           continue;
