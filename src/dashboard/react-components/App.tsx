@@ -1027,50 +1027,58 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         />
       )}
 
-      {/* Trajectory Panel - Centered overlay */}
+      {/* Trajectory Panel - Fullscreen slide-over */}
       {isTrajectoryOpen && (
-        <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        <div
+          className="fixed inset-0 z-50 flex bg-black/50 backdrop-blur-sm"
           onClick={() => setIsTrajectoryOpen(false)}
         >
-          <div 
-            className="relative w-[480px] max-w-[90vw] max-h-[80vh] shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+          <div
+            className="ml-auto w-full max-w-3xl h-full bg-bg-primary shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              onClick={() => setIsTrajectoryOpen(false)}
-              className="absolute -top-3 -right-3 w-8 h-8 bg-bg-elevated border border-border rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-bg-hover hover:border-accent-purple/50 transition-all z-10 shadow-lg"
-              title="Close trajectory"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-            <TrajectoryViewer
-              agentName={trajectoryStatus?.task?.slice(0, 30) || 'Current'}
-              steps={trajectorySteps}
-              history={trajectoryHistory}
-              selectedTrajectoryId={selectedTrajectoryId}
-              onSelectTrajectory={selectTrajectory}
-              isLoading={isTrajectoryLoading}
-              maxHeight="60vh"
-            />
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border-subtle bg-bg-secondary">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-accent-cyan/20 flex items-center justify-center border border-blue-500/30">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-blue-500">
+                    <path d="M3 12h4l3 9 4-18 3 9h4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-text-primary m-0">Trajectory Viewer</h2>
+                  <p className="text-xs text-text-muted m-0">
+                    {trajectoryStatus?.active ? `Active: ${trajectoryStatus.task || 'Working...'}` : 'Browse past trajectories'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsTrajectoryOpen(false)}
+                className="w-10 h-10 rounded-lg bg-bg-tertiary border border-border-subtle flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-bg-hover hover:border-blue-500/50 transition-all"
+                title="Close (Esc)"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-hidden p-6">
+              <TrajectoryViewer
+                agentName={trajectoryStatus?.task?.slice(0, 30) || 'Current'}
+                steps={trajectorySteps}
+                history={trajectoryHistory}
+                selectedTrajectoryId={selectedTrajectoryId}
+                onSelectTrajectory={selectTrajectory}
+                isLoading={isTrajectoryLoading}
+                maxHeight="calc(100vh - 160px)"
+              />
+            </div>
           </div>
         </div>
       )}
 
-      {/* Trajectory Toggle Button (bottom-right when panel is closed) */}
-      {!isTrajectoryOpen && trajectoryStatus?.active && (
-        <button
-          onClick={() => setIsTrajectoryOpen(true)}
-          className="fixed right-4 bottom-4 w-12 h-12 bg-accent text-bg-deep rounded-full shadow-glow-cyan flex items-center justify-center hover:scale-105 transition-transform z-50"
-          title={`Trajectory: ${trajectoryStatus.phase || 'active'}`}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 12h4l3 9 4-18 3 9h4" />
-          </svg>
-        </button>
-      )}
 
       {/* Decision Queue Panel */}
       {isDecisionQueueOpen && (

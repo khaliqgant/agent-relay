@@ -205,15 +205,15 @@ export function Header({
           <button
             className={`flex items-center justify-center p-2 border rounded-lg cursor-pointer transition-all duration-150 relative ${
               hasActiveTrajectory
-                ? 'bg-accent-purple/20 border-accent-purple text-accent-purple'
-                : 'bg-bg-tertiary border-border-subtle text-text-secondary hover:bg-bg-elevated hover:border-border-medium hover:text-accent-purple'
+                ? 'bg-accent-cyan/20 border-accent-cyan text-accent-cyan'
+                : 'bg-bg-tertiary border-border-subtle text-text-secondary hover:bg-bg-elevated hover:border-border-medium hover:text-accent-cyan'
             }`}
             onClick={onTrajectoryClick}
             title="Trajectory Viewer"
           >
             <TrajectoryIcon />
             {hasActiveTrajectory && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-accent-purple rounded-full animate-pulse" />
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-accent-cyan rounded-full animate-pulse" />
             )}
           </button>
         )}

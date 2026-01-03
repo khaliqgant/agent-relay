@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-01-03T15:09:03.192Z",
+  "lastUpdated": "2026-01-03T15:37:00.902Z",
   "trajectories": {
     "traj_ozd98si6a7ns": {
       "title": "Fix thinking indicator showing on all messages",
@@ -190,6 +190,27 @@
       "startedAt": "2026-01-03T15:03:22.148Z",
       "completedAt": "2026-01-03T15:09:03.169Z",
       "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_wkp2fgzdyinb.json"
+    },
+    "traj_3t0440mjeunc": {
+      "title": "Wire up TrajectoryViewer component in dashboard",
+      "status": "abandoned",
+      "startedAt": "2026-01-03T15:24:03.823Z",
+      "completedAt": "2026-01-03T15:25:25.534Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_3t0440mjeunc.json"
+    },
+    "traj_1dviorhnkcb5": {
+      "title": "Use uuid() instead of Math.random() for message IDs",
+      "status": "completed",
+      "startedAt": "2026-01-03T15:25:32.815Z",
+      "completedAt": "2026-01-03T15:25:42.319Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_1dviorhnkcb5.json"
+    },
+    "traj_qb3twvvywfwi": {
+      "title": "Test coverage for Vault and billing modules",
+      "status": "completed",
+      "startedAt": "2026-01-03T15:26:26.404Z",
+      "completedAt": "2026-01-03T15:37:00.890Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_qb3twvvywfwi.json"
     }
   }
 }
