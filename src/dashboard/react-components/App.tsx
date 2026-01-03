@@ -801,6 +801,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           selectedAgent={selectedAgent}
           projects={mergedProjects}
           currentProject={mergedProjects.find(p => p.id === currentProject) || null}
+          onProjectChange={handleProjectSelect}
           onCommandPaletteOpen={handleCommandPaletteOpen}
           onSettingsClick={handleSettingsClick}
           onHistoryClick={handleHistoryClick}
@@ -861,6 +862,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
               <MessageList
                 messages={messages}
                 currentChannel={currentChannel}
+                currentThread={currentThread}
                 onThreadClick={(messageId) => setCurrentThread(messageId)}
                 highlightedMessageId={currentThread ?? undefined}
                 agents={data?.agents}

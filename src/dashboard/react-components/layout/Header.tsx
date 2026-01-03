@@ -9,6 +9,7 @@ import React from 'react';
 import type { Agent, Project } from '../../types';
 import { getAgentColor, getAgentInitials } from '../../lib/colors';
 import { getAgentBreadcrumb } from '../../lib/hierarchy';
+import { RepoContextHeader } from './RepoContextHeader';
 
 export interface HeaderProps {
   currentChannel: string;
@@ -17,6 +18,8 @@ export interface HeaderProps {
   projects?: Project[];
   /** Currently active project */
   currentProject?: Project | null;
+  /** Callback when user switches project */
+  onProjectChange?: (project: Project) => void;
   onCommandPaletteOpen?: () => void;
   onSettingsClick?: () => void;
   onHistoryClick?: () => void;
@@ -37,6 +40,7 @@ export function Header({
   selectedAgent,
   projects = [],
   currentProject,
+  onProjectChange,
   onCommandPaletteOpen,
   onSettingsClick,
   onHistoryClick,
@@ -50,7 +54,6 @@ export function Header({
   const isGeneral = currentChannel === 'general';
   const colors = selectedAgent ? getAgentColor(selectedAgent.name) : null;
   const hasMultipleProjects = projects.length > 1;
-  const projectName = currentProject?.name || currentProject?.path?.split('/').pop();
 
   return (
     <header className="h-[52px] bg-bg-secondary border-b border-border-subtle flex items-center justify-between px-4">
@@ -65,6 +68,22 @@ export function Header({
           <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-error rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
         )}
       </button>
+
+      {/* Repo Context Switcher */}
+      {projects.length > 0 && onProjectChange && (
+        <div className="max-md:hidden mr-3">
+          <RepoContextHeader
+            projects={projects}
+            currentProject={currentProject ?? null}
+            onProjectChange={onProjectChange}
+          />
+        </div>
+      )}
+
+      {/* Divider when repo context is shown */}
+      {projects.length > 0 && onProjectChange && (
+        <div className="w-px h-6 bg-border-subtle mr-3 max-md:hidden" />
+      )}
 
       <div className="flex items-center gap-3 flex-1 min-w-0">
         {isGeneral ? (
@@ -114,34 +133,6 @@ export function Header({
           </>
         )}
       </div>
-
-      {/* Connected Projects Indicator */}
-      {hasMultipleProjects && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-tertiary/80 border border-border-subtle rounded-lg max-md:hidden">
-          <BridgeIcon />
-          <span className="text-xs text-text-secondary">
-            <span className="text-accent-cyan font-semibold">{projects.length}</span> projects
-          </span>
-          {projectName && (
-            <>
-              <span className="text-border-subtle">•</span>
-              <span className="text-xs text-text-primary font-medium truncate max-w-[120px]">
-                {projectName}
-              </span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Single project indicator when project is selected */}
-      {!hasMultipleProjects && projectName && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-tertiary/50 rounded-lg max-md:hidden">
-          <FolderIcon />
-          <span className="text-xs text-text-primary font-medium truncate max-w-[150px]">
-            {projectName}
-          </span>
-        </div>
-      )}
 
       <div className="flex items-center gap-2">
         <button
@@ -282,28 +273,6 @@ function MenuIcon() {
       <line x1="3" y1="12" x2="21" y2="12" />
       <line x1="3" y1="6" x2="21" y2="6" />
       <line x1="3" y1="18" x2="21" y2="18" />
-    </svg>
-  );
-}
-
-function BridgeIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent-cyan">
-      <circle cx="5" cy="12" r="3" />
-      <circle cx="19" cy="12" r="3" />
-      <line x1="8" y1="12" x2="16" y2="12" />
-      <circle cx="12" cy="5" r="2" />
-      <circle cx="12" cy="19" r="2" />
-      <line x1="12" y1="7" x2="12" y2="10" />
-      <line x1="12" y1="14" x2="12" y2="17" />
-    </svg>
-  );
-}
-
-function FolderIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-text-muted">
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
     </svg>
   );
 }

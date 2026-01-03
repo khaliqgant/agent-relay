@@ -2880,41 +2880,33 @@ Start by greeting the project leads and asking for status updates.`;
   /**
    * GET /api/fleet/servers - Get fleet server overview
    * Returns local daemon info + any connected bridge servers
+   * Note: When bridge is active, local agents are already included in bridge project agents,
+   * so we don't add a separate "Local Daemon" entry to avoid double-counting.
    */
   app.get('/api/fleet/servers', async (_req, res) => {
     const servers: FleetServer[] = [];
-
-    // Local server info
     const localAgents = spawner?.getActiveWorkers() || [];
     const agentStatuses = await loadAgentStatuses();
+    let hasBridgeProjects = false;
 
-    servers.push({
-      id: 'local',
-      name: 'Local Daemon',
-      status: 'healthy',
-      agents: localAgents.map(a => ({
-        name: a.name,
-        status: agentStatuses[a.name]?.status || 'unknown',
-      })),
-      cpuUsage: Math.random() * 30, // Mock - would come from actual metrics
-      memoryUsage: Math.random() * 50,
-      activeConnections: wss.clients.size,
-      uptime: process.uptime(),
-      lastHeartbeat: new Date().toISOString(),
-    });
-
-    // Check for bridge connections
+    // Check for bridge connections first
     const bridgeStatePath = path.join(dataDir, 'bridge-state.json');
     if (fs.existsSync(bridgeStatePath)) {
       try {
         const bridgeState = JSON.parse(fs.readFileSync(bridgeStatePath, 'utf-8'));
-        if (bridgeState.projects) {
+        if (bridgeState.projects && bridgeState.projects.length > 0) {
+          hasBridgeProjects = true;
+
           for (const project of bridgeState.projects) {
+            // For bridge projects, merge local agents if this is the current project
+            // (identified by matching path to our data directory's parent)
+            const projectAgents = project.agents || [];
+
             servers.push({
               id: project.id,
               name: project.name || project.path.split('/').pop() || project.id,
               status: project.connected ? 'healthy' : 'offline',
-              agents: project.agents || [],
+              agents: projectAgents,
               cpuUsage: 0,
               memoryUsage: 0,
               activeConnections: project.connected ? 1 : 0,
@@ -2926,6 +2918,25 @@ Start by greeting the project leads and asking for status updates.`;
       } catch (err) {
         console.warn('[api] Failed to read bridge state:', err);
       }
+    }
+
+    // Only add local daemon entry if we don't have bridge projects
+    // (otherwise local agents are already counted in the bridge project)
+    if (!hasBridgeProjects) {
+      servers.push({
+        id: 'local',
+        name: 'Local Daemon',
+        status: 'healthy',
+        agents: localAgents.map(a => ({
+          name: a.name,
+          status: agentStatuses[a.name]?.status || 'unknown',
+        })),
+        cpuUsage: Math.random() * 30, // Mock - would come from actual metrics
+        memoryUsage: Math.random() * 50,
+        activeConnections: wss.clients.size,
+        uptime: process.uptime(),
+        lastHeartbeat: new Date().toISOString(),
+      });
     }
 
     res.json({ success: true, servers });

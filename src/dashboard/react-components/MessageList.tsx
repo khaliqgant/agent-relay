@@ -51,6 +51,8 @@ export interface MessageListProps {
   currentChannel: string;
   onThreadClick?: (messageId: string) => void;
   highlightedMessageId?: string;
+  /** Currently selected thread ID - when set, shows thread-related messages */
+  currentThread?: string | null;
   /** Agents list for checking processing state */
   agents?: Agent[];
   /** Current user info (for cloud mode - shows avatar/username instead of "Dashboard") */
@@ -62,6 +64,7 @@ export function MessageList({
   currentChannel,
   onThreadClick,
   highlightedMessageId,
+  currentThread,
   agents = [],
   currentUser,
 }: MessageListProps) {
@@ -88,8 +91,14 @@ export function MessageList({
   // Track if a scroll is in progress to prevent race conditions
   const isScrollingRef = useRef(false);
 
-  // Filter messages for current channel
+  // Filter messages for current channel or current thread
   const filteredMessages = messages.filter((msg) => {
+    // When a thread is selected, show messages related to that thread
+    if (currentThread) {
+      // Show the original message (id matches thread) or replies (thread field matches)
+      return msg.id === currentThread || msg.thread === currentThread;
+    }
+
     if (currentChannel === 'general') {
       // Show messages that are broadcasts (to='*' or isBroadcast flag)
       // Also show messages that have channel='general' in their metadata
