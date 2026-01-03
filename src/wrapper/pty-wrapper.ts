@@ -882,15 +882,16 @@ export class PtyWrapper extends EventEmitter {
         continue;
       }
 
-      // Check for fenced spawn start: ->relay:spawn Name cli <<<
+      // Check for fenced spawn start: ->relay:spawn Name [cli] <<<
       // STRICT: Must be at start of line (after whitespace)
       if (canSpawn && trimmed.startsWith(spawnPrefix)) {
         const afterSpawn = trimmed.substring(spawnPrefix.length).trim();
 
-        // Check for fenced format: Name cli <<<
-        const fencedMatch = afterSpawn.match(/^(\S+)\s+(\S+)\s+<<<(.*)$/);
+        // Check for fenced format: Name [cli] <<< (CLI optional, defaults to 'claude')
+        const fencedMatch = afterSpawn.match(/^(\S+)(?:\s+(\S+))?\s+<<<(.*)$/);
         if (fencedMatch) {
-          const [, name, cli, inlineContent] = fencedMatch;
+          const [, name, cliOrUndefined, inlineContent] = fencedMatch;
+          let cli = cliOrUndefined || 'claude';
 
           // STRICT: Validate agent name (PascalCase) and CLI type
           if (!this.isValidAgentName(name)) {
@@ -898,8 +899,8 @@ export class PtyWrapper extends EventEmitter {
             continue;
           }
           if (!this.isValidCliType(cli)) {
-            console.warn(`[pty:${this.config.name}] Unknown CLI type, skipping: cli=${cli}`);
-            continue;
+            console.warn(`[pty:${this.config.name}] Unknown CLI type, using default: cli=${cli}`);
+            cli = 'claude';
           }
 
           // Check if fence closes on same line
@@ -911,7 +912,7 @@ export class PtyWrapper extends EventEmitter {
 
             if (!this.processedSpawnCommands.has(spawnKey)) {
               this.processedSpawnCommands.add(spawnKey);
-              console.log(`[pty:${this.config.name}] Spawn command: ${name} (${cli}) - "${taskStr.substring(0, 50)}..."`);
+              console.log(`[pty:${this.config.name}] Spawn command (fenced): ${name} (${cli}) - "${taskStr.substring(0, 50)}..."`);
               this.executeSpawn(name, cli, taskStr);
             }
           } else {
@@ -926,29 +927,33 @@ export class PtyWrapper extends EventEmitter {
           continue;
         }
 
-        // Parse single-line format: WorkerName cli OR WorkerName cli "task"
+        // Parse single-line format: WorkerName [cli] [task]
+        // CLI defaults to 'claude' if not provided
         const parts = afterSpawn.split(/\s+/);
-        if (parts.length >= 2) {
+        if (parts.length >= 1) {
           const name = parts[0];
-          const cli = parts[1];
-          // Task is everything after cli, potentially in quotes (optional)
+          // CLI is optional - defaults to 'claude'
+          let cli = parts[1] || 'claude';
+          // Task is everything after cli (if cli was provided) or after name (if cli was omitted)
           let task = '';
-          if (parts.length >= 3) {
-            const taskPart = parts.slice(2).join(' ');
+          const taskStartIndex = parts[1] ? 2 : 1;
+          if (parts.length > taskStartIndex) {
+            const taskPart = parts.slice(taskStartIndex).join(' ');
             // Remove surrounding quotes if present
             const quoteMatch = taskPart.match(/^["'](.*)["']$/);
             task = quoteMatch ? quoteMatch[1] : taskPart;
           }
 
-          if (name && cli) {
+          if (name) {
             // STRICT: Validate agent name (PascalCase) and CLI type
             if (!this.isValidAgentName(name)) {
               // Don't log warning for documentation text - just silently skip
               continue;
             }
             if (!this.isValidCliType(cli)) {
-              // Don't log warning for documentation text - just silently skip
-              continue;
+              // Default CLI 'claude' should always be valid, but validate anyway
+              console.warn(`[pty:${this.config.name}] Unknown CLI type, using default: cli=${cli}, defaulting to 'claude'`);
+              cli = 'claude';
             }
 
             const spawnKey = `${name}:${cli}`;
