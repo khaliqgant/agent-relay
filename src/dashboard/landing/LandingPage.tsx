@@ -13,7 +13,7 @@ import { Logo, LogoIcon, LogoHero } from '../react-components/Logo';
 const PROVIDERS = {
   claude: { name: 'Claude', color: '#00D9FF', icon: '◈' },
   codex: { name: 'Codex', color: '#FF6B35', icon: '⬡' },
-  gemini: { name: 'Gemini', color: '#A855F7', icon: '◇' },
+  gemini: { name: 'Gemini', color: '#00FFC8', icon: '◇' },
 };
 
 // Simulated agent messages for the live demo

@@ -69,6 +69,9 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
 
+      # Nango (set in .env.local - get from Nango dashboard)
+      NANGO_SECRET_KEY: ${NANGO_SECRET_KEY:-}
+
       # Vault master key (generate with: openssl rand -base64 32)
       VAULT_MASTER_KEY: ${VAULT_MASTER_KEY:-ZGV2LXZhdWx0LWtleS1jaGFuZ2UtaW4tcHJvZHVjdGlvbg==}
 

@@ -29,7 +29,8 @@
 
   --accent-cyan: #00d9ff;
   --accent-orange: #ff6b35;
-  --accent-purple: #a855f7;
+  --accent-teal: #00ffc8;
+  --accent-blue: #0891b2;
   --accent-green: #00ffc8;
 
   --border-subtle: rgba(255, 255, 255, 0.06);
@@ -38,7 +39,8 @@
 
   --glow-cyan: 0 0 30px rgba(0, 217, 255, 0.3);
   --glow-orange: 0 0 30px rgba(255, 107, 53, 0.3);
-  --glow-purple: 0 0 30px rgba(168, 85, 247, 0.3);
+  --glow-teal: 0 0 30px rgba(0, 255, 200, 0.3);
+  --glow-blue: 0 0 30px rgba(8, 145, 178, 0.3);
 
   /* Typography */
   --font-display: 'Outfit', sans-serif;
@@ -167,7 +169,7 @@
 .orb-2 {
   width: 500px;
   height: 500px;
-  background: var(--accent-purple);
+  background: var(--accent-teal);
   top: 40%;
   right: -150px;
   animation-delay: -7s;
@@ -397,7 +399,7 @@
 }
 
 .title-line.gradient {
-  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-purple) 50%, var(--accent-orange) 100%);
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-teal) 50%, var(--accent-blue) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -992,7 +994,7 @@ section {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 24px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .pricing-card {
@@ -1002,6 +1004,8 @@ section {
   border: 1px solid var(--border-subtle);
   border-radius: 16px;
   transition: var(--transition-medium);
+  display: flex;
+  flex-direction: column;
 }
 
 .pricing-card:hover {
@@ -1009,7 +1013,7 @@ section {
 }
 
 .pricing-card.highlighted {
-  background: linear-gradient(135deg, rgba(0, 217, 255, 0.05) 0%, rgba(168, 85, 247, 0.05) 100%);
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.05) 0%, rgba(99, 102, 241, 0.05) 100%);
   border-color: var(--accent-cyan);
   transform: scale(1.02);
 }
@@ -1020,7 +1024,7 @@ section {
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 16px;
-  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-purple) 100%);
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
   color: var(--bg-deep);
   font-size: 11px;
   font-weight: 600;
@@ -1065,6 +1069,7 @@ section {
 .pricing-features {
   list-style: none;
   margin-bottom: 32px;
+  flex: 1;
 }
 
 .pricing-features li {
@@ -2122,7 +2127,7 @@ section {
 }
 
 .pricing-hero .title-line.gradient {
-  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-purple) 50%, var(--accent-orange) 100%);
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-teal) 50%, var(--accent-blue) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -2214,7 +2219,7 @@ section {
 }
 
 .plan-card.highlighted {
-  background: linear-gradient(135deg, rgba(0, 217, 255, 0.08) 0%, rgba(168, 85, 247, 0.05) 100%);
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.08) 0%, rgba(99, 102, 241, 0.05) 100%);
   border-color: var(--accent-cyan);
   box-shadow: 0 0 60px rgba(0, 217, 255, 0.15);
 }
@@ -2225,7 +2230,7 @@ section {
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 16px;
-  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-purple) 100%);
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
   color: var(--bg-deep);
   font-size: 11px;
   font-weight: 700;
@@ -2573,7 +2578,7 @@ section {
 .dot-3 {
   bottom: 15%;
   left: 15%;
-  color: var(--accent-purple);
+  color: var(--accent-teal);
   animation-delay: -4s;
 }
 
