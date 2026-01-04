@@ -112,6 +112,17 @@ if [[ -n "${REPO_LIST}" ]]; then
 fi
 
 # ============================================================================
+# Configure agent policy enforcement for cloud workspaces
+# Policy is fetched from cloud API and enforced at runtime
+# ============================================================================
+
+if [[ -n "${CLOUD_API_URL:-}" && -n "${WORKSPACE_ID:-}" ]]; then
+  log "Enabling agent policy enforcement"
+  export AGENT_POLICY_ENFORCEMENT=1
+  # Policy is fetched from ${CLOUD_API_URL}/api/policy/${WORKSPACE_ID}/internal
+fi
+
+# ============================================================================
 # Configure AI provider credentials
 # Create credential files that CLIs expect from ENV vars passed by provisioner
 # ============================================================================
