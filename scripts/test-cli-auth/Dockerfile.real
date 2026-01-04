@@ -42,9 +42,8 @@ USER testuser
 
 # Claude - uses official install script
 RUN curl -fsSL https://claude.ai/install.sh | bash || echo "Claude install failed"
-# Pre-seed Claude config to skip interactive onboarding
-RUN mkdir -p /home/testuser/.claude && \
-    echo '{"theme":"dark","hasCompletedOnboarding":true}' > /home/testuser/.claude/settings.local.json
+# Note: We don't pre-seed Claude config - we want to test the full interactive flow
+# including the dark mode and auth method prompts
 
 # Note: OpenCode is installed as root above via npm
 
