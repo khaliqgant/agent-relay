@@ -10,6 +10,7 @@ import type { Agent, Project } from '../../types';
 import { getAgentColor, getAgentInitials } from '../../lib/colors';
 import { getAgentBreadcrumb } from '../../lib/hierarchy';
 import { RepoContextHeader } from './RepoContextHeader';
+import { WorkspaceStatusIndicator } from '../WorkspaceStatusIndicator';
 
 export interface HeaderProps {
   currentChannel: string;
@@ -94,6 +95,12 @@ export function Header({
       {projects.length > 0 && onProjectChange && (
         <div className="w-px h-6 bg-border-subtle mr-3 max-md:hidden" />
       )}
+
+      {/* Workspace Status Indicator */}
+      <WorkspaceStatusIndicator className="max-md:hidden mr-3" />
+
+      {/* Divider after workspace status */}
+      <div className="w-px h-6 bg-border-subtle mr-3 max-md:hidden" />
 
       <div className="flex items-center gap-3 flex-1 min-w-0">
         {isGeneral ? (
