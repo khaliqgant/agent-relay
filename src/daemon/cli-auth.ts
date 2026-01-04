@@ -71,6 +71,9 @@ export interface StartCLIAuthOptions {
 
 /**
  * Start CLI auth flow
+ *
+ * This function waits for the auth URL to be captured before returning,
+ * ensuring the caller can immediately open the OAuth popup.
  */
 export async function startCLIAuth(
   provider: string,
@@ -105,6 +108,19 @@ export async function startCLIAuth(
   });
 
   const respondedPrompts = new Set<string>();
+
+  // Create a promise that resolves when authUrl is captured or timeout
+  let resolveAuthUrl: () => void;
+  const authUrlPromise = new Promise<void>((resolve) => {
+    resolveAuthUrl = resolve;
+  });
+
+  // Timeout for waiting for auth URL (shorter than the full OAuth timeout)
+  const AUTH_URL_WAIT_TIMEOUT = 15000; // 15 seconds to capture auth URL
+  const authUrlTimeout = setTimeout(() => {
+    logger.warn('Auth URL wait timeout, returning session without URL', { provider, sessionId });
+    resolveAuthUrl();
+  }, AUTH_URL_WAIT_TIMEOUT);
 
   try {
     const proc = pty.spawn(config.command, args, {
@@ -162,6 +178,9 @@ export async function startCLIAuth(
         session.authUrl = match[1];
         session.status = 'waiting_auth';
         logger.info('Auth URL captured', { provider, url: session.authUrl });
+        // Signal that we have the auth URL
+        clearTimeout(authUrlTimeout);
+        resolveAuthUrl();
       }
 
       // Check for success and try to extract credentials
@@ -189,6 +208,7 @@ export async function startCLIAuth(
 
     proc.onExit(async ({ exitCode }) => {
       clearTimeout(timeout);
+      clearTimeout(authUrlTimeout);
       logger.info('CLI process exited', { provider, exitCode });
 
       // Try to extract credentials
@@ -210,12 +230,20 @@ export async function startCLIAuth(
         session.status = 'error';
         session.error = 'CLI exited without auth URL or credentials';
       }
+
+      // Resolve in case we're still waiting
+      resolveAuthUrl();
     });
   } catch (err) {
     session.status = 'error';
     session.error = err instanceof Error ? err.message : 'Failed to spawn CLI';
     logger.error('Failed to start CLI auth', { error: session.error });
+    clearTimeout(authUrlTimeout);
+    resolveAuthUrl!();
   }
+
+  // Wait for auth URL to be captured (or timeout)
+  await authUrlPromise;
 
   return session;
 }
