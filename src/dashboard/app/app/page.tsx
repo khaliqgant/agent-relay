@@ -9,6 +9,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { App } from '../../react-components/App';
+import { CloudSessionProvider } from '../../react-components/CloudSessionProvider';
 import { LogoIcon } from '../../react-components/Logo';
 import { setActiveWorkspaceId } from '../../lib/api';
 
@@ -56,6 +57,9 @@ const AI_PROVIDERS: ProviderInfo[] = [
   { id: 'droid', name: 'Factory', displayName: 'Droid', color: '#6366F1', cliCommand: 'droid' },
 ];
 
+// Force cloud mode via env var - prevents silent fallback to local mode
+const FORCE_CLOUD_MODE = process.env.NEXT_PUBLIC_FORCE_CLOUD_MODE === 'true';
+
 export default function DashboardPage() {
   const [state, setState] = useState<PageState>('loading');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -64,7 +68,7 @@ export default function DashboardPage() {
   const [wsUrl, setWsUrl] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   // Track cloud mode for potential future use
-  const [_isCloudMode, setIsCloudMode] = useState(false);
+  const [_isCloudMode, setIsCloudMode] = useState(FORCE_CLOUD_MODE);
   const [csrfToken, setCsrfToken] = useState<string | null>(null);
   const [providerAuth, setProviderAuth] = useState<ProviderAuthState | null>(null);
 
@@ -77,6 +81,9 @@ export default function DashboardPage() {
 
         // If session endpoint doesn't exist (404), we're in local mode
         if (sessionRes.status === 404) {
+          if (FORCE_CLOUD_MODE) {
+            throw new Error('Cloud mode enforced but session endpoint returned 404. Is the cloud server running?');
+          }
           setIsCloudMode(false);
           setState('local');
           return;
@@ -139,8 +146,14 @@ export default function DashboardPage() {
           window.location.href = '/connect-repos';
         }
       } catch (err) {
-        // If session check fails with 404, assume local mode
+        // If session check fails with network error, assume local mode (unless forced cloud)
         if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+          if (FORCE_CLOUD_MODE) {
+            console.error('Cloud mode enforced but network request failed:', err);
+            setError('Cloud mode enforced but failed to connect to server. Is the cloud server running?');
+            setState('error');
+            return;
+          }
           setIsCloudMode(false);
           setState('local');
           return;
@@ -201,8 +214,10 @@ export default function DashboardPage() {
       }
 
       // Poll for workspace to be ready
+      // Cloud deployments (Fly.io) can take 3-5 minutes for cold starts
       const pollForReady = async (workspaceId: string) => {
-        const maxAttempts = 60; // 2 minutes with 2s interval
+        const maxAttempts = 150; // 5 minutes with 2s interval
+        const pollIntervalMs = 2000;
         let attempts = 0;
 
         while (attempts < maxAttempts) {
@@ -224,14 +239,20 @@ export default function DashboardPage() {
               return;
             }
           } else if (statusData.status === 'error') {
-            throw new Error('Workspace provisioning failed');
+            const errorMsg = statusData.errorMessage || 'Workspace provisioning failed';
+            throw new Error(errorMsg);
           }
 
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
           attempts++;
+
+          // Log progress every 30 seconds
+          if (attempts % 15 === 0) {
+            console.log(`[workspace] Still provisioning... (${Math.floor(attempts * pollIntervalMs / 1000)}s elapsed)`);
+          }
         }
 
-        throw new Error('Workspace provisioning timed out');
+        throw new Error('Workspace provisioning timed out after 5 minutes. Please try again or contact support.');
       };
 
       await pollForReady(data.workspaceId);
@@ -243,6 +264,14 @@ export default function DashboardPage() {
   }, [connectToWorkspace, csrfToken]);
 
   // Handle connecting an AI provider via CLI login
+  // Maps frontend provider IDs to backend provider IDs
+  const PROVIDER_ID_MAP: Record<string, string> = {
+    anthropic: 'anthropic',
+    codex: 'openai', // Backend uses 'openai' for Codex
+    opencode: 'opencode',
+    droid: 'droid',
+  };
+
   const handleConnectProvider = useCallback(async (provider: ProviderInfo) => {
     if (!selectedWorkspace) return;
 
@@ -254,17 +283,19 @@ export default function DashboardPage() {
         headers['X-CSRF-Token'] = csrfToken;
       }
 
-      const res = await fetch(`/api/workspaces/${selectedWorkspace.id}/connect-provider`, {
+      // Use the onboarding CLI auth endpoint which has proper PTY handling
+      const backendProviderId = PROVIDER_ID_MAP[provider.id] || provider.id;
+      const res = await fetch(`/api/onboarding/cli/${backendProviderId}/start`, {
         method: 'POST',
         credentials: 'include',
         headers,
-        body: JSON.stringify({ provider: provider.id }),
+        body: JSON.stringify({ workspaceId: selectedWorkspace.id }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to start provider auth');
+        throw new Error(data.error || data.message || 'Failed to start provider auth');
       }
 
       if (data.authUrl) {
@@ -279,10 +310,58 @@ export default function DashboardPage() {
           `width=${width},height=${height},left=${left},top=${top},popup=yes`
         );
         setProviderAuth({ provider, authUrl: data.authUrl, status: 'waiting' });
+      } else if (data.sessionId) {
+        // Session started but no URL yet - poll for status
+        setProviderAuth({ provider, status: 'starting' });
+        // Start polling for auth URL
+        const pollForAuthUrl = async (sessionId: string) => {
+          const maxAttempts = 30; // 30 seconds
+          for (let i = 0; i < maxAttempts; i++) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            try {
+              const statusRes = await fetch(
+                `/api/onboarding/cli/${backendProviderId}/status/${sessionId}`,
+                { credentials: 'include' }
+              );
+              const statusData = await statusRes.json();
+
+              if (statusData.authUrl) {
+                const width = 600;
+                const height = 700;
+                const left = window.screenX + (window.outerWidth - width) / 2;
+                const top = window.screenY + (window.outerHeight - height) / 2;
+                window.open(
+                  statusData.authUrl,
+                  `${provider.displayName} Login`,
+                  `width=${width},height=${height},left=${left},top=${top},popup=yes`
+                );
+                setProviderAuth({ provider, authUrl: statusData.authUrl, status: 'waiting' });
+                return;
+              } else if (statusData.status === 'success') {
+                setProviderAuth({ provider, status: 'success' });
+                setTimeout(() => {
+                  setProviderAuth(null);
+                  connectToWorkspace(selectedWorkspace);
+                }, 2000);
+                return;
+              } else if (statusData.status === 'error') {
+                throw new Error(statusData.error || 'Authentication failed');
+              }
+            } catch (pollErr) {
+              console.warn('Error polling auth status:', pollErr);
+            }
+          }
+          // Timeout
+          setProviderAuth({
+            provider,
+            status: 'error',
+            error: 'Timed out waiting for authentication URL',
+          });
+        };
+        pollForAuthUrl(data.sessionId);
       } else {
-        // No auth URL means already authenticated or error
+        // Already authenticated
         setProviderAuth({ provider, status: 'success' });
-        // Auto-continue after 2 seconds
         setTimeout(() => {
           setProviderAuth(null);
           connectToWorkspace(selectedWorkspace);
@@ -380,8 +459,13 @@ export default function DashboardPage() {
   }
 
   // Connected to workspace - render App with workspace's WebSocket
+  // Wrap in CloudSessionProvider so App has access to cloud session context
   if (state === 'connected' && wsUrl) {
-    return <App wsUrl={wsUrl} />;
+    return (
+      <CloudSessionProvider cloudMode={true}>
+        <App wsUrl={wsUrl} />
+      </CloudSessionProvider>
+    );
   }
 
   // Connecting state

@@ -5,6 +5,8 @@
  * Includes automatic session expiration detection and handling.
  */
 
+import { setCsrfToken as setApiCsrfToken } from './api';
+
 // Session error codes from the backend
 export type SessionErrorCode = 'SESSION_EXPIRED' | 'USER_NOT_FOUND' | 'SESSION_ERROR';
 
@@ -59,11 +61,14 @@ export function getCsrfToken(): string | null {
 
 /**
  * Capture CSRF token from response headers
+ * Also syncs with the api.ts library for dashboard requests
  */
 function captureCsrfToken(response: Response): void {
   const token = response.headers.get('X-CSRF-Token');
   if (token) {
     csrfToken = token;
+    // Sync with api.ts for dashboard-to-workspace requests
+    setApiCsrfToken(token);
   }
 }
 

@@ -36,6 +36,13 @@
       "when": 1736035200000,
       "tag": "0005_github_installations",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1736121600000,
+      "tag": "0006_workspace_ssh",
+      "breakpoints": true
     }
   ]
 }

@@ -73,7 +73,8 @@ services:
       NANGO_SECRET_KEY: ${NANGO_SECRET_KEY:-}
 
       # Vault master key (generate with: openssl rand -base64 32)
-      VAULT_MASTER_KEY: ${VAULT_MASTER_KEY:-ZGV2LXZhdWx0LWtleS1jaGFuZ2UtaW4tcHJvZHVjdGlvbg==}
+      # Default is "dev-vault-key-32-bytes-change!!!" - MUST be exactly 32 bytes when decoded
+      VAULT_MASTER_KEY: ${VAULT_MASTER_KEY:-ZGV2LXZhdWx0LWtleS0zMi1ieXRlcy1jaGFuZ2UhISE=}
 
       # Stripe (set in .env.local for billing features)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
@@ -82,6 +83,12 @@ services:
 
       # Compute provider (docker for local dev)
       COMPUTE_PROVIDER: docker
+
+      # Flag to indicate we're running in Docker (for localhost translation)
+      RUNNING_IN_DOCKER: "true"
+
+      # Force cloud mode in dashboard (prevents silent fallback to local mode)
+      NEXT_PUBLIC_FORCE_CLOUD_MODE: "true"
 
       # Provider OAuth (optional)
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
@@ -102,17 +109,22 @@ services:
 
   # Optional: Example workspace for testing
   workspace:
-    image: ghcr.io/agentworkforce/agent-relay-workspace:latest
+    image: ghcr.io/agentworkforce/relay-workspace:latest
     build:
-      context: ./deploy/workspace
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: deploy/workspace/Dockerfile
+    user: root  # Required to start SSH server before dropping privileges
     ports:
       - "3888:3888"
       - "3889:3889"
+      - "2222:2222"  # SSH for port forwarding (e.g., Codex OAuth)
     environment:
       WORKSPACE_ID: local-dev-workspace
       SUPERVISOR_ENABLED: "true"
       MAX_AGENTS: "10"
+      # SSH for port forwarding (Codex OAuth callback tunneling)
+      ENABLE_SSH: "true"
+      SSH_PASSWORD: ${WORKSPACE_SSH_PASSWORD:-devpassword}
     volumes:
       - workspace_data:/data
       - ./:/workspace:ro

@@ -380,7 +380,14 @@ export interface WorkspaceQueries {
   updateStatus(
     id: string,
     status: string,
-    options?: { computeId?: string; publicUrl?: string; errorMessage?: string }
+    options?: {
+      computeId?: string;
+      publicUrl?: string;
+      errorMessage?: string;
+      sshHost?: string;
+      sshPort?: number;
+      sshPassword?: string;
+    }
   ): Promise<void>;
   updateConfig(id: string, config: schema.WorkspaceConfig): Promise<void>;
   setCustomDomain(id: string, customDomain: string, status?: string): Promise<void>;
@@ -423,7 +430,14 @@ export const workspaceQueries: WorkspaceQueries = {
   async updateStatus(
     id: string,
     status: string,
-    options?: { computeId?: string; publicUrl?: string; errorMessage?: string }
+    options?: {
+      computeId?: string;
+      publicUrl?: string;
+      errorMessage?: string;
+      sshHost?: string;
+      sshPort?: number;
+      sshPassword?: string;
+    }
   ): Promise<void> {
     const db = getDb();
     await db
@@ -433,6 +447,9 @@ export const workspaceQueries: WorkspaceQueries = {
         computeId: options?.computeId,
         publicUrl: options?.publicUrl,
         errorMessage: options?.errorMessage,
+        sshHost: options?.sshHost,
+        sshPort: options?.sshPort,
+        sshPassword: options?.sshPassword,
         updatedAt: new Date(),
       })
       .where(eq(schema.workspaces.id, id));

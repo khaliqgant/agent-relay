@@ -29,12 +29,12 @@ pnpm-debug.log*
 
 # Local test artifacts
 .agent-relay-test-*/
+.tmp/
+.tmp-*/
 
 # Coverage output
 coverage/
 .npm-cache
-.tmp-supervisor-tests
-.tmp-agent-relay-data
 
 .next
 

@@ -7,6 +7,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { Message, SendMessageRequest } from '../../types';
+import { api } from '../../lib/api';
 
 export interface UseMessagesOptions {
   messages: Message[];
@@ -261,15 +262,13 @@ export function useMessages({
           request.from = senderName;
         }
 
-        const response = await fetch('/api/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(request),
-        });
+        // Use api.sendMessage which handles:
+        // - Workspace proxy routing (in cloud mode)
+        // - CSRF token headers
+        // - Credentials
+        const result = await api.sendMessage(request);
 
-        const result = await response.json() as { success?: boolean; error?: string };
-
-        if (response.ok && result.success) {
+        if (result.success) {
           // Success! The optimistic message will be cleaned up when
           // the real message arrives via WebSocket
           return true;

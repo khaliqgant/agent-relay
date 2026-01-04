@@ -65,7 +65,15 @@ const DEFAULT_OPTIONS: Required<UseWorkspaceStatusOptions> = {
 export function useWorkspaceStatus(
   options: UseWorkspaceStatusOptions = {}
 ): UseWorkspaceStatusReturn {
-  const opts = { ...DEFAULT_OPTIONS, ...options };
+  // Stabilize options to prevent infinite re-renders
+  // Use refs for callbacks and useMemo for primitive values
+  const autoRefresh = options.autoRefresh ?? DEFAULT_OPTIONS.autoRefresh;
+  const refreshInterval = options.refreshInterval ?? DEFAULT_OPTIONS.refreshInterval;
+  const autoWakeup = options.autoWakeup ?? DEFAULT_OPTIONS.autoWakeup;
+
+  // Store callback in ref to avoid recreating refresh on every render
+  const onStatusChangeRef = useRef(options.onStatusChange ?? DEFAULT_OPTIONS.onStatusChange);
+  onStatusChangeRef.current = options.onStatusChange ?? DEFAULT_OPTIONS.onStatusChange;
 
   const [workspace, setWorkspace] = useState<WorkspaceStatus | null>(null);
   const [exists, setExists] = useState(false);
@@ -100,7 +108,7 @@ export function useWorkspaceStatus(
 
           // Check for status change
           if (previousStatusRef.current && previousStatusRef.current !== ws.status) {
-            opts.onStatusChange(ws.status, false);
+            onStatusChangeRef.current(ws.status, false);
           }
           previousStatusRef.current = ws.status;
         } else {
@@ -118,7 +126,13 @@ export function useWorkspaceStatus(
         setIsLoading(false);
       }
     }
-  }, [opts]);
+  }, []); // No dependencies - uses refs for callbacks
+
+  // Store refresh interval in ref for wakeup callback
+  const refreshIntervalRef = useRef(refreshInterval);
+  refreshIntervalRef.current = refreshInterval;
+  const autoRefreshRef = useRef(autoRefresh);
+  autoRefreshRef.current = autoRefresh;
 
   // Wake up workspace
   const wakeup = useCallback(async (): Promise<{ success: boolean; message: string }> => {
@@ -141,7 +155,7 @@ export function useWorkspaceStatus(
         if (result.data.wasRestarted) {
           setStatusMessage(result.data.message);
           setActionNeeded(null);
-          opts.onStatusChange('starting', true);
+          onStatusChangeRef.current('starting', true);
 
           // Start more frequent polling to catch when workspace is ready
           if (intervalRef.current) {
@@ -153,8 +167,8 @@ export function useWorkspaceStatus(
           setTimeout(() => {
             if (mountedRef.current && intervalRef.current) {
               clearInterval(intervalRef.current);
-              if (opts.autoRefresh) {
-                intervalRef.current = setInterval(refresh, opts.refreshInterval);
+              if (autoRefreshRef.current) {
+                intervalRef.current = setInterval(refresh, refreshIntervalRef.current);
               }
             }
           }, 120000);
@@ -176,7 +190,7 @@ export function useWorkspaceStatus(
         setIsWakingUp(false);
       }
     }
-  }, [workspace?.id, refresh, opts]);
+  }, [workspace?.id, refresh]);
 
   // Initial fetch
   useEffect(() => {
@@ -190,9 +204,9 @@ export function useWorkspaceStatus(
 
   // Auto-refresh polling
   useEffect(() => {
-    if (!opts.autoRefresh) return;
+    if (!autoRefresh) return;
 
-    intervalRef.current = setInterval(refresh, opts.refreshInterval);
+    intervalRef.current = setInterval(refresh, refreshInterval);
 
     return () => {
       if (intervalRef.current) {
@@ -200,14 +214,14 @@ export function useWorkspaceStatus(
         intervalRef.current = null;
       }
     };
-  }, [opts.autoRefresh, opts.refreshInterval, refresh]);
+  }, [autoRefresh, refreshInterval, refresh]);
 
   // Auto-wakeup when workspace is stopped
   useEffect(() => {
-    if (opts.autoWakeup && workspace?.isStopped && !isWakingUp) {
+    if (autoWakeup && workspace?.isStopped && !isWakingUp) {
       wakeup();
     }
-  }, [opts.autoWakeup, workspace?.isStopped, isWakingUp, wakeup]);
+  }, [autoWakeup, workspace?.isStopped, isWakingUp, wakeup]);
 
   return {
     workspace,

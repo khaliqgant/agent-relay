@@ -326,7 +326,7 @@ export class DaemonApi extends EventEmitter {
     this.routes.set('POST /auth/cli/:provider/start', async (req): Promise<ApiResponse> => {
       const { provider } = req.params;
       try {
-        const session = startCLIAuth(provider);
+        const session = await startCLIAuth(provider);
         return {
           status: 200,
           body: {

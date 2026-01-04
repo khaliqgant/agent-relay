@@ -11,7 +11,6 @@ import { randomUUID } from 'crypto';
 import { requireAuth } from './auth.js';
 import { db } from '../db/index.js';
 import { nangoService, NANGO_INTEGRATIONS } from '../services/nango.js';
-import { getProvisioner } from '../provisioner/index.js';
 
 export const nangoAuthRouter = Router();
 
@@ -421,10 +420,11 @@ async function handleRepoAuthWebhook(
 
     console.log(`[nango-webhook] Synced ${repos.length} repos for ${user.githubUsername} (installation: ${githubInstallationId || 'unknown'})`);
 
-    // Auto-provision a workspace if user doesn't have one
-    if (repos.length > 0) {
-      await autoProvisionWorkspaceIfNeeded(user.id, user.githubUsername || 'user', repos.map(r => r.full_name));
-    }
+    // Note: We intentionally do NOT auto-provision workspaces here.
+    // Users should go through the onboarding flow at /app to:
+    // 1. Name their workspace
+    // 2. Choose which repos to include
+    // 3. Understand what they're creating
 
   } catch (error: unknown) {
     const err = error as { message?: string };
@@ -438,41 +438,3 @@ async function handleRepoAuthWebhook(
   }
 }
 
-/**
- * Auto-provision a workspace for the user if they don't have one
- * This is called after repos are connected to provide immediate workspace access
- */
-async function autoProvisionWorkspaceIfNeeded(
-  userId: string,
-  username: string,
-  repositories: string[]
-): Promise<void> {
-  try {
-    // Check if user already has a workspace
-    const existingWorkspaces = await db.workspaces.findByUserId(userId);
-    if (existingWorkspaces.length > 0) {
-      console.log(`[auto-provision] User ${username} already has ${existingWorkspaces.length} workspace(s), skipping auto-provision`);
-      return;
-    }
-
-    console.log(`[auto-provision] Starting workspace provision for ${username} with ${repositories.length} repos`);
-
-    const provisioner = getProvisioner();
-    const result = await provisioner.provision({
-      userId,
-      name: `${username}'s Workspace`,
-      providers: [], // No AI providers yet - user can connect them later
-      repositories,
-    });
-
-    if (result.status === 'error') {
-      console.error(`[auto-provision] Failed to provision workspace for ${username}:`, result.error);
-      return;
-    }
-
-    console.log(`[auto-provision] Workspace ${result.workspaceId} provisioned for ${username} (status: ${result.status})`);
-  } catch (error) {
-    console.error(`[auto-provision] Error provisioning workspace for ${username}:`, error);
-    // Non-fatal - user can still manually create a workspace
-  }
-}

@@ -14,6 +14,7 @@ import {
   timestamp,
   boolean,
   bigint,
+  integer,
   jsonb,
   unique,
   index,
@@ -173,6 +174,10 @@ export const workspaces = pgTable('workspaces', {
   publicUrl: varchar('public_url', { length: 255 }),
   customDomain: varchar('custom_domain', { length: 255 }),
   customDomainStatus: varchar('custom_domain_status', { length: 50 }),
+  // SSH access for port forwarding (e.g., Codex OAuth callback tunneling)
+  sshHost: varchar('ssh_host', { length: 255 }),
+  sshPort: integer('ssh_port'),
+  sshPassword: varchar('ssh_password', { length: 255 }),
   config: jsonb('config').$type<WorkspaceConfig>().notNull().default({}),
   errorMessage: text('error_message'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

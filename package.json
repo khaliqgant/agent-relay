@@ -74,12 +74,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/khaliqgant/agent-relay.git"
+    "url": "git+https://github.com/AgentWorkforce/relay.git"
   },
   "bugs": {
-    "url": "https://github.com/khaliqgant/agent-relay/issues"
+    "url": "https://github.com/AgentWorkforce/relay/issues"
   },
-  "homepage": "https://github.com/khaliqgant/agent-relay#readme",
+  "homepage": "https://github.com/AgentWorkforce/relay#readme",
   "dependencies": {
     "@nangohq/node": "^0.69.20",
     "@types/jsonwebtoken": "^9.0.10",

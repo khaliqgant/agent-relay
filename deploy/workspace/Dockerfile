@@ -54,6 +54,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
+
+# Copy docs folder (contains relay snippets for agent spawning)
+COPY docs ./docs
+
 COPY deploy/workspace/entrypoint.sh /entrypoint.sh
 COPY deploy/workspace/git-credential-relay /usr/local/bin/git-credential-relay
 RUN chmod +x /entrypoint.sh /usr/local/bin/git-credential-relay

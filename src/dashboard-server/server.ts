@@ -18,6 +18,13 @@ import type { ProjectConfig, SpawnRequest } from '../bridge/types.js';
 import { listTrajectorySteps, getTrajectoryStatus, getTrajectoryHistory } from '../trajectory/integration.js';
 import { loadTeamsConfig } from '../bridge/teams-config.js';
 import { getMemoryMonitor } from '../resiliency/memory-monitor.js';
+import {
+  startCLIAuth,
+  getAuthSession,
+  cancelAuthSession,
+  submitAuthCode,
+  getSupportedProviders,
+} from '../daemon/cli-auth.js';
 
 /**
  * Initialize cloud persistence for session tracking.
@@ -1988,6 +1995,103 @@ export async function startDashboard(
       relayConnected,
       websocketClients: wss.clients.size,
     });
+  });
+
+  // ===== CLI Auth API (for workspace-based provider authentication) =====
+
+  /**
+   * POST /auth/cli/:provider/start - Start CLI auth flow
+   * Body: { useDeviceFlow?: boolean }
+   */
+  app.post('/auth/cli/:provider/start', async (req, res) => {
+    const { provider } = req.params;
+    const { useDeviceFlow } = req.body || {};
+    try {
+      const session = await startCLIAuth(provider, { useDeviceFlow });
+      res.json({
+        sessionId: session.id,
+        status: session.status,
+        authUrl: session.authUrl,
+      });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : 'Failed to start CLI auth',
+      });
+    }
+  });
+
+  /**
+   * GET /auth/cli/:provider/status/:sessionId - Get auth session status
+   */
+  app.get('/auth/cli/:provider/status/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const session = getAuthSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    res.json({
+      status: session.status,
+      authUrl: session.authUrl,
+      error: session.error,
+    });
+  });
+
+  /**
+   * GET /auth/cli/:provider/creds/:sessionId - Get credentials from completed auth
+   */
+  app.get('/auth/cli/:provider/creds/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const session = getAuthSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (session.status !== 'success') {
+      return res.status(400).json({ error: 'Auth not complete', status: session.status });
+    }
+    res.json({
+      token: session.token,
+      refreshToken: session.refreshToken,
+      expiresAt: session.tokenExpiresAt?.toISOString(),
+    });
+  });
+
+  /**
+   * POST /auth/cli/:provider/cancel/:sessionId - Cancel auth session
+   */
+  app.post('/auth/cli/:provider/cancel/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const cancelled = cancelAuthSession(sessionId);
+    if (!cancelled) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    res.json({ success: true });
+  });
+
+  /**
+   * POST /auth/cli/:provider/code/:sessionId - Submit auth code to PTY
+   * Used when OAuth returns a code that must be pasted into the CLI
+   */
+  app.post('/auth/cli/:provider/code/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const { code } = req.body;
+
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ error: 'Auth code is required' });
+    }
+
+    const result = submitAuthCode(sessionId, code);
+    if (!result.success) {
+      return res.status(404).json({ error: result.error || 'Session not found or process not running' });
+    }
+
+    res.json({ success: true, message: 'Auth code submitted' });
+  });
+
+  /**
+   * GET /auth/cli/providers - List supported providers
+   */
+  app.get('/auth/cli/providers', (req, res) => {
+    res.json({ providers: getSupportedProviders() });
   });
 
   // ===== Metrics API =====

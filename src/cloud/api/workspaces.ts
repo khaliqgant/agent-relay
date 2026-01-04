@@ -264,6 +264,10 @@ workspacesRouter.get('/:id', async (req: Request, res: Response) => {
       computeProvider: workspace.computeProvider,
       config: workspace.config,
       errorMessage: workspace.errorMessage,
+      // SSH access for port forwarding (e.g., Codex OAuth)
+      sshHost: workspace.sshHost,
+      sshPort: workspace.sshPort,
+      sshPassword: workspace.sshPassword,
       repositories: repositories.map((r) => ({
         id: r.id,
         fullName: r.githubFullName,
@@ -661,103 +665,6 @@ async function removeDomainFromCompute(workspace: Workspace): Promise<void> {
 }
 
 /**
- * POST /api/workspaces/:id/connect-provider
- * Trigger CLI login flow for a provider (claude, codex, opencode, droid)
- * Returns the OAuth URL for the user to complete authentication
- */
-const PROVIDER_CLI_COMMANDS: Record<string, { command: string; displayName: string }> = {
-  anthropic: { command: 'claude', displayName: 'Claude' },
-  codex: { command: 'codex login', displayName: 'Codex' },
-  opencode: { command: 'opencode', displayName: 'OpenCode' },
-  droid: { command: 'droid', displayName: 'Droid' },
-};
-
-workspacesRouter.post('/:id/connect-provider', async (req: Request, res: Response) => {
-  const userId = req.session.userId!;
-  const { id } = req.params;
-  const { provider } = req.body;
-
-  const providerConfig = PROVIDER_CLI_COMMANDS[provider];
-  if (!provider || !providerConfig) {
-    return res.status(400).json({
-      error: 'Valid provider is required',
-      validProviders: Object.keys(PROVIDER_CLI_COMMANDS),
-    });
-  }
-
-  try {
-    const workspace = await db.workspaces.findById(id);
-
-    if (!workspace) {
-      return res.status(404).json({ error: 'Workspace not found' });
-    }
-
-    if (workspace.userId !== userId) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    if (workspace.status !== 'running') {
-      return res.status(400).json({ error: 'Workspace must be running to connect providers' });
-    }
-
-    const containerName = workspace.computeId;
-
-    if (!containerName) {
-      return res.status(400).json({ error: 'Workspace has no compute instance' });
-    }
-
-    // Run the CLI login command in the container and capture output
-    const { execSync } = await import('child_process');
-
-    try {
-      // For Docker containers, run the command and capture the OAuth URL
-      // The CLI typically outputs something like:
-      // "Please visit https://... to authenticate"
-      const output = execSync(
-        `docker exec ${containerName} timeout 10 ${providerConfig.command} 2>&1 || true`,
-        { encoding: 'utf-8', timeout: 15000 }
-      );
-
-      // Parse OAuth URL from output
-      const urlMatch = output.match(/https:\/\/[^\s]+/);
-
-      if (urlMatch) {
-        res.json({
-          success: true,
-          provider,
-          authUrl: urlMatch[0],
-          message: `Visit the URL to authenticate with ${providerConfig.displayName}`,
-          instructions: [
-            '1. Click the authentication URL below',
-            '2. Complete the login in your browser',
-            '3. Return here - your workspace will automatically detect the credentials',
-          ],
-        });
-      } else {
-        // CLI might already be authenticated or returned different output
-        res.json({
-          success: false,
-          provider,
-          output: output.substring(0, 500), // First 500 chars for debugging
-          message: 'Could not extract authentication URL. The provider may already be connected.',
-        });
-      }
-    } catch (execError) {
-      const errorMsg = execError instanceof Error ? execError.message : 'Unknown error';
-      console.error(`[workspace] CLI login error for ${provider}:`, errorMsg);
-
-      res.status(500).json({
-        error: 'Failed to start authentication flow',
-        details: errorMsg,
-      });
-    }
-  } catch (error) {
-    console.error('Error connecting provider:', error);
-    res.status(500).json({ error: 'Failed to connect provider' });
-  }
-});
-
-/**
  * POST /api/workspaces/:id/proxy/*
  * Proxy API requests to the workspace container
  * This allows the dashboard to make REST calls through the cloud server
@@ -781,8 +688,20 @@ workspacesRouter.all('/:id/proxy/{*proxyPath}', async (req: Request, res: Respon
       return res.status(400).json({ error: 'Workspace is not running' });
     }
 
-    // Forward the request to the workspace
-    const targetUrl = `${workspace.publicUrl}/api/${proxyPath}`;
+    // Determine the internal URL for proxying
+    // When running inside Docker, localhost URLs won't work - use the container name instead
+    let targetBaseUrl = workspace.publicUrl;
+    const runningInDocker = process.env.RUNNING_IN_DOCKER === 'true';
+
+    if (runningInDocker && workspace.computeId && targetBaseUrl.includes('localhost')) {
+      // Replace localhost URL with container name for Docker networking
+      // workspace.computeId is the container name (e.g., "ar-abc12345")
+      // The workspace port is 3888 inside the container
+      targetBaseUrl = `http://${workspace.computeId}:3888`;
+    }
+
+    const targetUrl = `${targetBaseUrl}/api/${proxyPath}`;
+    console.log(`[workspace-proxy] ${req.method} ${targetUrl}`);
 
     const fetchOptions: RequestInit = {
       method: req.method,
@@ -796,12 +715,22 @@ workspacesRouter.all('/:id/proxy/{*proxyPath}', async (req: Request, res: Respon
     }
 
     const proxyRes = await fetch(targetUrl, fetchOptions);
-    const data = await proxyRes.json();
 
-    res.status(proxyRes.status).json(data);
+    // Handle non-JSON responses gracefully
+    const contentType = proxyRes.headers.get('content-type');
+    if (contentType?.includes('application/json')) {
+      const data = await proxyRes.json();
+      res.status(proxyRes.status).json(data);
+    } else {
+      const text = await proxyRes.text();
+      res.status(proxyRes.status).send(text);
+    }
   } catch (error) {
     console.error('[workspace-proxy] Error:', error);
-    res.status(500).json({ error: 'Failed to proxy request to workspace' });
+    res.status(500).json({
+      error: 'Failed to proxy request to workspace',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 

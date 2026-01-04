@@ -11,8 +11,16 @@ import { vault } from '../vault/index.js';
 import { nangoService } from '../services/nango.js';
 
 const WORKSPACE_PORT = 3888;
+const SSH_PORT = 2222;
 const FETCH_TIMEOUT_MS = 10_000;
 const WORKSPACE_IMAGE = process.env.WORKSPACE_IMAGE || 'ghcr.io/agentworkforce/relay-workspace:latest';
+
+/**
+ * Generate a random password for SSH access
+ */
+function generateSSHPassword(): string {
+  return crypto.randomBytes(16).toString('base64').replace(/[/+=]/g, '').substring(0, 16);
+}
 
 /**
  * Get a fresh GitHub App installation token from Nango.
@@ -145,6 +153,9 @@ interface ComputeProvisioner {
   provision(workspace: Workspace, credentials: Map<string, string>): Promise<{
     computeId: string;
     publicUrl: string;
+    sshHost?: string;
+    sshPort?: number;
+    sshPassword?: string;
   }>;
   deprovision(workspace: Workspace): Promise<void>;
   getStatus(workspace: Workspace): Promise<WorkspaceStatus>;
@@ -198,8 +209,9 @@ class FlyProvisioner implements ComputeProvisioner {
   async provision(
     workspace: Workspace,
     credentials: Map<string, string>
-  ): Promise<{ computeId: string; publicUrl: string }> {
+  ): Promise<{ computeId: string; publicUrl: string; sshHost?: string; sshPort?: number; sshPassword?: string }> {
     const appName = `ar-${workspace.id.substring(0, 8)}`;
+    const sshPassword = generateSSHPassword();
 
     // Create Fly app
     await fetchWithRetry('https://api.machines.dev/v1/apps', {
@@ -214,8 +226,10 @@ class FlyProvisioner implements ComputeProvisioner {
       }),
     });
 
-    // Set secrets (credentials)
-    const secrets: Record<string, string> = {};
+    // Set secrets (credentials + SSH password)
+    const secrets: Record<string, string> = {
+      SSH_PASSWORD: sshPassword,
+    };
     for (const [provider, token] of credentials) {
       secrets[`${provider.toUpperCase()}_TOKEN`] = token;
     }
@@ -239,6 +253,7 @@ class FlyProvisioner implements ComputeProvisioner {
     }
 
     // Create machine with auto-stop/start for cost optimization
+    // SSH enabled for port forwarding (e.g., Codex OAuth)
     const machineResponse = await fetchWithRetry(
       `https://api.machines.dev/v1/apps/${appName}/machines`,
       {
@@ -262,6 +277,8 @@ class FlyProvisioner implements ComputeProvisioner {
               // Git gateway configuration
               CLOUD_API_URL: this.cloudApiUrl,
               WORKSPACE_TOKEN: this.generateWorkspaceToken(workspace.id),
+              // SSH for port forwarding (Codex OAuth, etc.)
+              ENABLE_SSH: 'true',
             },
             services: [
               {
@@ -275,6 +292,12 @@ class FlyProvisioner implements ComputeProvisioner {
                 auto_stop_machines: true,
                 auto_start_machines: true,
                 min_machines_running: 0,
+              },
+              {
+                // SSH for port forwarding
+                ports: [{ port: SSH_PORT, handlers: [] }],
+                protocol: 'tcp',
+                internal_port: SSH_PORT,
               },
             ],
             guest: {
@@ -299,11 +322,16 @@ class FlyProvisioner implements ComputeProvisioner {
       ? `https://${customHostname}`
       : `https://${appName}.fly.dev`;
 
+    const sshHost = customHostname || `${appName}.fly.dev`;
+
     await softHealthCheck(publicUrl);
 
     return {
       computeId: machine.id,
       publicUrl,
+      sshHost,
+      sshPort: SSH_PORT,
+      sshPassword,
     };
   }
 
@@ -775,11 +803,42 @@ class DockerProvisioner implements ComputeProvisioner {
       .digest('hex');
   }
 
+  /**
+   * Wait for container to be healthy by polling the health endpoint
+   */
+  private async waitForHealthy(publicUrl: string, timeoutMs: number = 60_000): Promise<void> {
+    const startTime = Date.now();
+    const pollInterval = 2000;
+
+    console.log(`[docker] Waiting for container to be healthy at ${publicUrl}...`);
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        const response = await fetch(`${publicUrl}/health`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (response.ok) {
+          console.log(`[docker] Container healthy after ${Date.now() - startTime}ms`);
+          return;
+        }
+      } catch {
+        // Container not ready yet, continue polling
+      }
+
+      await wait(pollInterval);
+    }
+
+    throw new Error(`Container did not become healthy within ${timeoutMs}ms`);
+  }
+
   async provision(
     workspace: Workspace,
     credentials: Map<string, string>
-  ): Promise<{ computeId: string; publicUrl: string }> {
+  ): Promise<{ computeId: string; publicUrl: string; sshHost?: string; sshPort?: number; sshPassword?: string }> {
     const containerName = `ar-${workspace.id.substring(0, 8)}`;
+    const sshPassword = generateSSHPassword();
 
     // Build environment variables
     const envArgs: string[] = [
@@ -792,27 +851,54 @@ class DockerProvisioner implements ComputeProvisioner {
       `-e AGENT_RELAY_DASHBOARD_PORT=${WORKSPACE_PORT}`,
       `-e CLOUD_API_URL=${this.cloudApiUrl}`,
       `-e WORKSPACE_TOKEN=${this.generateWorkspaceToken(workspace.id)}`,
+      // SSH for port forwarding (Codex OAuth, etc.)
+      `-e ENABLE_SSH=true`,
+      `-e SSH_PASSWORD=${sshPassword}`,
     ];
 
     for (const [provider, token] of credentials) {
       envArgs.push(`-e ${provider.toUpperCase()}_TOKEN=${token}`);
     }
 
-    // Run container
+    // Run container with SSH port exposed
     const { execSync } = await import('child_process');
     const hostPort = 3000 + Math.floor(Math.random() * 1000);
+    const sshHostPort = 2200 + Math.floor(Math.random() * 100);
+
+    // When running in Docker, connect to the same network for container-to-container communication
+    const runningInDocker = process.env.RUNNING_IN_DOCKER === 'true';
+    const networkArg = runningInDocker ? '--network agent-relay-dev' : '';
 
     try {
       execSync(
-        `docker run -d --name ${containerName} -p ${hostPort}:${WORKSPACE_PORT} ${envArgs.join(' ')} ${WORKSPACE_IMAGE}`,
+        `docker run -d --user root --name ${containerName} ${networkArg} -p ${hostPort}:${WORKSPACE_PORT} -p ${sshHostPort}:${SSH_PORT} ${envArgs.join(' ')} ${WORKSPACE_IMAGE}`,
         { stdio: 'pipe' }
       );
 
+      const publicUrl = `http://localhost:${hostPort}`;
+
+      // Wait for container to be healthy before returning
+      // When running in Docker, use the internal container name for health check
+      const healthCheckUrl = runningInDocker
+        ? `http://${containerName}:${WORKSPACE_PORT}`
+        : publicUrl;
+      await this.waitForHealthy(healthCheckUrl);
+
       return {
         computeId: containerName,
-        publicUrl: `http://localhost:${hostPort}`,
+        publicUrl,
+        sshHost: 'localhost',
+        sshPort: sshHostPort,
+        sshPassword,
       };
     } catch (error) {
+      // Clean up container if it was created but health check failed
+      try {
+        const { execSync: execSyncCleanup } = await import('child_process');
+        execSyncCleanup(`docker rm -f ${containerName}`, { stdio: 'pipe' });
+      } catch {
+        // Ignore cleanup errors
+      }
       throw new Error(`Failed to start Docker container: ${error}`);
     }
   }
@@ -935,7 +1021,7 @@ export class WorkspaceProvisioner {
 
     // Provision compute
     try {
-      const { computeId, publicUrl } = await this.provisioner.provision(
+      const { computeId, publicUrl, sshHost, sshPort, sshPassword } = await this.provisioner.provision(
         workspace,
         credentials
       );
@@ -943,6 +1029,9 @@ export class WorkspaceProvisioner {
       await db.workspaces.updateStatus(workspace.id, 'running', {
         computeId,
         publicUrl,
+        sshHost,
+        sshPort,
+        sshPassword,
       });
 
       return {

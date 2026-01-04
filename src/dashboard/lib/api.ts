@@ -24,6 +24,33 @@ const API_BASE = '';
 // Workspace ID for cloud mode proxying
 let activeWorkspaceId: string | null = null;
 
+// CSRF token for cloud mode requests
+let csrfToken: string | null = null;
+
+/**
+ * Set the CSRF token for API requests
+ */
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
+/**
+ * Get the current CSRF token
+ */
+export function getCsrfToken(): string | null {
+  return csrfToken;
+}
+
+/**
+ * Capture CSRF token from response headers
+ */
+function captureCsrfToken(response: Response): void {
+  const token = response.headers.get('X-CSRF-Token');
+  if (token) {
+    csrfToken = token;
+  }
+}
+
 /**
  * Set the active workspace ID for API proxying in cloud mode
  */
@@ -43,6 +70,43 @@ function getApiUrl(path: string): string {
     return `/api/workspaces/${activeWorkspaceId}/proxy/${proxyPath}`;
   }
   return `${API_BASE}${path}`;
+}
+
+/**
+ * Wrapper for fetch that handles CSRF tokens and credentials
+ * All requests include credentials and capture CSRF tokens from responses.
+ * Non-GET requests include the CSRF token in headers.
+ */
+async function apiFetch(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const method = options.method?.toUpperCase() || 'GET';
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  };
+
+  // Add CSRF token for state-changing requests
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    // Ensure Content-Type is set for requests with body
+    if (options.body && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
+  }
+
+  const response = await fetch(url, {
+    ...options,
+    headers,
+    credentials: 'include',
+  });
+
+  // Always capture CSRF token from response
+  captureCsrfToken(response);
+
+  return response;
 }
 
 /**
@@ -198,9 +262,8 @@ export const api = {
    */
   async sendMessage(request: SendMessageRequest): Promise<ApiResponse<void>> {
     try {
-      const response = await fetch(getApiUrl('/api/send'), {
+      const response = await apiFetch(getApiUrl('/api/send'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
 
@@ -244,9 +307,8 @@ export const api = {
         data = file.data;
       }
 
-      const response = await fetch(getApiUrl('/api/upload'), {
+      const response = await apiFetch(getApiUrl('/api/upload'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename, mimeType, data }),
       });
 
@@ -271,9 +333,8 @@ export const api = {
    */
   async spawnAgent(request: SpawnAgentRequest): Promise<SpawnAgentResponse> {
     try {
-      const response = await fetch(getApiUrl('/api/spawn'), {
+      const response = await apiFetch(getApiUrl('/api/spawn'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
 
@@ -288,7 +349,7 @@ export const api = {
    */
   async getSpawnedAgents(): Promise<ApiResponse<{ agents: Array<{ name: string; cli: string; startedAt: string }> }>> {
     try {
-      const response = await fetch(getApiUrl('/api/spawned'));
+      const response = await apiFetch(getApiUrl('/api/spawned'));
       const result = await response.json() as { success?: boolean; agents?: Array<{ name: string; cli: string; startedAt: string }>; error?: string };
 
       if (response.ok && result.success) {
@@ -306,7 +367,7 @@ export const api = {
    */
   async releaseAgent(name: string): Promise<ApiResponse<void>> {
     try {
-      const response = await fetch(getApiUrl(`/api/spawned/${encodeURIComponent(name)}`), {
+      const response = await apiFetch(getApiUrl(`/api/spawned/${encodeURIComponent(name)}`), {
         method: 'DELETE',
       });
 
@@ -327,7 +388,7 @@ export const api = {
    */
   async getData(): Promise<ApiResponse<DashboardData>> {
     try {
-      const response = await fetch(getApiUrl('/api/data'));
+      const response = await apiFetch(getApiUrl('/api/data'));
       const data = await response.json() as DashboardData;
 
       if (response.ok) {
@@ -345,7 +406,7 @@ export const api = {
    */
   async getBridgeData(): Promise<ApiResponse<FleetData>> {
     try {
-      const response = await fetch(getApiUrl('/api/bridge'));
+      const response = await apiFetch(getApiUrl('/api/bridge'));
       const data = await response.json() as FleetData;
 
       if (response.ok) {
@@ -363,7 +424,7 @@ export const api = {
    */
   async getMetrics(): Promise<ApiResponse<unknown>> {
     try {
-      const response = await fetch(getApiUrl('/api/metrics'));
+      const response = await apiFetch(getApiUrl('/api/metrics'));
       const data = await response.json();
 
       if (response.ok) {
@@ -392,7 +453,7 @@ export const api = {
       if (params?.since) query.set('since', String(params.since));
       if (params?.limit) query.set('limit', String(params.limit));
 
-      const response = await fetch(getApiUrl(`/api/history/sessions?${query}`));
+      const response = await apiFetch(getApiUrl(`/api/history/sessions?${query}`));
       const data = await response.json();
 
       if (response.ok) {
@@ -427,7 +488,7 @@ export const api = {
       if (params?.order) query.set('order', params.order);
       if (params?.search) query.set('search', params.search);
 
-      const response = await fetch(getApiUrl(`/api/history/messages?${query}`));
+      const response = await apiFetch(getApiUrl(`/api/history/messages?${query}`));
       const data = await response.json();
 
       if (response.ok) {
@@ -445,7 +506,7 @@ export const api = {
    */
   async getHistoryConversations(): Promise<ApiResponse<{ conversations: Conversation[] }>> {
     try {
-      const response = await fetch(getApiUrl('/api/history/conversations'));
+      const response = await apiFetch(getApiUrl('/api/history/conversations'));
       const data = await response.json();
 
       if (response.ok) {
@@ -463,7 +524,7 @@ export const api = {
    */
   async getHistoryMessage(id: string): Promise<ApiResponse<HistoryMessage>> {
     try {
-      const response = await fetch(getApiUrl(`/api/history/message/${encodeURIComponent(id)}`));
+      const response = await apiFetch(getApiUrl(`/api/history/message/${encodeURIComponent(id)}`));
       const data = await response.json();
 
       if (response.ok) {
@@ -481,7 +542,7 @@ export const api = {
    */
   async getHistoryStats(): Promise<ApiResponse<HistoryStats>> {
     try {
-      const response = await fetch(getApiUrl('/api/history/stats'));
+      const response = await apiFetch(getApiUrl('/api/history/stats'));
       const data = await response.json();
 
       if (response.ok) {
@@ -508,7 +569,7 @@ export const api = {
       if (params?.query) queryParams.set('q', params.query);
       if (params?.limit) queryParams.set('limit', String(params.limit));
 
-      const response = await fetch(getApiUrl(`/api/files?${queryParams}`));
+      const response = await apiFetch(getApiUrl(`/api/files?${queryParams}`));
       const data = await response.json();
 
       if (response.ok) {
@@ -528,7 +589,7 @@ export const api = {
    */
   async getDecisions(): Promise<ApiResponse<{ decisions: ApiDecision[] }>> {
     try {
-      const response = await fetch(getApiUrl('/api/decisions'));
+      const response = await apiFetch(getApiUrl('/api/decisions'));
       const data = await response.json();
 
       if (response.ok && data.success) {
@@ -546,9 +607,8 @@ export const api = {
    */
   async approveDecision(id: string, optionId?: string, response?: string): Promise<ApiResponse<void>> {
     try {
-      const res = await fetch(getApiUrl(`/api/decisions/${encodeURIComponent(id)}/approve`), {
+      const res = await apiFetch(getApiUrl(`/api/decisions/${encodeURIComponent(id)}/approve`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ optionId, response }),
       });
 
@@ -569,9 +629,8 @@ export const api = {
    */
   async rejectDecision(id: string, reason?: string): Promise<ApiResponse<void>> {
     try {
-      const res = await fetch(getApiUrl(`/api/decisions/${encodeURIComponent(id)}/reject`), {
+      const res = await apiFetch(getApiUrl(`/api/decisions/${encodeURIComponent(id)}/reject`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
 
@@ -592,7 +651,7 @@ export const api = {
    */
   async dismissDecision(id: string): Promise<ApiResponse<void>> {
     try {
-      const res = await fetch(getApiUrl(`/api/decisions/${encodeURIComponent(id)}`), {
+      const res = await apiFetch(getApiUrl(`/api/decisions/${encodeURIComponent(id)}`), {
         method: 'DELETE',
       });
 
@@ -615,7 +674,7 @@ export const api = {
    */
   async getFleetServers(): Promise<ApiResponse<{ servers: FleetServer[] }>> {
     try {
-      const response = await fetch(getApiUrl('/api/fleet/servers'));
+      const response = await apiFetch(getApiUrl('/api/fleet/servers'));
       const data = await response.json();
 
       if (response.ok && data.success) {
@@ -633,7 +692,7 @@ export const api = {
    */
   async getFleetStats(): Promise<ApiResponse<{ stats: FleetStats }>> {
     try {
-      const response = await fetch(getApiUrl('/api/fleet/stats'));
+      const response = await apiFetch(getApiUrl('/api/fleet/stats'));
       const data = await response.json();
 
       if (response.ok && data.success) {
@@ -660,7 +719,7 @@ export const api = {
       if (params?.status) queryParams.set('status', params.status);
       if (params?.agent) queryParams.set('agent', params.agent);
 
-      const response = await fetch(getApiUrl(`/api/tasks?${queryParams}`));
+      const response = await apiFetch(getApiUrl(`/api/tasks?${queryParams}`));
       const data = await response.json();
 
       if (response.ok && data.success) {
@@ -683,9 +742,8 @@ export const api = {
     priority: 'low' | 'medium' | 'high' | 'critical';
   }): Promise<ApiResponse<{ task: TaskAssignment }>> {
     try {
-      const response = await fetch(getApiUrl('/api/tasks'), {
+      const response = await apiFetch(getApiUrl('/api/tasks'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
 
@@ -709,9 +767,8 @@ export const api = {
     result?: string;
   }): Promise<ApiResponse<{ task: TaskAssignment }>> {
     try {
-      const response = await fetch(getApiUrl(`/api/tasks/${encodeURIComponent(id)}`), {
+      const response = await apiFetch(getApiUrl(`/api/tasks/${encodeURIComponent(id)}`), {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       });
 
@@ -732,7 +789,7 @@ export const api = {
    */
   async cancelTask(id: string): Promise<ApiResponse<void>> {
     try {
-      const response = await fetch(getApiUrl(`/api/tasks/${encodeURIComponent(id)}`), {
+      const response = await apiFetch(getApiUrl(`/api/tasks/${encodeURIComponent(id)}`), {
         method: 'DELETE',
       });
 
@@ -761,9 +818,8 @@ export const api = {
     description?: string;
   }): Promise<ApiResponse<{ bead: { id: string; title: string } }>> {
     try {
-      const response = await fetch(getApiUrl('/api/beads'), {
+      const response = await apiFetch(getApiUrl('/api/beads'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
 
@@ -788,9 +844,8 @@ export const api = {
     thread?: string;
   }): Promise<ApiResponse<{ messageId: string }>> {
     try {
-      const response = await fetch(getApiUrl('/api/relay/send'), {
+      const response = await apiFetch(getApiUrl('/api/relay/send'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
 

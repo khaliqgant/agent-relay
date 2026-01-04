@@ -190,7 +190,7 @@ prpm install @agent-relay/agent-relay-snippet --location CLAUDE.md
 
 `agent-relay up` starts a web dashboard at http://localhost:3888
 
-![Agent Relay Dashboard](dashboard.png)
+![Agent Relay Dashboard](docs/dashboard.png)
 
 ## Development
 

@@ -8,9 +8,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import crypto from 'crypto';
 import path from 'node:path';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createClient, RedisClientType } from 'redis';
 import { RedisStore } from 'connect-redis';
+import { WebSocketServer, WebSocket } from 'ws';
 import { getConfig } from './config.js';
 import { runMigrations } from './db/index.js';
 import { getScalingOrchestrator, ScalingOrchestrator } from './services/index.js';
@@ -26,7 +28,7 @@ declare module 'express-session' {
 }
 
 // API routers
-import { authRouter } from './api/auth.js';
+import { authRouter, requireAuth } from './api/auth.js';
 import { providersRouter } from './api/providers.js';
 import { workspacesRouter } from './api/workspaces.js';
 import { reposRouter } from './api/repos.js';
@@ -42,6 +44,38 @@ import { webhooksRouter } from './api/webhooks.js';
 import { githubAppRouter } from './api/github-app.js';
 import { nangoAuthRouter } from './api/nango-auth.js';
 import { gitRouter } from './api/git.js';
+import { db } from './db/index.js';
+
+/**
+ * Proxy a request to the user's primary running workspace
+ */
+async function proxyToUserWorkspace(req: Request, res: Response, path: string): Promise<void> {
+  const userId = req.session.userId;
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    // Find user's running workspace
+    const workspaces = await db.workspaces.findByUserId(userId);
+    const runningWorkspace = workspaces.find(w => w.status === 'running' && w.publicUrl);
+
+    if (!runningWorkspace || !runningWorkspace.publicUrl) {
+      res.status(404).json({ error: 'No running workspace found', success: false });
+      return;
+    }
+
+    // Proxy to workspace
+    const targetUrl = `${runningWorkspace.publicUrl}${path}`;
+    const proxyRes = await fetch(targetUrl);
+    const data = await proxyRes.json();
+    res.status(proxyRes.status).json(data);
+  } catch (error) {
+    console.error('[trajectory-proxy] Error:', error);
+    res.status(500).json({ error: 'Failed to proxy request to workspace', success: false });
+  }
+}
 
 export interface CloudServer {
   app: Express;
@@ -126,10 +160,19 @@ export async function createServer(): Promise<CloudServer> {
 
   // Simple in-memory rate limiting per IP
   const RATE_LIMIT_WINDOW_MS = 60_000;
-  const RATE_LIMIT_MAX = 300;
+  // Higher limit in development mode
+  const RATE_LIMIT_MAX = process.env.NODE_ENV === 'development' ? 1000 : 300;
   const rateLimits = new Map<string, { count: number; resetAt: number }>();
 
   app.use((req: Request, res: Response, next: NextFunction) => {
+    // Skip rate limiting for localhost in development
+    if (process.env.NODE_ENV === 'development') {
+      const ip = req.ip || '';
+      if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') {
+        return next();
+      }
+    }
+
     const now = Date.now();
     const key = req.ip || 'unknown';
     const entry = rateLimits.get(key);
@@ -158,18 +201,32 @@ export async function createServer(): Promise<CloudServer> {
 
   // Lightweight CSRF protection using session token
   const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-  // Paths exempt from CSRF (webhooks from external services)
-  const CSRF_EXEMPT_PATHS = ['/api/webhooks/', '/api/auth/nango/webhook'];
+  // Paths exempt from CSRF (webhooks from external services, workspace proxy)
+  const CSRF_EXEMPT_PATHS = [
+    '/api/webhooks/',
+    '/api/auth/nango/webhook',
+  ];
+  // Additional pattern for workspace proxy routes (contains /proxy/)
+  const isWorkspaceProxyRoute = (path: string) => /^\/api\/workspaces\/[^/]+\/proxy\//.test(path);
   app.use((req: Request, res: Response, next: NextFunction) => {
-    // Skip CSRF for webhook endpoints
-    if (CSRF_EXEMPT_PATHS.some(path => req.path.startsWith(path))) {
+    // Skip CSRF for webhook endpoints and workspace proxy routes
+    if (CSRF_EXEMPT_PATHS.some(path => req.path.startsWith(path)) || isWorkspaceProxyRoute(req.path)) {
       return next();
     }
 
     if (!req.session) return res.status(500).json({ error: 'Session unavailable' });
 
+    // Generate CSRF token if not present
+    // Use session.save() to ensure the session is persisted even for unauthenticated users
+    // This is necessary because saveUninitialized: false won't auto-save new sessions
     if (!req.session.csrfToken) {
       req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+      // Explicitly save session to persist the CSRF token
+      req.session.save((err) => {
+        if (err) {
+          console.error('[csrf] Failed to save session:', err);
+        }
+      });
     }
     res.setHeader('X-CSRF-Token', req.session.csrfToken);
 
@@ -190,6 +247,7 @@ export async function createServer(): Promise<CloudServer> {
 
     const token = req.get('x-csrf-token');
     if (!token || token !== req.session.csrfToken) {
+      console.log(`[csrf] Token mismatch: received=${token?.substring(0, 8)}... expected=${req.session.csrfToken?.substring(0, 8)}...`);
       return res.status(403).json({
         error: 'CSRF token invalid or missing',
         code: 'CSRF_MISMATCH',
@@ -226,6 +284,23 @@ export async function createServer(): Promise<CloudServer> {
     console.log('[cloud] Test helper routes enabled (non-production mode)');
   }
 
+  // Trajectory proxy routes - auto-detect user's workspace and forward
+  // These are convenience routes so the dashboard doesn't need to know the workspace ID
+  app.get('/api/trajectory', requireAuth, async (req, res) => {
+    await proxyToUserWorkspace(req, res, '/api/trajectory');
+  });
+
+  app.get('/api/trajectory/steps', requireAuth, async (req, res) => {
+    const queryString = req.query.trajectoryId
+      ? `?trajectoryId=${encodeURIComponent(req.query.trajectoryId as string)}`
+      : '';
+    await proxyToUserWorkspace(req, res, `/api/trajectory/steps${queryString}`);
+  });
+
+  app.get('/api/trajectory/history', requireAuth, async (req, res) => {
+    await proxyToUserWorkspace(req, res, '/api/trajectory/history');
+  });
+
   // Serve static dashboard files (Next.js static export)
   // Path: dist/cloud/server.js -> ../../src/dashboard/out
   const dashboardPath = path.join(__dirname, '../../src/dashboard/out');
@@ -254,8 +329,185 @@ export async function createServer(): Promise<CloudServer> {
   });
 
   // Server lifecycle
-  let server: ReturnType<Express['listen']> | null = null;
+  let server: http.Server | null = null;
   let scalingOrchestrator: ScalingOrchestrator | null = null;
+
+  // Create HTTP server for WebSocket upgrade handling
+  const httpServer = http.createServer(app);
+
+  // ===== Presence WebSocket =====
+  const wssPresence = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: false,
+    maxPayload: 1024 * 1024, // 1MB - presence messages are small
+  });
+
+  // Track online users for presence with multi-tab support
+  interface UserPresenceInfo {
+    username: string;
+    avatarUrl?: string;
+    connectedAt: string;
+    lastSeen: string;
+  }
+  interface UserPresenceState {
+    info: UserPresenceInfo;
+    connections: Set<WebSocket>;
+  }
+  const onlineUsers = new Map<string, UserPresenceState>();
+
+  // Validation helpers
+  const isValidUsername = (username: unknown): username is string => {
+    if (typeof username !== 'string') return false;
+    return /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/.test(username);
+  };
+
+  const isValidAvatarUrl = (url: unknown): url is string | undefined => {
+    if (url === undefined || url === null) return true;
+    if (typeof url !== 'string') return false;
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'https:' &&
+        (parsed.hostname === 'avatars.githubusercontent.com' ||
+         parsed.hostname === 'github.com' ||
+         parsed.hostname.endsWith('.githubusercontent.com'));
+    } catch {
+      return false;
+    }
+  };
+
+  // Handle HTTP upgrade for WebSocket
+  httpServer.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
+
+    if (pathname === '/ws/presence') {
+      wssPresence.handleUpgrade(request, socket, head, (ws) => {
+        wssPresence.emit('connection', ws, request);
+      });
+    } else {
+      // Unknown WebSocket path - destroy socket
+      socket.destroy();
+    }
+  });
+
+  // Broadcast to all presence clients
+  const broadcastPresence = (message: object, exclude?: WebSocket) => {
+    const payload = JSON.stringify(message);
+    wssPresence.clients.forEach((client) => {
+      if (client !== exclude && client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
+  };
+
+  // Get online users list
+  const getOnlineUsersList = (): UserPresenceInfo[] => {
+    return Array.from(onlineUsers.values()).map((state) => state.info);
+  };
+
+  // Handle presence connections
+  wssPresence.on('connection', (ws) => {
+    console.log('[cloud] Presence WebSocket client connected');
+    let clientUsername: string | undefined;
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+
+        if (msg.type === 'presence') {
+          if (msg.action === 'join' && msg.user?.username) {
+            const username = msg.user.username;
+            const avatarUrl = msg.user.avatarUrl;
+
+            if (!isValidUsername(username)) {
+              console.warn(`[cloud] Invalid username rejected: ${username}`);
+              return;
+            }
+            if (!isValidAvatarUrl(avatarUrl)) {
+              console.warn(`[cloud] Invalid avatar URL rejected for user ${username}`);
+              return;
+            }
+
+            clientUsername = username;
+            const now = new Date().toISOString();
+
+            const existing = onlineUsers.get(username);
+            if (existing) {
+              existing.connections.add(ws);
+              existing.info.lastSeen = now;
+              console.log(`[cloud] User ${username} opened new tab (${existing.connections.size} connections)`);
+            } else {
+              onlineUsers.set(username, {
+                info: { username, avatarUrl, connectedAt: now, lastSeen: now },
+                connections: new Set([ws]),
+              });
+
+              console.log(`[cloud] User ${username} came online`);
+              broadcastPresence({
+                type: 'presence_join',
+                user: { username, avatarUrl, connectedAt: now, lastSeen: now },
+              }, ws);
+            }
+
+            ws.send(JSON.stringify({
+              type: 'presence_list',
+              users: getOnlineUsersList(),
+            }));
+
+          } else if (msg.action === 'leave') {
+            if (!clientUsername || msg.username !== clientUsername) return;
+
+            const userState = onlineUsers.get(clientUsername);
+            if (userState) {
+              userState.connections.delete(ws);
+              if (userState.connections.size === 0) {
+                onlineUsers.delete(clientUsername);
+                console.log(`[cloud] User ${clientUsername} went offline`);
+                broadcastPresence({ type: 'presence_leave', username: clientUsername });
+              }
+            }
+          }
+        } else if (msg.type === 'typing') {
+          if (!clientUsername || msg.username !== clientUsername) return;
+
+          const userState = onlineUsers.get(clientUsername);
+          if (userState) {
+            userState.info.lastSeen = new Date().toISOString();
+          }
+
+          broadcastPresence({
+            type: 'typing',
+            username: clientUsername,
+            avatarUrl: userState?.info.avatarUrl,
+            isTyping: msg.isTyping,
+          }, ws);
+        }
+      } catch (err) {
+        console.error('[cloud] Invalid presence message:', err);
+      }
+    });
+
+    ws.on('close', () => {
+      if (clientUsername) {
+        const userState = onlineUsers.get(clientUsername);
+        if (userState) {
+          userState.connections.delete(ws);
+          if (userState.connections.size === 0) {
+            onlineUsers.delete(clientUsername);
+            console.log(`[cloud] User ${clientUsername} disconnected`);
+            broadcastPresence({ type: 'presence_leave', username: clientUsername });
+          }
+        }
+      }
+    });
+
+    ws.on('error', (err) => {
+      console.error('[cloud] Presence WebSocket error:', err);
+    });
+  });
+
+  wssPresence.on('error', (err) => {
+    console.error('[cloud] Presence WebSocket server error:', err);
+  });
 
   return {
     app,
@@ -292,9 +544,10 @@ export async function createServer(): Promise<CloudServer> {
       }
 
       return new Promise((resolve) => {
-        server = app.listen(config.port, () => {
+        server = httpServer.listen(config.port, () => {
           console.log(`Agent Relay Cloud running on port ${config.port}`);
           console.log(`Public URL: ${config.publicUrl}`);
+          console.log(`WebSocket: ws://localhost:${config.port}/ws/presence`);
           resolve();
         });
       });
@@ -305,6 +558,9 @@ export async function createServer(): Promise<CloudServer> {
       if (scalingOrchestrator) {
         await scalingOrchestrator.shutdown();
       }
+
+      // Close WebSocket server
+      wssPresence.close();
 
       if (server) {
         await new Promise<void>((resolve) => server!.close(() => resolve()));
