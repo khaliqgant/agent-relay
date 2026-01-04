@@ -53,3 +53,15 @@ export {
   getFailureHistory,
   getPRFailureHistory,
 } from './ci-agent-spawner.js';
+
+// Issue and mention handling
+export {
+  handleMention,
+  handleIssueAssignment,
+  getPendingMentions,
+  getPendingIssueAssignments,
+  processPendingMentions,
+  processPendingIssueAssignments,
+  KNOWN_AGENTS,
+  isKnownAgent,
+} from './mention-handler.js';

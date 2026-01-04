@@ -43,6 +43,12 @@ export type {
   NewCIFixAttempt,
   CICheckStrategy,
   CIWebhookConfig,
+  // Issue and comment types
+  IssueAssignment,
+  NewIssueAssignment,
+  CommentMention,
+  NewCommentMention,
+  AgentTriggerConfig,
 } from './schema.js';
 
 // Re-export schema tables for direct access if needed
@@ -59,6 +65,8 @@ export {
   usageRecords as usageRecordsTable,
   ciFailureEvents as ciFailureEventsTable,
   ciFixAttempts as ciFixAttemptsTable,
+  issueAssignments as issueAssignmentsTable,
+  commentMentions as commentMentionsTable,
 } from './schema.js';
 
 // Import query modules
@@ -76,6 +84,8 @@ import {
   repositoryQueries,
   ciFailureEventQueries,
   ciFixAttemptQueries,
+  issueAssignmentQueries,
+  commentMentionQueries,
 } from './drizzle.js';
 
 // Legacy type aliases for backwards compatibility
@@ -103,6 +113,9 @@ export const db = {
   // CI failure tracking
   ciFailureEvents: ciFailureEventQueries,
   ciFixAttempts: ciFixAttemptQueries,
+  // Issue and comment tracking
+  issueAssignments: issueAssignmentQueries,
+  commentMentions: commentMentionQueries,
   // Database utilities
   getDb,
   close: closeDb,
@@ -121,6 +134,8 @@ export {
   linkedDaemonQueries,
   ciFailureEventQueries,
   ciFixAttemptQueries,
+  issueAssignmentQueries,
+  commentMentionQueries,
 };
 
 // Export database utilities

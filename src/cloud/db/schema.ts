@@ -703,3 +703,112 @@ export type CIFailureEvent = typeof ciFailureEvents.$inferSelect;
 export type NewCIFailureEvent = typeof ciFailureEvents.$inferInsert;
 export type CIFixAttempt = typeof ciFixAttempts.$inferSelect;
 export type NewCIFixAttempt = typeof ciFixAttempts.$inferInsert;
+
+// ============================================================================
+// GitHub Issue Assignments (agent handling of issues)
+// ============================================================================
+
+export const issueAssignments = pgTable('issue_assignments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  repositoryId: uuid('repository_id').references(() => repositories.id, { onDelete: 'cascade' }),
+  repository: varchar('repository', { length: 255 }).notNull(), // org/repo format
+  issueNumber: bigint('issue_number', { mode: 'number' }).notNull(),
+  issueTitle: text('issue_title').notNull(),
+  issueBody: text('issue_body'),
+  issueUrl: varchar('issue_url', { length: 512 }),
+  // Assignment details
+  agentId: varchar('agent_id', { length: 255 }),
+  agentName: varchar('agent_name', { length: 255 }),
+  assignedAt: timestamp('assigned_at'),
+  // Status tracking
+  status: varchar('status', { length: 50 }).notNull().default('pending'), // pending, assigned, in_progress, resolved, closed
+  resolution: text('resolution'),
+  // PR created to fix the issue
+  linkedPrNumber: bigint('linked_pr_number', { mode: 'number' }),
+  // Metadata
+  labels: text('labels').array(),
+  priority: varchar('priority', { length: 20 }), // low, medium, high, critical
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  repositoryIdx: index('idx_issue_assignments_repository').on(table.repository),
+  issueNumberIdx: index('idx_issue_assignments_issue_number').on(table.issueNumber),
+  statusIdx: index('idx_issue_assignments_status').on(table.status),
+  agentIdIdx: index('idx_issue_assignments_agent_id').on(table.agentId),
+  repoIssueIdx: unique('issue_assignments_repo_issue_unique').on(table.repository, table.issueNumber),
+}));
+
+export const issueAssignmentsRelations = relations(issueAssignments, ({ one }) => ({
+  repositoryRef: one(repositories, {
+    fields: [issueAssignments.repositoryId],
+    references: [repositories.id],
+  }),
+}));
+
+// ============================================================================
+// Comment Mentions (tracking @mentions to agents)
+// ============================================================================
+
+export const commentMentions = pgTable('comment_mentions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  repositoryId: uuid('repository_id').references(() => repositories.id, { onDelete: 'cascade' }),
+  repository: varchar('repository', { length: 255 }).notNull(),
+  // Source of the mention
+  sourceType: varchar('source_type', { length: 50 }).notNull(), // issue_comment, pr_comment, pr_review
+  sourceId: bigint('source_id', { mode: 'number' }).notNull(), // GitHub comment ID
+  issueOrPrNumber: bigint('issue_or_pr_number', { mode: 'number' }).notNull(),
+  // Comment details
+  commentBody: text('comment_body').notNull(),
+  commentUrl: varchar('comment_url', { length: 512 }),
+  authorLogin: varchar('author_login', { length: 255 }).notNull(),
+  authorId: bigint('author_id', { mode: 'number' }),
+  // Mention details
+  mentionedAgent: varchar('mentioned_agent', { length: 255 }).notNull(), // e.g., "agent-relay", "ci-fix", "lead"
+  mentionContext: text('mention_context'), // Text surrounding the mention
+  // Response tracking
+  agentId: varchar('agent_id', { length: 255 }),
+  agentName: varchar('agent_name', { length: 255 }),
+  status: varchar('status', { length: 50 }).notNull().default('pending'), // pending, processing, responded, ignored
+  responseCommentId: bigint('response_comment_id', { mode: 'number' }),
+  responseBody: text('response_body'),
+  respondedAt: timestamp('responded_at'),
+  // Metadata
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  repositoryIdx: index('idx_comment_mentions_repository').on(table.repository),
+  sourceIdx: index('idx_comment_mentions_source').on(table.sourceType, table.sourceId),
+  statusIdx: index('idx_comment_mentions_status').on(table.status),
+  mentionedAgentIdx: index('idx_comment_mentions_mentioned_agent').on(table.mentionedAgent),
+}));
+
+export const commentMentionsRelations = relations(commentMentions, ({ one }) => ({
+  repositoryRef: one(repositories, {
+    fields: [commentMentions.repositoryId],
+    references: [repositories.id],
+  }),
+}));
+
+// ============================================================================
+// Agent Webhook Configuration (per-repo settings for agent triggers)
+// ============================================================================
+
+export interface AgentTriggerConfig {
+  // Which agents can be mentioned
+  mentionableAgents?: string[]; // e.g., ["lead", "ci-fix", "reviewer"]
+  // Default agent for issue handling
+  defaultIssueAgent?: string;
+  // Labels that trigger agent assignment
+  autoAssignLabels?: Record<string, string>; // e.g., { "bug": "debugger", "enhancement": "developer" }
+  // Whether to auto-respond to mentions
+  autoRespondToMentions?: boolean;
+  // Rate limiting
+  maxResponsesPerHour?: number;
+  // Who can trigger agents
+  allowedTriggerUsers?: string[]; // Empty = everyone, list = only these users
+}
+
+// Type exports for issue/comment tables
+export type IssueAssignment = typeof issueAssignments.$inferSelect;
+export type NewIssueAssignment = typeof issueAssignments.$inferInsert;
+export type CommentMention = typeof commentMentions.$inferSelect;
+export type NewCommentMention = typeof commentMentions.$inferInsert;

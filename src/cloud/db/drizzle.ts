@@ -1324,6 +1324,216 @@ export const ciFixAttemptQueries: CIFixAttemptQueries = {
 };
 
 // ============================================================================
+// Issue Assignment Queries
+// ============================================================================
+
+export interface IssueAssignmentQueries {
+  findById(id: string): Promise<schema.IssueAssignment | null>;
+  findByRepository(repository: string, limit?: number): Promise<schema.IssueAssignment[]>;
+  findByIssue(repository: string, issueNumber: number): Promise<schema.IssueAssignment | null>;
+  findByAgent(agentId: string): Promise<schema.IssueAssignment[]>;
+  findPending(limit?: number): Promise<schema.IssueAssignment[]>;
+  create(data: schema.NewIssueAssignment): Promise<schema.IssueAssignment>;
+  assignAgent(id: string, agentId: string, agentName: string): Promise<void>;
+  updateStatus(id: string, status: string, resolution?: string): Promise<void>;
+  linkPR(id: string, prNumber: number): Promise<void>;
+}
+
+export const issueAssignmentQueries: IssueAssignmentQueries = {
+  async findById(id: string): Promise<schema.IssueAssignment | null> {
+    const db = getDb();
+    const result = await db.select().from(schema.issueAssignments).where(eq(schema.issueAssignments.id, id));
+    return result[0] ?? null;
+  },
+
+  async findByRepository(repository: string, limit = 50): Promise<schema.IssueAssignment[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.issueAssignments)
+      .where(eq(schema.issueAssignments.repository, repository))
+      .orderBy(desc(schema.issueAssignments.createdAt))
+      .limit(limit);
+  },
+
+  async findByIssue(repository: string, issueNumber: number): Promise<schema.IssueAssignment | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.issueAssignments)
+      .where(
+        and(
+          eq(schema.issueAssignments.repository, repository),
+          eq(schema.issueAssignments.issueNumber, issueNumber)
+        )
+      );
+    return result[0] ?? null;
+  },
+
+  async findByAgent(agentId: string): Promise<schema.IssueAssignment[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.issueAssignments)
+      .where(eq(schema.issueAssignments.agentId, agentId))
+      .orderBy(desc(schema.issueAssignments.createdAt));
+  },
+
+  async findPending(limit = 100): Promise<schema.IssueAssignment[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.issueAssignments)
+      .where(eq(schema.issueAssignments.status, 'pending'))
+      .orderBy(schema.issueAssignments.createdAt)
+      .limit(limit);
+  },
+
+  async create(data: schema.NewIssueAssignment): Promise<schema.IssueAssignment> {
+    const db = getDb();
+    const result = await db.insert(schema.issueAssignments).values(data).returning();
+    return result[0];
+  },
+
+  async assignAgent(id: string, agentId: string, agentName: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.issueAssignments)
+      .set({
+        agentId,
+        agentName,
+        assignedAt: new Date(),
+        status: 'assigned',
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.issueAssignments.id, id));
+  },
+
+  async updateStatus(id: string, status: string, resolution?: string): Promise<void> {
+    const db = getDb();
+    const updates: Record<string, unknown> = { status, updatedAt: new Date() };
+    if (resolution) {
+      updates.resolution = resolution;
+    }
+    await db
+      .update(schema.issueAssignments)
+      .set(updates)
+      .where(eq(schema.issueAssignments.id, id));
+  },
+
+  async linkPR(id: string, prNumber: number): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.issueAssignments)
+      .set({ linkedPrNumber: prNumber, updatedAt: new Date() })
+      .where(eq(schema.issueAssignments.id, id));
+  },
+};
+
+// ============================================================================
+// Comment Mention Queries
+// ============================================================================
+
+export interface CommentMentionQueries {
+  findById(id: string): Promise<schema.CommentMention | null>;
+  findByRepository(repository: string, limit?: number): Promise<schema.CommentMention[]>;
+  findBySource(sourceType: string, sourceId: number): Promise<schema.CommentMention | null>;
+  findPending(limit?: number): Promise<schema.CommentMention[]>;
+  findByMentionedAgent(mentionedAgent: string, limit?: number): Promise<schema.CommentMention[]>;
+  create(data: schema.NewCommentMention): Promise<schema.CommentMention>;
+  markProcessing(id: string, agentId: string, agentName: string): Promise<void>;
+  markResponded(id: string, responseCommentId: number, responseBody: string): Promise<void>;
+  markIgnored(id: string): Promise<void>;
+}
+
+export const commentMentionQueries: CommentMentionQueries = {
+  async findById(id: string): Promise<schema.CommentMention | null> {
+    const db = getDb();
+    const result = await db.select().from(schema.commentMentions).where(eq(schema.commentMentions.id, id));
+    return result[0] ?? null;
+  },
+
+  async findByRepository(repository: string, limit = 50): Promise<schema.CommentMention[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.commentMentions)
+      .where(eq(schema.commentMentions.repository, repository))
+      .orderBy(desc(schema.commentMentions.createdAt))
+      .limit(limit);
+  },
+
+  async findBySource(sourceType: string, sourceId: number): Promise<schema.CommentMention | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.commentMentions)
+      .where(
+        and(
+          eq(schema.commentMentions.sourceType, sourceType),
+          eq(schema.commentMentions.sourceId, sourceId)
+        )
+      );
+    return result[0] ?? null;
+  },
+
+  async findPending(limit = 100): Promise<schema.CommentMention[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.commentMentions)
+      .where(eq(schema.commentMentions.status, 'pending'))
+      .orderBy(schema.commentMentions.createdAt)
+      .limit(limit);
+  },
+
+  async findByMentionedAgent(mentionedAgent: string, limit = 50): Promise<schema.CommentMention[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.commentMentions)
+      .where(eq(schema.commentMentions.mentionedAgent, mentionedAgent))
+      .orderBy(desc(schema.commentMentions.createdAt))
+      .limit(limit);
+  },
+
+  async create(data: schema.NewCommentMention): Promise<schema.CommentMention> {
+    const db = getDb();
+    const result = await db.insert(schema.commentMentions).values(data).returning();
+    return result[0];
+  },
+
+  async markProcessing(id: string, agentId: string, agentName: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.commentMentions)
+      .set({ status: 'processing', agentId, agentName })
+      .where(eq(schema.commentMentions.id, id));
+  },
+
+  async markResponded(id: string, responseCommentId: number, responseBody: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.commentMentions)
+      .set({
+        status: 'responded',
+        responseCommentId,
+        responseBody,
+        respondedAt: new Date(),
+      })
+      .where(eq(schema.commentMentions.id, id));
+  },
+
+  async markIgnored(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.commentMentions)
+      .set({ status: 'ignored' })
+      .where(eq(schema.commentMentions.id, id));
+  },
+};
+
+// ============================================================================
 // Migration helper
 // ============================================================================
 

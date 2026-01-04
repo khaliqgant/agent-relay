@@ -683,6 +683,112 @@ alerts:
     message: "Agents failing to fix CI issues"
 ```
 
+## Issue and Comment Handling
+
+In addition to CI failures, agents can respond to GitHub issues and @mentions in comments.
+
+### Supported Events
+
+| Event | Purpose |
+|-------|---------|
+| `issues` | Track new issues for agent assignment |
+| `issue_comment` | Detect @mentions in issue/PR comments |
+| `pull_request_review_comment` | Detect @mentions in PR review comments |
+
+### @Mention Detection
+
+When a comment contains `@agent-name`, the system:
+
+1. Extracts all @mentions from the comment text
+2. Checks if the mentioned name is a known agent type
+3. Creates a mention record in the database
+4. Routes to the appropriate agent for response
+
+**Known Agent Types:**
+- `@agent-relay` - General purpose agent
+- `@lead` - Lead agent for coordination
+- `@developer` - Developer agent for coding tasks
+- `@reviewer` - Code review agent
+- `@ci-fix` - CI failure fixing agent
+- `@debugger` - Bug investigation agent
+- `@docs` - Documentation agent
+- `@test` - Test writing agent
+- `@refactor` - Code refactoring agent
+
+### Issue Assignment
+
+When a new issue is opened:
+
+1. Record the issue in `issue_assignments` table
+2. Extract priority from labels (p0-p3, critical/high/medium/low)
+3. Optionally auto-assign based on label mapping
+4. Agent receives issue context and works on a fix
+
+### Configuration
+
+Configure agent triggers per repository:
+
+```json
+{
+  "agentTriggers": {
+    "mentionableAgents": ["lead", "ci-fix", "reviewer"],
+    "defaultIssueAgent": "developer",
+    "autoAssignLabels": {
+      "bug": "debugger",
+      "enhancement": "developer",
+      "documentation": "docs"
+    },
+    "autoRespondToMentions": true,
+    "maxResponsesPerHour": 20,
+    "allowedTriggerUsers": []
+  }
+}
+```
+
+### Database Schema
+
+```sql
+-- Issue assignments
+CREATE TABLE issue_assignments (
+  id UUID PRIMARY KEY,
+  repository TEXT NOT NULL,
+  issue_number BIGINT NOT NULL,
+  issue_title TEXT NOT NULL,
+  issue_body TEXT,
+  agent_id TEXT,
+  agent_name TEXT,
+  status TEXT DEFAULT 'pending',
+  resolution TEXT,
+  linked_pr_number BIGINT,
+  labels TEXT[],
+  priority TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(repository, issue_number)
+);
+
+-- Comment mentions
+CREATE TABLE comment_mentions (
+  id UUID PRIMARY KEY,
+  repository TEXT NOT NULL,
+  source_type TEXT NOT NULL, -- issue_comment, pr_comment, pr_review
+  source_id BIGINT NOT NULL,
+  issue_or_pr_number BIGINT NOT NULL,
+  comment_body TEXT NOT NULL,
+  author_login TEXT NOT NULL,
+  mentioned_agent TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  response_comment_id BIGINT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Security
+
+- Rate limit @mentions to prevent abuse
+- Optionally restrict which users can trigger agents
+- Agents cannot respond to their own comments (prevent loops)
+- Bot accounts are ignored by default
+
 ## Future Enhancements
 
 1. **Learning from Fixes**: Track successful fixes to build patterns for common errors
@@ -694,6 +800,10 @@ alerts:
 4. **Cross-repo Learning**: Apply fix patterns learned in one repo to others
 
 5. **Escalation Paths**: Auto-escalate to humans if agent can't fix after N attempts
+
+6. **Slack/Discord Integration**: Notify team channels about agent activity
+
+7. **PR Review Automation**: Auto-request reviews from appropriate agents
 
 ## References
 
