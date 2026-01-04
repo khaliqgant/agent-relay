@@ -66,12 +66,8 @@ export const CLI_AUTH_CONFIG: Record<string, CLIAuthConfig> = {
     displayName: 'Claude',
     waitTimeout: 5000,
     prompts: [
-      {
-        pattern: /dark\s*(mode|theme)/i,
-        response: '\r', // Press enter to accept default
-        delay: 100,
-        description: 'Dark mode prompt',
-      },
+      // Note: Dark mode prompt is pre-seeded in Dockerfile.real to avoid interactive setup
+      // If running without pre-seeding, add: { pattern: /dark\s*(mode|theme)/i, response: '\r', description: 'Dark mode prompt' }
       {
         pattern: /(subscription|api\s*key|how\s*would\s*you\s*like\s*to\s*authenticate)/i,
         response: '\r', // Press enter for first option (subscription)
