@@ -6,6 +6,12 @@ log() {
   echo "[workspace] $*"
 }
 
+# Drop to workspace user if running as root
+if [[ "$(id -u)" == "0" ]]; then
+  log "Dropping privileges to workspace user..."
+  exec gosu workspace "$0" "$@"
+fi
+
 PORT="${AGENT_RELAY_DASHBOARD_PORT:-${PORT:-3888}}"
 export AGENT_RELAY_DASHBOARD_PORT="${PORT}"
 export PORT="${PORT}"
@@ -127,30 +133,37 @@ fi
 # Create credential files that CLIs expect from ENV vars passed by provisioner
 # ============================================================================
 
-# Claude CLI expects ~/.claude/credentials.json
+# Claude CLI expects ~/.claude/.credentials.json (note the dot prefix on filename)
+# Format: { claudeAiOauth: { accessToken: "...", refreshToken: "...", expiresAt: ... } }
 if [[ -n "${ANTHROPIC_TOKEN:-}" ]]; then
   log "Configuring Claude credentials..."
   mkdir -p "${HOME}/.claude"
-  cat > "${HOME}/.claude/credentials.json" <<EOF
+  cat > "${HOME}/.claude/.credentials.json" <<EOF
 {
-  "oauth_token": "${ANTHROPIC_TOKEN}",
-  "expires_at": null
+  "claudeAiOauth": {
+    "accessToken": "${ANTHROPIC_TOKEN}",
+    "refreshToken": "${ANTHROPIC_REFRESH_TOKEN:-}",
+    "expiresAt": ${ANTHROPIC_TOKEN_EXPIRES_AT:-null}
+  }
 }
 EOF
-  chmod 600 "${HOME}/.claude/credentials.json"
+  chmod 600 "${HOME}/.claude/.credentials.json"
 fi
 
-# Codex CLI expects ~/.codex/credentials.json
+# Codex CLI expects ~/.codex/auth.json
+# Format: { tokens: { access_token: "...", refresh_token: "...", ... } }
 if [[ -n "${OPENAI_TOKEN:-}" ]]; then
   log "Configuring Codex credentials..."
   mkdir -p "${HOME}/.codex"
-  cat > "${HOME}/.codex/credentials.json" <<EOF
+  cat > "${HOME}/.codex/auth.json" <<EOF
 {
-  "token": "${OPENAI_TOKEN}",
-  "expires_at": null
+  "tokens": {
+    "access_token": "${OPENAI_TOKEN}",
+    "refresh_token": "${OPENAI_REFRESH_TOKEN:-}"
+  }
 }
 EOF
-  chmod 600 "${HOME}/.codex/credentials.json"
+  chmod 600 "${HOME}/.codex/auth.json"
 fi
 
 # Google/Gemini - uses application default credentials

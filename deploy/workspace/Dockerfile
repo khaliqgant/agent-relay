@@ -31,6 +31,7 @@ WORKDIR /app
 
 # Install system dependencies for AI CLIs and git
 # Note: tmux not needed - daemon uses node-pty directly
+# gosu is used to drop privileges from root to workspace user
 RUN apt-get update && apt-get install -y \
     bash \
     ca-certificates \
@@ -38,6 +39,7 @@ RUN apt-get update && apt-get install -y \
     git \
     python3 \
     jq \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI (gh)
@@ -62,11 +64,12 @@ RUN npm install -g @google/gemini-cli
 RUN npm install -g opencode-ai@latest
 
 # Create workspace directory
-RUN mkdir -p /workspace/repos /data
+RUN mkdir -p /workspace /data
 
 # Create non-root user
-RUN useradd -m -u 1001 workspace
-RUN chown -R workspace:workspace /app /workspace /data
+RUN useradd -m -u 1001 -s /bin/bash workspace \
+    && chown -R workspace:workspace /app /workspace /data
+
 USER workspace
 
 # Install AI CLIs as workspace user (they install to ~/.local/bin)
