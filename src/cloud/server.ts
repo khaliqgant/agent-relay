@@ -41,6 +41,7 @@ import { testHelpersRouter } from './api/test-helpers.js';
 import { webhooksRouter } from './api/webhooks.js';
 import { githubAppRouter } from './api/github-app.js';
 import { nangoAuthRouter } from './api/nango-auth.js';
+import { gitRouter } from './api/git.js';
 
 export interface CloudServer {
   app: Express;
@@ -217,6 +218,7 @@ export async function createServer(): Promise<CloudServer> {
   app.use('/api/webhooks', webhooksRouter);
   app.use('/api/github-app', githubAppRouter);
   app.use('/api/auth/nango', nangoAuthRouter);
+  app.use('/api/git', gitRouter);
 
   // Test helper routes (only available in non-production)
   if (process.env.NODE_ENV !== 'production') {

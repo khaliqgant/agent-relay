@@ -167,6 +167,8 @@ class FlyProvisioner implements ComputeProvisioner {
   private org: string;
   private region: string;
   private workspaceDomain?: string;
+  private cloudApiUrl: string;
+  private sessionSecret: string;
 
   constructor() {
     const config = getConfig();
@@ -177,6 +179,20 @@ class FlyProvisioner implements ComputeProvisioner {
     this.org = config.compute.fly.org;
     this.region = config.compute.fly.region || 'sjc';
     this.workspaceDomain = config.compute.fly.workspaceDomain;
+    this.cloudApiUrl = config.publicUrl;
+    this.sessionSecret = config.sessionSecret;
+  }
+
+  /**
+   * Generate a workspace token for API authentication
+   * This is a simple HMAC - in production, consider using JWTs
+   */
+  private generateWorkspaceToken(workspaceId: string): string {
+    const crypto = require('crypto');
+    return crypto
+      .createHmac('sha256', this.sessionSecret)
+      .update(`workspace:${workspaceId}`)
+      .digest('hex');
   }
 
   async provision(
@@ -243,6 +259,9 @@ class FlyProvisioner implements ComputeProvisioner {
               PROVIDERS: (workspace.config.providers ?? []).join(','),
               PORT: String(WORKSPACE_PORT),
               AGENT_RELAY_DASHBOARD_PORT: String(WORKSPACE_PORT),
+              // Git gateway configuration
+              CLOUD_API_URL: this.cloudApiUrl,
+              WORKSPACE_TOKEN: this.generateWorkspaceToken(workspace.id),
             },
             services: [
               {
@@ -482,6 +501,8 @@ class FlyProvisioner implements ComputeProvisioner {
  */
 class RailwayProvisioner implements ComputeProvisioner {
   private apiToken: string;
+  private cloudApiUrl: string;
+  private sessionSecret: string;
 
   constructor() {
     const config = getConfig();
@@ -489,6 +510,16 @@ class RailwayProvisioner implements ComputeProvisioner {
       throw new Error('Railway configuration missing');
     }
     this.apiToken = config.compute.railway.apiToken;
+    this.cloudApiUrl = config.publicUrl;
+    this.sessionSecret = config.sessionSecret;
+  }
+
+  private generateWorkspaceToken(workspaceId: string): string {
+    const crypto = require('crypto');
+    return crypto
+      .createHmac('sha256', this.sessionSecret)
+      .update(`workspace:${workspaceId}`)
+      .digest('hex');
   }
 
   async provision(
@@ -561,6 +592,8 @@ class RailwayProvisioner implements ComputeProvisioner {
       PROVIDERS: (workspace.config.providers ?? []).join(','),
       PORT: String(WORKSPACE_PORT),
       AGENT_RELAY_DASHBOARD_PORT: String(WORKSPACE_PORT),
+      CLOUD_API_URL: this.cloudApiUrl,
+      WORKSPACE_TOKEN: this.generateWorkspaceToken(workspace.id),
     };
 
     for (const [provider, token] of credentials) {
@@ -727,6 +760,23 @@ class RailwayProvisioner implements ComputeProvisioner {
  * Local Docker provisioner (for development/self-hosted)
  */
 class DockerProvisioner implements ComputeProvisioner {
+  private cloudApiUrl: string;
+  private sessionSecret: string;
+
+  constructor() {
+    const config = getConfig();
+    this.cloudApiUrl = config.publicUrl;
+    this.sessionSecret = config.sessionSecret;
+  }
+
+  private generateWorkspaceToken(workspaceId: string): string {
+    const crypto = require('crypto');
+    return crypto
+      .createHmac('sha256', this.sessionSecret)
+      .update(`workspace:${workspaceId}`)
+      .digest('hex');
+  }
+
   async provision(
     workspace: Workspace,
     credentials: Map<string, string>
@@ -742,6 +792,8 @@ class DockerProvisioner implements ComputeProvisioner {
       `-e PROVIDERS=${(workspace.config.providers ?? []).join(',')}`,
       `-e PORT=${WORKSPACE_PORT}`,
       `-e AGENT_RELAY_DASHBOARD_PORT=${WORKSPACE_PORT}`,
+      `-e CLOUD_API_URL=${this.cloudApiUrl}`,
+      `-e WORKSPACE_TOKEN=${this.generateWorkspaceToken(workspace.id)}`,
     ];
 
     for (const [provider, token] of credentials) {
