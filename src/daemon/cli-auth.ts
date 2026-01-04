@@ -10,132 +10,21 @@ import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { createLogger } from '../resiliency/logger.js';
+import {
+  CLI_AUTH_CONFIG,
+  stripAnsiCodes,
+  matchesSuccessPattern,
+  findMatchingPrompt,
+  getSupportedProviders,
+  type CLIAuthConfig,
+  type PromptHandler,
+} from '../shared/cli-auth-config.js';
 
 const logger = createLogger('cli-auth');
 
-/**
- * CLI auth configuration for each provider
- */
-interface CLIAuthConfig {
-  command: string;
-  args: string[];
-  urlPattern: RegExp;
-  credentialPath?: string;
-  displayName: string;
-  prompts: PromptHandler[];
-  successPatterns: RegExp[];
-  waitTimeout: number;
-}
-
-interface PromptHandler {
-  pattern: RegExp;
-  response: string;
-  delay?: number;
-  description: string;
-}
-
-const CLI_AUTH_CONFIG: Record<string, CLIAuthConfig> = {
-  anthropic: {
-    command: 'claude',
-    args: [],
-    urlPattern: /(https:\/\/[^\s]+)/,
-    credentialPath: '~/.claude/credentials.json',
-    displayName: 'Claude',
-    waitTimeout: 30000,
-    prompts: [
-      {
-        pattern: /dark\s*(mode|theme)/i,
-        response: '\r',
-        delay: 100,
-        description: 'Dark mode prompt',
-      },
-      {
-        pattern: /(subscription|api\s*key|how\s*would\s*you\s*like\s*to\s*authenticate)/i,
-        response: '\r',
-        delay: 100,
-        description: 'Auth method prompt',
-      },
-      {
-        pattern: /trust\s*(this|the)\s*(directory|folder|workspace)/i,
-        response: 'y\r',
-        delay: 100,
-        description: 'Trust directory prompt',
-      },
-    ],
-    successPatterns: [/success/i, /authenticated/i, /logged\s*in/i],
-  },
-  openai: {
-    command: 'codex',
-    args: ['login'],
-    urlPattern: /(https:\/\/[^\s]+)/,
-    credentialPath: '~/.codex/credentials.json',
-    displayName: 'Codex',
-    waitTimeout: 30000,
-    prompts: [
-      {
-        pattern: /trust\s*(this|the)\s*(directory|folder|workspace)/i,
-        response: 'y\r',
-        delay: 100,
-        description: 'Trust directory prompt',
-      },
-    ],
-    successPatterns: [/success/i, /authenticated/i, /logged\s*in/i],
-  },
-  google: {
-    command: 'gemini',
-    args: [],
-    urlPattern: /(https:\/\/[^\s]+)/,
-    displayName: 'Gemini',
-    waitTimeout: 30000,
-    prompts: [
-      {
-        pattern: /login\s*with\s*google|google\s*account|choose.*auth/i,
-        response: '\r',
-        delay: 200,
-        description: 'Auth method selection',
-      },
-    ],
-    successPatterns: [/success/i, /authenticated/i, /logged\s*in/i],
-  },
-  opencode: {
-    command: 'opencode',
-    args: ['auth', 'login'],
-    urlPattern: /(https:\/\/[^\s]+)/,
-    displayName: 'OpenCode',
-    waitTimeout: 30000,
-    prompts: [
-      {
-        pattern: /select.*provider|choose.*provider|which.*provider/i,
-        response: '\r',
-        delay: 200,
-        description: 'Provider selection',
-      },
-      {
-        pattern: /claude\s*pro|anthropic|select.*auth/i,
-        response: '\r',
-        delay: 200,
-        description: 'Auth type selection',
-      },
-    ],
-    successPatterns: [/success/i, /authenticated/i, /logged\s*in/i],
-  },
-  droid: {
-    command: 'droid',
-    args: ['--login'],
-    urlPattern: /(https:\/\/[^\s]+)/,
-    displayName: 'Droid',
-    waitTimeout: 30000,
-    prompts: [
-      {
-        pattern: /sign\s*in|log\s*in|authenticate/i,
-        response: '\r',
-        delay: 200,
-        description: 'Login prompt',
-      },
-    ],
-    successPatterns: [/success/i, /authenticated/i, /logged\s*in/i],
-  },
-};
+// Re-export for consumers
+export { CLI_AUTH_CONFIG, getSupportedProviders };
+export type { CLIAuthConfig, PromptHandler };
 
 /**
  * Auth session state
@@ -146,6 +35,8 @@ interface AuthSession {
   status: 'starting' | 'waiting_auth' | 'success' | 'error';
   authUrl?: string;
   token?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: Date;
   error?: string;
   output: string;
   promptsHandled: string[];
@@ -173,44 +64,18 @@ setInterval(() => {
   }
 }, 60000);
 
-/**
- * Strip ANSI escape codes from text
- */
-function stripAnsiCodes(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-}
-
-/**
- * Check if text matches any success pattern
- */
-function matchesSuccessPattern(text: string, patterns: RegExp[]): boolean {
-  const cleanText = stripAnsiCodes(text).toLowerCase();
-  return patterns.some((p) => p.test(cleanText));
-}
-
-/**
- * Find matching prompt handler
- */
-function findMatchingPrompt(
-  text: string,
-  prompts: PromptHandler[],
-  respondedPrompts: Set<string>
-): PromptHandler | null {
-  const cleanText = stripAnsiCodes(text);
-  for (const prompt of prompts) {
-    if (respondedPrompts.has(prompt.description)) continue;
-    if (prompt.pattern.test(cleanText)) {
-      return prompt;
-    }
-  }
-  return null;
+export interface StartCLIAuthOptions {
+  /** Use device flow instead of standard OAuth (if provider supports it) */
+  useDeviceFlow?: boolean;
 }
 
 /**
  * Start CLI auth flow
  */
-export function startCLIAuth(provider: string): AuthSession {
+export async function startCLIAuth(
+  provider: string,
+  options: StartCLIAuthOptions = {}
+): Promise<AuthSession> {
   const config = CLI_AUTH_CONFIG[provider];
   if (!config) {
     throw new Error(`Unknown provider: ${provider}`);
@@ -227,10 +92,22 @@ export function startCLIAuth(provider: string): AuthSession {
   };
   sessions.set(sessionId, session);
 
+  // Use device flow args if requested and supported
+  const args = options.useDeviceFlow && config.deviceFlowArgs
+    ? config.deviceFlowArgs
+    : config.args;
+
+  logger.info('Starting CLI auth', {
+    provider,
+    sessionId,
+    useDeviceFlow: options.useDeviceFlow,
+    args,
+  });
+
   const respondedPrompts = new Set<string>();
 
   try {
-    const proc = pty.spawn(config.command, config.args, {
+    const proc = pty.spawn(config.command, args, {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
@@ -246,14 +123,17 @@ export function startCLIAuth(provider: string): AuthSession {
 
     session.process = proc;
 
-    // Timeout handler
+    // Timeout handler - give user plenty of time to complete OAuth flow
+    // 5 minutes should be enough for even slow OAuth flows
+    const OAUTH_COMPLETION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
     const timeout = setTimeout(() => {
       if (session.status === 'starting' || session.status === 'waiting_auth') {
+        logger.warn('CLI auth timed out', { provider, sessionId, status: session.status });
         proc.kill();
         session.status = 'error';
-        session.error = 'Timeout waiting for auth completion';
+        session.error = 'Timeout waiting for auth completion (5 minutes). Please try again.';
       }
-    }, config.waitTimeout + 60000); // Extra time for user to complete OAuth
+    }, config.waitTimeout + OAUTH_COMPLETION_TIMEOUT);
 
     proc.onData((data: string) => {
       session.output += data;
@@ -284,9 +164,26 @@ export function startCLIAuth(provider: string): AuthSession {
         logger.info('Auth URL captured', { provider, url: session.authUrl });
       }
 
-      // Check for success
+      // Check for success and try to extract credentials
       if (matchesSuccessPattern(data, config.successPatterns)) {
         session.status = 'success';
+        logger.info('Success pattern detected, attempting credential extraction', { provider });
+
+        // Try to extract credentials immediately (CLI may not exit after success)
+        // Use a small delay to let the CLI finish writing the file
+        setTimeout(async () => {
+          try {
+            const creds = await extractCredentials(provider, config);
+            if (creds) {
+              session.token = creds.token;
+              session.refreshToken = creds.refreshToken;
+              session.tokenExpiresAt = creds.expiresAt;
+              logger.info('Credentials extracted successfully', { provider, hasRefreshToken: !!creds.refreshToken });
+            }
+          } catch (err) {
+            logger.error('Failed to extract credentials on success', { error: String(err) });
+          }
+        }, 500);
       }
     });
 
@@ -297,9 +194,11 @@ export function startCLIAuth(provider: string): AuthSession {
       // Try to extract credentials
       if (session.authUrl || exitCode === 0) {
         try {
-          const token = await extractCredentials(provider, config);
-          if (token) {
-            session.token = token;
+          const creds = await extractCredentials(provider, config);
+          if (creds) {
+            session.token = creds.token;
+            session.refreshToken = creds.refreshToken;
+            session.tokenExpiresAt = creds.expiresAt;
             session.status = 'success';
           }
         } catch (err) {
@@ -329,6 +228,93 @@ export function getAuthSession(sessionId: string): AuthSession | null {
 }
 
 /**
+ * Submit auth code to a waiting session
+ * This writes the code to the PTY process stdin
+ *
+ * @returns Object with success status and optional error message
+ */
+export function submitAuthCode(
+  sessionId: string,
+  code: string
+): { success: boolean; error?: string } {
+  const session = sessions.get(sessionId);
+  if (!session) {
+    logger.warn('Auth code submission failed: session not found', { sessionId });
+    return { success: false, error: 'Session not found or expired' };
+  }
+
+  if (!session.process) {
+    logger.warn('Auth code submission failed: no PTY process', {
+      sessionId,
+      sessionStatus: session.status,
+    });
+    return {
+      success: false,
+      error: 'CLI process not running. The auth session may have timed out.',
+    };
+  }
+
+  try {
+    // Write the auth code followed by enter
+    session.process.write(code + '\r');
+    logger.info('Auth code submitted', { sessionId, codeLength: code.length });
+
+    // Start polling for credentials after code submission
+    // The CLI should write credentials shortly after receiving the code
+    const config = CLI_AUTH_CONFIG[session.provider];
+    if (config) {
+      pollForCredentials(session, config);
+    }
+
+    return { success: true };
+  } catch (err) {
+    logger.error('Failed to submit auth code', { sessionId, error: String(err) });
+    return { success: false, error: 'Failed to write to CLI process' };
+  }
+}
+
+/**
+ * Poll for credentials file after auth code submission
+ * Some CLIs don't output success patterns, so we check the file directly
+ */
+async function pollForCredentials(session: AuthSession, config: CLIAuthConfig): Promise<void> {
+  const maxAttempts = 10;
+  const pollInterval = 1000; // 1 second
+
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    // Skip if session already has credentials or errored
+    if (session.token || session.status === 'error') {
+      return;
+    }
+
+    try {
+      const creds = await extractCredentials(session.provider, config);
+      if (creds) {
+        session.token = creds.token;
+        session.refreshToken = creds.refreshToken;
+        session.tokenExpiresAt = creds.expiresAt;
+        session.status = 'success';
+        logger.info('Credentials found via polling', {
+          provider: session.provider,
+          attempt: i + 1,
+          hasRefreshToken: !!creds.refreshToken,
+        });
+        return;
+      }
+    } catch {
+      // File doesn't exist yet, continue polling
+    }
+  }
+
+  logger.warn('Credential polling completed without finding credentials', {
+    provider: session.provider,
+    sessionId: session.id,
+  });
+}
+
+/**
  * Cancel auth session
  */
 export function cancelAuthSession(sessionId: string): boolean {
@@ -347,13 +333,19 @@ export function cancelAuthSession(sessionId: string): boolean {
   return true;
 }
 
+interface ExtractedCredentials {
+  token: string;
+  refreshToken?: string;
+  expiresAt?: Date;
+}
+
 /**
  * Extract credentials from CLI credential file
  */
 async function extractCredentials(
   provider: string,
   config: CLIAuthConfig
-): Promise<string | null> {
+): Promise<ExtractedCredentials | null> {
   if (!config.credentialPath) return null;
 
   try {
@@ -363,23 +355,34 @@ async function extractCredentials(
 
     // Extract token based on provider
     if (provider === 'anthropic') {
-      return creds.oauth_token || creds.access_token || creds.api_key;
+      // Claude stores OAuth in: { claudeAiOauth: { accessToken: "...", refreshToken: "...", expiresAt: ... } }
+      if (creds.claudeAiOauth?.accessToken) {
+        return {
+          token: creds.claudeAiOauth.accessToken,
+          refreshToken: creds.claudeAiOauth.refreshToken,
+          expiresAt: creds.claudeAiOauth.expiresAt ? new Date(creds.claudeAiOauth.expiresAt) : undefined,
+        };
+      }
+      // Fallback to legacy formats
+      const token = creds.oauth_token || creds.access_token || creds.api_key;
+      return token ? { token } : null;
     } else if (provider === 'openai') {
-      return creds.token || creds.access_token || creds.api_key;
+      // Codex stores OAuth in: { tokens: { access_token: "...", refresh_token: "...", ... } }
+      if (creds.tokens?.access_token) {
+        return {
+          token: creds.tokens.access_token,
+          refreshToken: creds.tokens.refresh_token,
+        };
+      }
+      // Fallback: API key or legacy formats
+      const token = creds.OPENAI_API_KEY || creds.token || creds.access_token || creds.api_key;
+      return token ? { token } : null;
     }
 
-    return creds.token || creds.access_token || creds.api_key || null;
+    const token = creds.token || creds.access_token || creds.api_key;
+    return token ? { token } : null;
   } catch {
     return null;
   }
 }
 
-/**
- * Get supported providers
- */
-export function getSupportedProviders(): { id: string; displayName: string }[] {
-  return Object.entries(CLI_AUTH_CONFIG).map(([id, config]) => ({
-    id,
-    displayName: config.displayName,
-  }));
-}
