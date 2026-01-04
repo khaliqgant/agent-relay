@@ -50,9 +50,8 @@ RUN curl -fsSL https://opencode.ai/install | bash || echo "OpenCode install fail
 # Droid - uses official install script
 RUN curl -fsSL https://app.factory.ai/cli | sh || echo "Droid install failed"
 
-# Gemini CLI - uses Google's install script
-RUN curl -fsSL https://gemini.google.com/cli/install.sh | bash || \
-    echo "Gemini install failed"
+# Gemini CLI - install via npm
+RUN npm install -g @google/gemini-cli || echo "Gemini install failed"
 
 # Add user's local bin to PATH
 ENV PATH="/home/testuser/.local/bin:$PATH"
