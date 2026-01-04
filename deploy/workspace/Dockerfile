@@ -72,9 +72,8 @@ USER workspace
 # Install AI CLIs as workspace user (they install to ~/.local/bin)
 # Claude
 RUN curl -fsSL https://claude.ai/install.sh | bash
-# Pre-seed Claude config to skip interactive onboarding
-RUN mkdir -p /home/workspace/.claude && \
-    echo '{"theme":"dark","hasCompletedOnboarding":true}' > /home/workspace/.claude/settings.local.json
+# Note: We don't pre-seed Claude config - we want the full interactive auth flow
+# to run so the PTY runner can capture the auth URL
 # Note: Codex, Gemini, and OpenCode are installed as root above via npm
 # Droid
 RUN curl -fsSL https://app.factory.ai/cli | sh
