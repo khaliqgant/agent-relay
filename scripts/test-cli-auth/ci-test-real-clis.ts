@@ -20,13 +20,13 @@
 import { execSync } from 'child_process';
 import { writeFileSync } from 'fs';
 
-// Import the actual config and PTY runner from onboarding.ts
+// Import the actual config and PTY runner from cli-pty-runner.ts
 // This ensures tests use the EXACT SAME logic as production
 import {
   CLI_AUTH_CONFIG,
   runCLIAuthViaPTY,
   type PTYAuthResult,
-} from '../../src/cloud/api/onboarding.js';
+} from '../../src/cloud/api/cli-pty-runner.js';
 
 interface TestResult {
   provider: string;

@@ -56,9 +56,14 @@ RUN npm install -g @google/gemini-cli || echo "Gemini install failed"
 # Add user's local bin to PATH
 ENV PATH="/home/testuser/.local/bin:$PATH"
 
-# Copy test files
-COPY --chown=testuser:testuser ci-test-real-clis.ts /app/
-COPY --chown=testuser:testuser package.json /app/
+# Copy test files and source dependencies
+# Context is repo root, so paths are relative to that
+COPY --chown=testuser:testuser scripts/test-cli-auth/ci-test-real-clis.ts /app/
+COPY --chown=testuser:testuser scripts/test-cli-auth/package.json /app/
+
+# Copy the cli-pty-runner module that the test imports
+# Import path ../../src/cloud/api/cli-pty-runner.js from /app/ resolves to /src/cloud/api/
+COPY --chown=testuser:testuser src/cloud/api/cli-pty-runner.ts /src/cloud/api/
 
 # Install test dependencies
 RUN npm install

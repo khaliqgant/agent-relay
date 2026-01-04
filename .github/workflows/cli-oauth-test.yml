@@ -45,7 +45,7 @@ jobs:
       - name: Build test container with real CLIs
         run: |
           docker build -f scripts/test-cli-auth/Dockerfile.real \
-            -t cli-oauth-test-real scripts/test-cli-auth/
+            -t cli-oauth-test-real .
 
       - name: Run CLI OAuth tests against real CLIs
         id: test
