@@ -31,7 +31,8 @@ policyRouter.get('/:workspaceId', async (req: Request, res: Response) => {
 
     // Check user has access to this workspace
     if (workspace.userId !== userId) {
-      const member = await db.workspaceMembers.findByWorkspaceAndUser(workspaceId, userId);
+      const members = await db.workspaceMembers.findByWorkspaceId(workspaceId);
+      const member = members.find(m => m.userId === userId);
       if (!member) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -76,7 +77,8 @@ policyRouter.put('/:workspaceId', async (req: Request, res: Response) => {
 
     // Only owner can update policy
     if (workspace.userId !== userId) {
-      const member = await db.workspaceMembers.findByWorkspaceAndUser(workspaceId, userId);
+      const members = await db.workspaceMembers.findByWorkspaceId(workspaceId);
+      const member = members.find(m => m.userId === userId);
       if (!member || !['owner', 'admin'].includes(member.role)) {
         return res.status(403).json({ error: 'Only owners and admins can update policy' });
       }
@@ -94,7 +96,7 @@ policyRouter.put('/:workspaceId', async (req: Request, res: Response) => {
       agentPolicy: policy,
     };
 
-    await db.workspaces.update(workspaceId, { config: newConfig });
+    await db.workspaces.updateConfig(workspaceId, newConfig);
 
     res.json({
       success: true,
@@ -127,7 +129,8 @@ policyRouter.delete('/:workspaceId', async (req: Request, res: Response) => {
 
     // Only owner can reset policy
     if (workspace.userId !== userId) {
-      const member = await db.workspaceMembers.findByWorkspaceAndUser(workspaceId, userId);
+      const members = await db.workspaceMembers.findByWorkspaceId(workspaceId);
+      const member = members.find(m => m.userId === userId);
       if (!member || member.role !== 'owner') {
         return res.status(403).json({ error: 'Only owners can reset policy' });
       }
@@ -135,7 +138,7 @@ policyRouter.delete('/:workspaceId', async (req: Request, res: Response) => {
 
     // Remove policy from config
     const { agentPolicy, ...restConfig } = workspace.config ?? {};
-    await db.workspaces.update(workspaceId, { config: restConfig });
+    await db.workspaces.updateConfig(workspaceId, restConfig as any);
 
     res.json({
       success: true,

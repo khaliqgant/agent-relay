@@ -6,6 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { sleep } from './utils.js';
 import { getProjectPaths } from '../utils/project-namespace.js';
 import { resolveCommand } from '../utils/command-resolver.js';
@@ -64,6 +65,58 @@ export type OnAgentDeathCallback = (info: {
   agentId?: string;
   resumeInstructions?: string;
 }) => void;
+
+/**
+ * Load the relay communication snippet.
+ * This defines how agents communicate via relay patterns.
+ * Cached after first load.
+ */
+let relaySnippetCache: string | null = null;
+
+function loadRelaySnippet(): string {
+  if (relaySnippetCache !== null) {
+    return relaySnippetCache;
+  }
+
+  try {
+    // Resolve path relative to this file's location
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    // From src/bridge/ go up to package root, then into docs/
+    const snippetPath = path.resolve(__dirname, '../../docs/agent-relay-snippet.md');
+
+    if (fs.existsSync(snippetPath)) {
+      relaySnippetCache = fs.readFileSync(snippetPath, 'utf-8');
+      console.log('[spawner] Loaded relay communication snippet');
+    } else {
+      // Fallback: minimal relay instructions
+      relaySnippetCache = `# Agent Relay Communication
+
+You are connected to an agent relay system. Use these patterns to communicate:
+
+## Sending Messages
+\`\`\`
+->relay:AgentName <<<
+Your message here.>>>
+\`\`\`
+
+## Communication Protocol
+- **ACK immediately** when receiving a task
+- **Report completion** with DONE: summary
+
+## Common Patterns
+- \`->relay:Lead <<<ACK: Starting task>>>\`
+- \`->relay:Lead <<<DONE: Task complete>>>\`
+`;
+      console.log('[spawner] Using fallback relay snippet (docs/agent-relay-snippet.md not found)');
+    }
+  } catch (err: any) {
+    console.error('[spawner] Failed to load relay snippet:', err.message);
+    relaySnippetCache = '';
+  }
+
+  return relaySnippetCache;
+}
 
 export class AgentSpawner {
   private activeWorkers: Map<string, ActiveWorker> = new Map();
@@ -361,8 +414,16 @@ export class AgentSpawner {
         };
       }
 
-      // Build the full message: policy instructions (if any) + task
+      // Build the full message: relay snippet + policy instructions (if any) + task
       let fullMessage = task || '';
+
+      // Always prepend relay communication rules so agents know how to communicate
+      // This is essential because target repos may not have the snippet installed
+      const relaySnippet = loadRelaySnippet();
+      if (relaySnippet) {
+        fullMessage = `${relaySnippet}\n\n---\n\n${fullMessage}`;
+        if (debug) console.log(`[spawner:debug] Prepended relay communication rules for ${name}`);
+      }
 
       // Prepend policy instructions if enforcement is enabled
       if (this.policyEnforcementEnabled && this.policyService) {
