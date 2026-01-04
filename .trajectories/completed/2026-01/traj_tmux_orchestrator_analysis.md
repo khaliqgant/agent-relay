@@ -81,14 +81,20 @@ Comprehensive competitive analysis of Tmux-Orchestrator vs Agent Relay, identifi
 
 ## Beads Created
 
-| ID | Priority | Feature | Status |
-|----|----------|---------|--------|
-| bd-tmux-sched1 | P0 | Self-scheduling (`->relay:schedule`) | New feature needed |
-| bd-tmux-ctx1 | P1 | Structured spawn context | Enhancement (base works) |
-| bd-tmux-esc1 | P1 | Escalation rules | New feature needed |
-| bd-tmux-learn1 | P2 | Trajectory search | Enhancement (learnings exist) |
+**None** - Analysis validated our existing architecture covers their solutions.
 
-**Skipped:** Git commit tracking (bd-tmux-git1) - requires per-agent git worktrees
+### What They Built vs What We Have
+
+| Their Solution | Our Solution |
+|----------------|--------------|
+| Self-scheduling (wake up) | Real-time messaging (agents wake each other) |
+| Context notes for spawn | Continuity injection (ledger + handoff) |
+| Git commit tracking | N/A (needs worktrees) |
+| LEARNINGS.md | Trajectories with learnings field |
+| ~500ms timing delays | <5ms Unix socket |
+
+### Key Insight
+Tmux-Orchestrator pioneered autonomous agents with shell scripts. Our architecture (real-time messaging + continuity) is the next evolution - we've already solved their problems more elegantly.
 
 ---
 
@@ -97,7 +103,6 @@ Comprehensive competitive analysis of Tmux-Orchestrator vs Agent Relay, identifi
 - `docs/competitive/TMUX_ORCHESTRATOR.md` - New analysis (600+ lines)
 - `docs/competitive/README.md` - Added to table
 - `docs/competitive/OVERVIEW.md` - Added to comparison matrix
-- `.beads/beads.jsonl` - 4 new beads (git tracking skipped)
 
 ---
 
