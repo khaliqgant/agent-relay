@@ -31,12 +31,15 @@ WORKDIR /app
 # Install Codex globally as root (matches workspace Dockerfile)
 RUN npm install -g @openai/codex || echo "Codex install failed"
 
+# Install Gemini CLI globally as root (npm -g requires root)
+RUN npm install -g @google/gemini-cli || echo "Gemini install failed"
+
 # Create test user (CLIs install to ~/.local/bin)
 RUN useradd -m -u 1001 testuser
 RUN chown -R testuser:testuser /app
 USER testuser
 
-# Install AI CLIs as testuser (matches workspace Dockerfile installation methods)
+# Install AI CLIs as testuser (these install scripts write to ~/.local/bin)
 
 # Claude - uses official install script
 RUN curl -fsSL https://claude.ai/install.sh | bash || echo "Claude install failed"
@@ -44,14 +47,11 @@ RUN curl -fsSL https://claude.ai/install.sh | bash || echo "Claude install faile
 RUN mkdir -p /home/testuser/.claude && \
     echo '{"theme":"dark","hasCompletedOnboarding":true}' > /home/testuser/.claude/settings.local.json
 
-# OpenCode - uses official install script
+# OpenCode - uses official install script (installs to ~/.local/bin)
 RUN curl -fsSL https://opencode.ai/install | bash || echo "OpenCode install failed"
 
 # Droid - uses official install script
 RUN curl -fsSL https://app.factory.ai/cli | sh || echo "Droid install failed"
-
-# Gemini CLI - install via npm
-RUN npm install -g @google/gemini-cli || echo "Gemini install failed"
 
 # Add user's local bin to PATH
 ENV PATH="/home/testuser/.local/bin:$PATH"

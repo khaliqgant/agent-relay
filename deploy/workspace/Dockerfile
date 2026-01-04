@@ -59,6 +59,9 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/git-credential-relay
 # Install Codex globally as root (requires write to /usr/local)
 RUN npm install -g @openai/codex
 
+# Install Gemini CLI globally as root (npm -g requires root)
+RUN npm install -g @google/gemini-cli
+
 # Create workspace directory
 RUN mkdir -p /workspace/repos /data
 
@@ -77,8 +80,7 @@ RUN mkdir -p /home/workspace/.claude && \
 RUN curl -fsSL https://opencode.ai/install | bash
 # Droid
 RUN curl -fsSL https://app.factory.ai/cli | sh
-# Gemini
-RUN npm install -g @google/gemini-cli
+# Note: Gemini is installed as root above (npm -g requires root)
 
 # Environment
 ENV NODE_ENV=production
