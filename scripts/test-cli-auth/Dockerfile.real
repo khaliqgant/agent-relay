@@ -61,9 +61,8 @@ ENV PATH="/home/testuser/.local/bin:$PATH"
 COPY --chown=testuser:testuser scripts/test-cli-auth/ci-test-real-clis.ts /app/
 COPY --chown=testuser:testuser scripts/test-cli-auth/package.json /app/
 
-# Copy the cli-pty-runner module that the test imports
-# Import path ../../src/cloud/api/cli-pty-runner.js from /app/ resolves to /src/cloud/api/
-COPY --chown=testuser:testuser src/cloud/api/cli-pty-runner.ts /src/cloud/api/
+# Copy the cli-pty-runner module to /app/ so it can access node_modules
+COPY --chown=testuser:testuser src/cloud/api/cli-pty-runner.ts /app/
 
 # Install test dependencies
 RUN npm install

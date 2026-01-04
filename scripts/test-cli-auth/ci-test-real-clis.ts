@@ -22,11 +22,13 @@ import { writeFileSync } from 'fs';
 
 // Import the actual config and PTY runner from cli-pty-runner.ts
 // This ensures tests use the EXACT SAME logic as production
+// Note: In Docker container, both files are in /app/, so use relative import
+// For local dev, this path also works from scripts/test-cli-auth/
 import {
   CLI_AUTH_CONFIG,
   runCLIAuthViaPTY,
   type PTYAuthResult,
-} from '../../src/cloud/api/cli-pty-runner.js';
+} from './cli-pty-runner.js';
 
 interface TestResult {
   provider: string;
