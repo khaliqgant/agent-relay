@@ -137,14 +137,25 @@ onboardingRouter.post('/cli/:provider/start', async (req: Request, res: Response
 
     // Return session info based on current state
     if (session.status === 'success' && !session.authUrl) {
-      // Already authenticated - CLI exited successfully without auth URL
-      activeSessions.delete(sessionId);
-      res.json({
-        sessionId,
-        status: 'success',
-        alreadyAuthenticated: true,
-        message: `Already authenticated with ${config.displayName}`,
-      });
+      // CLI exited without auth URL - check if we have credentials
+      if (session.token) {
+        // Already authenticated - we found existing credentials
+        activeSessions.delete(sessionId);
+        res.json({
+          sessionId,
+          status: 'success',
+          alreadyAuthenticated: true,
+          message: `Already authenticated with ${config.displayName}`,
+        });
+      } else {
+        // No auth URL and no credentials - CLI didn't start auth flow properly
+        activeSessions.delete(sessionId);
+        console.error(`[onboarding] CLI exited without auth URL or credentials. Output:\n${session.output}`);
+        res.status(500).json({
+          error: 'CLI auth failed - no auth URL generated. Please try again or check CLI installation.',
+          debug: process.env.NODE_ENV === 'development' ? session.output.slice(-500) : undefined,
+        });
+      }
     } else if (session.authUrl) {
       res.json({
         sessionId,
