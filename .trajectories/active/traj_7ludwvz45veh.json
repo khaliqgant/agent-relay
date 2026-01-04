@@ -131,6 +131,30 @@
             "reasoning": "Claude uses OAuth in cloud environments. For users connecting accounts: 1) API key works (already supported), 2) CLI setup-token is interactive, 3) Need proper OAuth device flow from Anthropic. Recommend API key for now with improved UX."
           },
           "significance": "high"
+        },
+        {
+          "ts": 1767511753148,
+          "type": "decision",
+          "content": "Use node-pty for CLI OAuth flow: Use node-pty for CLI OAuth flow",
+          "raw": {
+            "question": "Use node-pty for CLI OAuth flow",
+            "chosen": "Use node-pty for CLI OAuth flow",
+            "alternatives": [],
+            "reasoning": "Regular spawn with pipes doesn't properly emulate TTY, causing CLIs to behave differently. PTY ensures auth URLs are output correctly and allows sending responses to interactive prompts."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1767511764090,
+          "type": "decision",
+          "content": "Auto-respond to Claude interactive setup prompts: Auto-respond to Claude interactive setup prompts",
+          "raw": {
+            "question": "Auto-respond to Claude interactive setup prompts",
+            "chosen": "Auto-respond to Claude interactive setup prompts",
+            "alternatives": [],
+            "reasoning": "Claude has multi-step setup: dark mode -> auth method -> login URL. We detect prompts and send enter key to progress through them automatically."
+          },
+          "significance": "high"
         }
       ]
     }
