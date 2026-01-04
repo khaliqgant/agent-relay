@@ -20,6 +20,110 @@ Happy Coder is an open-source mobile app for controlling Claude Code and Codex r
 
 ---
 
+## How They Wrap Claude/Codex (CLI Architecture)
+
+Happy CLI (`happy-cli` repo) is a **separate package** from the mobile app. It's the critical piece that enables mobile control.
+
+### Three-Part System
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   happy-cli     │────▶│  happy-server   │◀────│  happy-coder    │
+│   (Terminal)    │     │  (Relay)        │     │  (Mobile App)   │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       ▲                       │
+        ▼                       │                       ▼
+┌─────────────────┐             │               ┌─────────────────┐
+│  Claude/Codex   │             │               │   iOS/Android   │
+│  (child proc)   │─────────────┘               │   React Native  │
+└─────────────────┘                             └─────────────────┘
+```
+
+### CLI Wrapper Implementation
+
+**Entry Points:**
+- `bin/happy.mjs` - Main CLI binary
+- `bin/happy-mcp.mjs` - MCP server for permissions
+
+**Core Architecture (from `src/claude/`):**
+
+```typescript
+// loop.ts - Main control loop (state machine)
+async function loop(config: Config) {
+  const session = new Session(config);
+
+  while (true) {
+    if (mode === 'local') {
+      const reason = await claudeLocalLauncher(session);
+      if (reason === 'exit') break;
+      mode = 'remote';  // Switch to mobile control
+    } else {
+      const reason = await claudeRemoteLauncher(session);
+      if (reason === 'exit') break;
+      mode = 'local';   // Switch back to desktop
+    }
+    onModeChange?.();
+  }
+}
+```
+
+**Mode Switching:**
+- **Local Mode**: Full terminal control via PTY
+- **Remote Mode**: Mobile has control, desktop shows read-only view
+- **Trigger**: Any keypress on desktop returns to local mode
+
+**Process Spawning (`claudeLocal.ts`):**
+```typescript
+// Spawn Claude as child process with custom hooks
+const child = spawn('node', [claudeLauncherScript], {
+  env: {
+    ...process.env,
+    CLAUDE_MCP_SERVERS: JSON.stringify(mcpConfig),
+    CLAUDE_SYSTEM_PROMPT: systemPrompt,
+  },
+  stdio: ['inherit', 'inherit', 'inherit', 'pipe'], // fd 3 for messages
+});
+```
+
+**Permission Interception (`permissionHandler.ts` - 15KB):**
+- Intercepts Claude's MCP tool calls
+- Forwards permission requests to mobile via WebSocket
+- Returns approval/denial from mobile user
+- Handles timeouts with configurable defaults
+
+**Session Sync (`runClaude.ts`):**
+```typescript
+// Real-time sync to mobile
+const messageQueue = new MessageQueue2();
+messageQueue.on('message', async (msg) => {
+  await apiSession.send(encrypt(msg));
+});
+
+// Handle incoming from mobile
+apiSession.on('message', async (msg) => {
+  const decrypted = decrypt(msg);
+  messageQueue.enqueue(decrypted);
+});
+```
+
+**Key Dependencies:**
+- `@anthropic-ai/claude-code` - Claude SDK (optional, for deep integration)
+- `@modelcontextprotocol/sdk` - MCP for permission interception
+- `socket.io-client` - WebSocket communication
+- `tweetnacl` - E2E encryption
+- `ink` - Terminal UI (React-based)
+- `qrcode-terminal` - QR code for mobile pairing
+
+### What We Can Learn
+
+1. **Separate CLI Package** - The wrapper is its own npm package, not bundled in mobile app
+2. **PTY for Terminal** - Uses pseudo-terminal for full terminal emulation
+3. **State Machine** - Clean local ↔ remote mode switching
+4. **MCP Integration** - Hooks into Claude's permission system via MCP
+5. **Message Queue** - Robust queuing for sync reliability
+6. **Ink for CLI UI** - React-based terminal rendering
+
+---
+
 ## Technical Architecture
 
 ### Client (happy-coder)
