@@ -3,9 +3,16 @@
  *
  * Handles @mentions of agents in GitHub issues and PR comments.
  * Routes mentions to appropriate agents for response.
+ *
+ * Flow:
+ * 1. App posts acknowledgment comment
+ * 2. Finds a linked daemon for the repository
+ * 3. Queues spawn command for the daemon
+ * 4. Agent works and posts response comment
  */
 
-import { db, CommentMention, IssueAssignment } from '../db/index.js';
+import { db, CommentMention, IssueAssignment, Repository } from '../db/index.js';
+import { nangoService } from './nango.js';
 
 /**
  * Known agent types that can be mentioned
@@ -35,12 +42,117 @@ export function isKnownAgent(mention: string): mention is KnownAgentType {
 }
 
 /**
+ * Get the GitHub App name for comments
+ */
+function getAppName(): string {
+  return process.env.GITHUB_APP_NAME || 'Agent Relay';
+}
+
+/**
+ * Post an acknowledgment comment on GitHub
+ */
+async function postAcknowledgmentComment(
+  repository: Repository,
+  issueNumber: number,
+  mentionedAgent: string,
+  authorLogin: string
+): Promise<{ id: number; url: string } | null> {
+  if (!repository.nangoConnectionId) {
+    console.warn(`[mention-handler] Repository ${repository.githubFullName} has no Nango connection`);
+    return null;
+  }
+
+  const [owner, repo] = repository.githubFullName.split('/');
+  const appName = getAppName();
+  const agentDescription = isKnownAgent(mentionedAgent)
+    ? KNOWN_AGENTS[mentionedAgent]
+    : 'Custom agent';
+
+  const body = `👋 @${authorLogin}, I've received your request and am routing it to **@${mentionedAgent}** (${agentDescription}).
+
+The agent will respond shortly. You can track progress in this thread.
+
+_— ${appName}_`;
+
+  try {
+    const result = await nangoService.addGithubIssueComment(
+      repository.nangoConnectionId,
+      owner,
+      repo,
+      issueNumber,
+      body
+    );
+    console.log(`[mention-handler] Posted acknowledgment comment: ${result.html_url}`);
+    return { id: result.id, url: result.html_url };
+  } catch (error) {
+    console.error(`[mention-handler] Failed to post acknowledgment comment:`, error);
+    return null;
+  }
+}
+
+/**
+ * Find a linked daemon that can handle this repository
+ */
+async function findAvailableDaemon(repository: Repository): Promise<{ id: string; userId: string } | null> {
+  // The daemon must belong to the repository owner
+  if (!repository.userId) {
+    console.warn(`[mention-handler] Repository ${repository.githubFullName} has no userId`);
+    return null;
+  }
+
+  const daemons = await db.linkedDaemons.findByUserId(repository.userId);
+  const onlineDaemon = daemons.find(d => d.status === 'online');
+
+  if (!onlineDaemon) {
+    console.warn(`[mention-handler] No online daemon found for user ${repository.userId}`);
+    return null;
+  }
+
+  return { id: onlineDaemon.id, userId: repository.userId };
+}
+
+/**
+ * Queue a spawn command for a linked daemon
+ */
+async function queueSpawnCommand(
+  daemonId: string,
+  agentName: string,
+  prompt: string,
+  metadata: {
+    mentionId: string;
+    repository: string;
+    issueNumber: number;
+    authorLogin: string;
+  }
+): Promise<void> {
+  const command = {
+    type: 'spawn_agent',
+    agentName,
+    cli: 'claude', // Default to Claude CLI
+    task: prompt,
+    metadata,
+    timestamp: new Date().toISOString(),
+  };
+
+  await db.linkedDaemons.queueMessage(daemonId, {
+    from: { daemonId: 'cloud', daemonName: 'Agent Relay Cloud', agent: 'system' },
+    to: '__spawner__',
+    content: JSON.stringify(command),
+    metadata: { type: 'spawn_command' },
+    timestamp: new Date().toISOString(),
+  });
+
+  console.log(`[mention-handler] Queued spawn command for daemon ${daemonId}`);
+}
+
+/**
  * Handle a mention record
  *
  * This function:
  * 1. Validates the mention is for a known agent
- * 2. Routes to the appropriate agent handler
- * 3. Spawns or messages the agent
+ * 2. Posts an acknowledgment comment
+ * 3. Finds a linked daemon
+ * 4. Queues a spawn command for the agent
  */
 export async function handleMention(mention: CommentMention): Promise<void> {
   console.log(`[mention-handler] Processing mention: @${mention.mentionedAgent} in ${mention.repository}`);
@@ -49,38 +161,83 @@ export async function handleMention(mention: CommentMention): Promise<void> {
   if (!isKnownAgent(mention.mentionedAgent)) {
     console.log(`[mention-handler] Unknown agent: @${mention.mentionedAgent}, checking workspace config`);
     // TODO: Check workspace configuration for custom agent names
-    // For now, ignore unknown agents
+    // For now, mark as ignored
     await db.commentMentions.markIgnored(mention.id);
     return;
   }
 
-  // Update status to processing
+  // Find the repository to get Nango connection
+  const repository = await db.repositories.findByFullName(mention.repository);
+  if (!repository) {
+    console.error(`[mention-handler] Repository not found: ${mention.repository}`);
+    await db.commentMentions.markIgnored(mention.id);
+    return;
+  }
+
+  // Generate agent info
   const agentId = `mention-${mention.id}`;
-  const agentName = mention.mentionedAgent;
+  const agentName = `${mention.mentionedAgent}-${mention.issueOrPrNumber}`;
+
+  // Update status to processing
   await db.commentMentions.markProcessing(mention.id, agentId, agentName);
 
-  // Build the prompt for the agent
-  const prompt = buildMentionPrompt(mention);
+  // Step 1: Post acknowledgment comment
+  const ackResult = await postAcknowledgmentComment(
+    repository,
+    mention.issueOrPrNumber,
+    mention.mentionedAgent,
+    mention.authorLogin
+  );
 
-  console.log(`[mention-handler] Built prompt for @${mention.mentionedAgent}:`);
-  console.log(`[mention-handler] --- BEGIN PROMPT ---`);
-  console.log(prompt);
-  console.log(`[mention-handler] --- END PROMPT ---`);
+  if (!ackResult) {
+    console.warn(`[mention-handler] Could not post acknowledgment, continuing anyway`);
+  }
 
-  // TODO: Actually spawn or message the agent
-  // This will integrate with the workspace/agent system to:
-  // 1. Find an existing agent working on this PR/issue
-  // 2. Message them if they exist
-  // 3. Spawn a new agent if needed
-  //
-  // For now, we just log the intent
-  console.log(`[mention-handler] Would spawn/message agent @${mention.mentionedAgent}`);
+  // Step 2: Find a linked daemon
+  const daemon = await findAvailableDaemon(repository);
+
+  if (!daemon) {
+    console.warn(`[mention-handler] No available daemon for ${mention.repository}`);
+    // Post a comment explaining the situation
+    if (repository.nangoConnectionId) {
+      const [owner, repo] = repository.githubFullName.split('/');
+      try {
+        await nangoService.addGithubIssueComment(
+          repository.nangoConnectionId,
+          owner,
+          repo,
+          mention.issueOrPrNumber,
+          `⚠️ @${mention.authorLogin}, I couldn't find an available agent to handle this request. Please ensure you have a linked Agent Relay daemon running.
+
+You can set this up by running \`agent-relay cloud link\` on your development machine.
+
+_— ${getAppName()}_`
+        );
+      } catch (error) {
+        console.error(`[mention-handler] Failed to post error comment:`, error);
+      }
+    }
+    return;
+  }
+
+  // Step 3: Build the prompt for the agent
+  const prompt = buildMentionPrompt(mention, repository);
+
+  // Step 4: Queue spawn command for the daemon
+  await queueSpawnCommand(daemon.id, agentName, prompt, {
+    mentionId: mention.id,
+    repository: mention.repository,
+    issueNumber: mention.issueOrPrNumber,
+    authorLogin: mention.authorLogin,
+  });
+
+  console.log(`[mention-handler] Spawned agent @${mention.mentionedAgent} for mention ${mention.id}`);
 }
 
 /**
  * Build a prompt for handling a mention
  */
-function buildMentionPrompt(mention: CommentMention): string {
+function buildMentionPrompt(mention: CommentMention, repository: Repository): string {
   const agentDescription = isKnownAgent(mention.mentionedAgent)
     ? KNOWN_AGENTS[mention.mentionedAgent]
     : 'Custom agent';
@@ -90,6 +247,25 @@ function buildMentionPrompt(mention: CommentMention): string {
     pr_comment: 'GitHub PR comment',
     pr_review: 'GitHub PR review comment',
   }[mention.sourceType] || 'GitHub comment';
+
+  const responseInstructions = `
+## Response Instructions
+
+When you complete your work:
+1. Post a comment on GitHub to notify @${mention.authorLogin}
+2. Reference specific files and line numbers when relevant
+3. If you made code changes, push them and reference the commit
+
+Use the GitHub CLI (\`gh\`) to post your response:
+\`\`\`bash
+gh issue comment ${mention.issueOrPrNumber} --repo ${mention.repository} --body "Your response here @${mention.authorLogin}"
+\`\`\`
+
+Or for PR comments:
+\`\`\`bash
+gh pr comment ${mention.issueOrPrNumber} --repo ${mention.repository} --body "Your response here @${mention.authorLogin}"
+\`\`\`
+`;
 
   return `
 # Agent Mention Task
@@ -117,14 +293,15 @@ Analyze the comment and respond appropriately:
 1. If a question was asked, provide a helpful answer
 2. If a task was requested, either complete it or explain what's needed
 3. If feedback was given, acknowledge it and act on it if needed
-4. Reply to the comment on GitHub with your response
+
+${responseInstructions}
 
 ## Important
 
 - Be concise and helpful
 - If you need to make code changes, create a commit and push
-- If the request is unclear, ask for clarification
-- Reference specific files and line numbers when relevant
+- If the request is unclear, ask for clarification in your response
+- Always @mention ${mention.authorLogin} in your response so they get notified
 `.trim();
 }
 
@@ -136,22 +313,82 @@ Analyze the comment and respond appropriately:
 export async function handleIssueAssignment(assignment: IssueAssignment): Promise<void> {
   console.log(`[mention-handler] Processing issue assignment: #${assignment.issueNumber} in ${assignment.repository}`);
 
+  // Find the repository
+  const repository = await db.repositories.findByFullName(assignment.repository);
+  if (!repository) {
+    console.error(`[mention-handler] Repository not found: ${assignment.repository}`);
+    return;
+  }
+
+  // Post acknowledgment comment
+  if (repository.nangoConnectionId) {
+    const [owner, repo] = repository.githubFullName.split('/');
+    try {
+      await nangoService.addGithubIssueComment(
+        repository.nangoConnectionId,
+        owner,
+        repo,
+        assignment.issueNumber,
+        `🤖 I've been assigned to work on this issue. I'll analyze the problem and get started.
+
+You can track my progress in this thread. I'll update you when I have a solution or need more information.
+
+_— ${getAppName()}_`
+      );
+    } catch (error) {
+      console.error(`[mention-handler] Failed to post assignment comment:`, error);
+    }
+  }
+
+  // Find a linked daemon
+  const daemon = await findAvailableDaemon(repository);
+
+  if (!daemon) {
+    console.warn(`[mention-handler] No available daemon for ${assignment.repository}`);
+    if (repository.nangoConnectionId) {
+      const [owner, repo] = repository.githubFullName.split('/');
+      try {
+        await nangoService.addGithubIssueComment(
+          repository.nangoConnectionId,
+          owner,
+          repo,
+          assignment.issueNumber,
+          `⚠️ I couldn't start working on this issue because no Agent Relay daemon is available.
+
+Please ensure you have a linked daemon running by executing \`agent-relay cloud link\` on your development machine.
+
+_— ${getAppName()}_`
+        );
+      } catch (error) {
+        console.error(`[mention-handler] Failed to post error comment:`, error);
+      }
+    }
+    return;
+  }
+
   // Build prompt for the issue
-  const prompt = buildIssuePrompt(assignment);
+  const prompt = buildIssuePrompt(assignment, repository);
 
-  console.log(`[mention-handler] Built prompt for issue #${assignment.issueNumber}:`);
-  console.log(`[mention-handler] --- BEGIN PROMPT ---`);
-  console.log(prompt);
-  console.log(`[mention-handler] --- END PROMPT ---`);
+  // Queue spawn command
+  const agentName = `issue-${assignment.issueNumber}`;
+  await queueSpawnCommand(daemon.id, agentName, prompt, {
+    mentionId: assignment.id,
+    repository: assignment.repository,
+    issueNumber: assignment.issueNumber,
+    authorLogin: 'issue-author', // TODO: Get from issue
+  });
 
-  // TODO: Spawn agent for the issue
-  console.log(`[mention-handler] Would spawn agent for issue #${assignment.issueNumber}`);
+  // Update assignment status and assign agent
+  await db.issueAssignments.assignAgent(assignment.id, agentName, agentName);
+  await db.issueAssignments.updateStatus(assignment.id, 'in_progress');
+
+  console.log(`[mention-handler] Spawned agent for issue #${assignment.issueNumber}`);
 }
 
 /**
  * Build a prompt for an issue assignment
  */
-function buildIssuePrompt(assignment: IssueAssignment): string {
+function buildIssuePrompt(assignment: IssueAssignment, repository: Repository): string {
   const priorityNote = assignment.priority
     ? `\n**Priority:** ${assignment.priority.toUpperCase()}`
     : '';
@@ -182,6 +419,20 @@ ${assignment.issueBody || 'No description provided.'}
 3. Implement a solution if possible
 4. Create a PR with your changes
 5. Link the PR to this issue
+
+## Response Instructions
+
+Keep the issue updated with your progress:
+\`\`\`bash
+gh issue comment ${assignment.issueNumber} --repo ${assignment.repository} --body "Your update here"
+\`\`\`
+
+When you create a PR:
+\`\`\`bash
+gh pr create --repo ${assignment.repository} --title "Fix #${assignment.issueNumber}: Brief description" --body "Fixes #${assignment.issueNumber}
+
+Description of changes..."
+\`\`\`
 
 ## Important
 

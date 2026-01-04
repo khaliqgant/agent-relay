@@ -944,6 +944,7 @@ export const projectGroupQueries: ProjectGroupQueries = {
 
 export interface RepositoryQueries {
   findById(id: string): Promise<schema.Repository | null>;
+  findByFullName(fullName: string): Promise<schema.Repository | null>;
   findByUserId(userId: string): Promise<schema.Repository[]>;
   findByWorkspaceId(workspaceId: string): Promise<schema.Repository[]>;
   findByProjectGroupId(projectGroupId: string): Promise<schema.Repository[]>;
@@ -959,6 +960,15 @@ export const repositoryQueries: RepositoryQueries = {
   async findById(id: string): Promise<schema.Repository | null> {
     const db = getDb();
     const result = await db.select().from(schema.repositories).where(eq(schema.repositories.id, id));
+    return result[0] ?? null;
+  },
+
+  async findByFullName(fullName: string): Promise<schema.Repository | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.repositories)
+      .where(eq(schema.repositories.githubFullName, fullName));
     return result[0] ?? null;
   },
 
