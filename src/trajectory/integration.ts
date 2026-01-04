@@ -589,6 +589,168 @@ export function detectPhaseFromContent(content: string): PDEROPhase | undefined 
 }
 
 /**
+ * Detected tool call information
+ */
+export interface DetectedToolCall {
+  tool: string;
+  args?: string;
+  status?: 'started' | 'completed' | 'failed';
+}
+
+/**
+ * Detected error information
+ */
+export interface DetectedError {
+  type: 'error' | 'warning' | 'failure';
+  message: string;
+  stack?: string;
+}
+
+/**
+ * All known Claude Code tool names
+ */
+const TOOL_NAMES = [
+  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Task', 'TaskOutput',
+  'WebFetch', 'WebSearch', 'NotebookEdit', 'TodoWrite', 'AskUserQuestion',
+  'KillShell', 'EnterPlanMode', 'ExitPlanMode', 'Skill', 'SlashCommand',
+];
+
+const TOOL_NAME_PATTERN = TOOL_NAMES.join('|');
+
+/**
+ * Tool call patterns for Claude Code and similar AI CLIs
+ */
+const TOOL_PATTERNS = [
+  // Claude Code tool invocations (displayed in output with parenthesis/braces)
+  new RegExp(`(?:^|\\n)\\s*(?:${TOOL_NAME_PATTERN})\\s*[({]`, 'i'),
+  // Tool completion markers (checkmarks, spinners)
+  new RegExp(`(?:^|\\n)\\s*(?:✓|✔|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)\\s*(${TOOL_NAME_PATTERN})`, 'i'),
+  // Function call patterns (explicit mentions)
+  new RegExp(`(?:^|\\n)\\s*(?:Calling|Using|Invoking)\\s+(?:tool\\s+)?['"]?(${TOOL_NAME_PATTERN})['"]?`, 'i'),
+  // Tool result patterns
+  new RegExp(`(?:^|\\n)\\s*(?:Tool result|Result from)\\s*:?\\s*(${TOOL_NAME_PATTERN})`, 'i'),
+];
+
+/**
+ * Error patterns for detecting failures in output
+ * Note: Patterns are ordered from most specific to least specific
+ */
+const ERROR_PATTERNS = [
+  // JavaScript/TypeScript runtime errors (most specific)
+  /(?:^|\n)((?:TypeError|ReferenceError|SyntaxError|RangeError|EvalError|URIError):\s*.+)/i,
+  // Named Error with message (e.g., "Error: Something went wrong")
+  /(?:^|\n)(Error:\s+.+)/,
+  // Failed assertions
+  /(?:^|\n)\s*(AssertionError:\s*.+)/i,
+  // Test failures (Vitest, Jest patterns)
+  /(?:^|\n)\s*(FAIL\s+\S+\.(?:ts|js|tsx|jsx))/i,
+  /(?:^|\n)\s*(✗|✘|×)\s+(.+)/,
+  // Command/process failures
+  /(?:^|\n)\s*(Command failed[^\n]+)/i,
+  /(?:^|\n)\s*((?:Exit|exit)\s+code[:\s]+[1-9]\d*)/i,
+  /(?:^|\n)\s*(exited with (?:code\s+)?[1-9]\d*)/i,
+  // Node.js/system errors
+  /(?:^|\n)\s*(EACCES|EPERM|ENOENT|ECONNREFUSED|ETIMEDOUT|ENOTFOUND)(?::\s*.+)?/,
+  // Build/compile errors (webpack, tsc, etc.)
+  /(?:^|\n)\s*(error TS\d+:\s*.+)/i,
+  /(?:^|\n)\s*(error\[\S+\]:\s*.+)/i,
+];
+
+/**
+ * Warning patterns for detecting potential issues
+ */
+const WARNING_PATTERNS = [
+  /(?:^|\n)\s*(?:warning|WARN|⚠️?)\s*[:\[]?\s*(.+)/i,
+  /(?:^|\n)\s*(?:deprecated|DEPRECATED):\s*(.+)/i,
+];
+
+/**
+ * Detect tool calls from agent output
+ *
+ * @example
+ * ```typescript
+ * const tools = detectToolCalls(output);
+ * // Returns: [{ tool: 'Read', args: 'file.ts' }, { tool: 'Bash', status: 'completed' }]
+ * ```
+ */
+export function detectToolCalls(content: string): DetectedToolCall[] {
+  const detected: DetectedToolCall[] = [];
+  const seenTools = new Set<string>();
+  const toolNameExtractor = new RegExp(`\\b(${TOOL_NAME_PATTERN})\\b`, 'i');
+
+  for (const pattern of TOOL_PATTERNS) {
+    const matches = content.matchAll(new RegExp(pattern.source, 'gi'));
+    for (const match of matches) {
+      // Extract tool name from the match
+      const fullMatch = match[0];
+      const toolNameMatch = fullMatch.match(toolNameExtractor);
+      if (toolNameMatch) {
+        const tool = toolNameMatch[1];
+        // Avoid duplicates by position (same tool at same position)
+        const key = `${tool}:${match.index}`;
+        if (!seenTools.has(key)) {
+          seenTools.add(key);
+          detected.push({
+            tool,
+            status: fullMatch.includes('✓') || fullMatch.includes('✔') ? 'completed' : 'started',
+          });
+        }
+      }
+    }
+  }
+
+  return detected;
+}
+
+/**
+ * Detect errors from agent output
+ *
+ * @example
+ * ```typescript
+ * const errors = detectErrors(output);
+ * // Returns: [{ type: 'error', message: 'TypeError: Cannot read property...' }]
+ * ```
+ */
+export function detectErrors(content: string): DetectedError[] {
+  const detected: DetectedError[] = [];
+  const seenMessages = new Set<string>();
+
+  // Check for error patterns
+  for (const pattern of ERROR_PATTERNS) {
+    const matches = content.matchAll(new RegExp(pattern, 'gi'));
+    for (const match of matches) {
+      const message = match[1] || match[0];
+      const cleanMessage = message.trim().slice(0, 200); // Limit length
+      if (!seenMessages.has(cleanMessage)) {
+        seenMessages.add(cleanMessage);
+        detected.push({
+          type: 'error',
+          message: cleanMessage,
+        });
+      }
+    }
+  }
+
+  // Check for warning patterns
+  for (const pattern of WARNING_PATTERNS) {
+    const matches = content.matchAll(new RegExp(pattern, 'gi'));
+    for (const match of matches) {
+      const message = match[1] || match[0];
+      const cleanMessage = message.trim().slice(0, 200);
+      if (!seenMessages.has(cleanMessage)) {
+        seenMessages.add(cleanMessage);
+        detected.push({
+          type: 'warning',
+          message: cleanMessage,
+        });
+      }
+    }
+  }
+
+  return detected;
+}
+
+/**
  * TrajectoryIntegration class for managing trajectory state
  *
  * This class enforces trajectory tracking during agent lifecycle:

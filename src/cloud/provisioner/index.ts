@@ -11,6 +11,7 @@ import { nangoService } from '../services/nango.js';
 
 const WORKSPACE_PORT = 3888;
 const FETCH_TIMEOUT_MS = 10_000;
+const WORKSPACE_IMAGE = process.env.WORKSPACE_IMAGE || 'ghcr.io/agentworkforce/relay-workspace:latest';
 
 /**
  * Get a fresh GitHub App installation token from Nango.
@@ -104,6 +105,8 @@ export interface ProvisionConfig {
   repositories: string[];
   supervisorEnabled?: boolean;
   maxAgents?: number;
+  /** Direct GitHub token for testing (bypasses Nango lookup) */
+  githubToken?: string;
 }
 
 export interface ProvisionResult {
@@ -231,7 +234,7 @@ class FlyProvisioner implements ComputeProvisioner {
         body: JSON.stringify({
           region: this.region,
           config: {
-            image: 'ghcr.io/khaliqgant/agent-relay-workspace:latest',
+            image: WORKSPACE_IMAGE,
             env: {
               WORKSPACE_ID: workspace.id,
               SUPERVISOR_ENABLED: String(workspace.config.supervisorEnabled ?? false),
@@ -539,7 +542,7 @@ class RailwayProvisioner implements ComputeProvisioner {
             projectId,
             name: 'workspace',
             source: {
-              image: 'ghcr.io/khaliqgant/agent-relay-workspace:latest',
+              image: WORKSPACE_IMAGE,
             },
           },
         },
@@ -751,7 +754,7 @@ class DockerProvisioner implements ComputeProvisioner {
 
     try {
       execSync(
-        `docker run -d --name ${containerName} -p ${hostPort}:${WORKSPACE_PORT} ${envArgs.join(' ')} ghcr.io/khaliqgant/agent-relay-workspace:latest`,
+        `docker run -d --name ${containerName} -p ${hostPort}:${WORKSPACE_PORT} ${envArgs.join(' ')} ${WORKSPACE_IMAGE}`,
         { stdio: 'pipe' }
       );
 
@@ -863,13 +866,20 @@ export class WorkspaceProvisioner {
     }
 
     // GitHub token is required for cloning repositories
-    // Use Nango GitHub App token (fresh installation token, not from vault)
+    // Use direct token if provided (for testing), otherwise get from Nango
     if (config.repositories.length > 0) {
-      const githubToken = await getGithubAppTokenForUser(config.userId);
-      if (githubToken) {
-        credentials.set('github', githubToken);
+      if (config.githubToken) {
+        // Direct token provided (for testing)
+        credentials.set('github', config.githubToken);
+        console.log('[provisioner] Using provided GitHub token');
       } else {
-        console.warn(`[provisioner] No GitHub App token for user ${config.userId}; repository cloning may fail.`);
+        // Get fresh installation token from Nango GitHub App
+        const githubToken = await getGithubAppTokenForUser(config.userId);
+        if (githubToken) {
+          credentials.set('github', githubToken);
+        } else {
+          console.warn(`[provisioner] No GitHub App token for user ${config.userId}; repository cloning may fail.`);
+        }
       }
     }
 

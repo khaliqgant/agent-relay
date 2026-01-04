@@ -49,12 +49,31 @@ export const defaultSettings: Settings = {
   },
 };
 
+interface AIProvider {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  color: string;
+  cliCommand: string;
+  isConnected?: boolean;
+}
+
+const AI_PROVIDERS: AIProvider[] = [
+  { id: 'anthropic', name: 'Anthropic', displayName: 'Claude', description: 'Claude Code - recommended for code tasks', color: '#D97757', cliCommand: 'claude' },
+  { id: 'codex', name: 'OpenAI', displayName: 'Codex', description: 'Codex - OpenAI coding assistant', color: '#10A37F', cliCommand: 'codex login' },
+  { id: 'opencode', name: 'OpenCode', displayName: 'OpenCode', description: 'OpenCode - AI coding assistant', color: '#00D4AA', cliCommand: 'opencode' },
+  { id: 'droid', name: 'Factory', displayName: 'Droid', description: 'Droid - Factory AI coding agent', color: '#6366F1', cliCommand: 'droid' },
+];
+
 export interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
   settings: Settings;
   onSettingsChange: (settings: Settings) => void;
   onResetSettings?: () => void;
+  workspaceId?: string; // For cloud mode provider connection
+  csrfToken?: string; // For cloud mode API calls
 }
 
 export function SettingsPanel({
