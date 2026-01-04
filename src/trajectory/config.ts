@@ -18,7 +18,7 @@
  *    - Reasoning: XDG-compliant, project-isolated, survives repo deletion
  */
 
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -60,7 +60,7 @@ export function readRelayConfig(projectRoot?: string): RelayConfig {
   // Check cache
   if (configCache && configCache.path === configPath) {
     try {
-      const stat = require('fs').statSync(configPath);
+      const stat = statSync(configPath);
       if (stat.mtimeMs === configCache.mtime) {
         return configCache.config;
       }
@@ -79,7 +79,7 @@ export function readRelayConfig(projectRoot?: string): RelayConfig {
 
     // Update cache
     try {
-      const stat = require('fs').statSync(configPath);
+      const stat = statSync(configPath);
       configCache = { path: configPath, config, mtime: stat.mtimeMs };
     } catch {
       // Ignore cache update failures

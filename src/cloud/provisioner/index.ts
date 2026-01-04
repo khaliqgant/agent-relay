@@ -4,6 +4,7 @@
  * One-click provisioning for compute resources (Fly.io, Railway, Docker).
  */
 
+import * as crypto from 'crypto';
 import { getConfig } from '../config.js';
 import { db, Workspace } from '../db/index.js';
 import { vault } from '../vault/index.js';
@@ -188,7 +189,6 @@ class FlyProvisioner implements ComputeProvisioner {
    * This is a simple HMAC - in production, consider using JWTs
    */
   private generateWorkspaceToken(workspaceId: string): string {
-    const crypto = require('crypto');
     return crypto
       .createHmac('sha256', this.sessionSecret)
       .update(`workspace:${workspaceId}`)
@@ -515,7 +515,6 @@ class RailwayProvisioner implements ComputeProvisioner {
   }
 
   private generateWorkspaceToken(workspaceId: string): string {
-    const crypto = require('crypto');
     return crypto
       .createHmac('sha256', this.sessionSecret)
       .update(`workspace:${workspaceId}`)
@@ -770,7 +769,6 @@ class DockerProvisioner implements ComputeProvisioner {
   }
 
   private generateWorkspaceToken(workspaceId: string): string {
-    const crypto = require('crypto');
     return crypto
       .createHmac('sha256', this.sessionSecret)
       .update(`workspace:${workspaceId}`)

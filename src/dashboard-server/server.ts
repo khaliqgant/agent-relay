@@ -3083,7 +3083,7 @@ Start by greeting the project leads and asking for status updates.`;
 
       const { getRelayConfigPath, readRelayConfig } = await import('../trajectory/config.js');
       const { getProjectPaths } = await import('../utils/project-namespace.js');
-      const { projectRoot } = getProjectPaths();
+      const { projectRoot: _projectRoot } = getProjectPaths();
 
       // Read existing config
       const config = readRelayConfig();

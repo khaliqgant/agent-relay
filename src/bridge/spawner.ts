@@ -12,7 +12,7 @@ import { getProjectPaths } from '../utils/project-namespace.js';
 import { resolveCommand } from '../utils/command-resolver.js';
 import { PtyWrapper, type PtyWrapperConfig, type SummaryEvent, type SessionEndEvent } from '../wrapper/pty-wrapper.js';
 import { selectShadowCli } from './shadow-cli.js';
-import { AgentPolicyService, type CloudPolicyFetcher, type PolicyDecision } from '../policy/agent-policy.js';
+import { AgentPolicyService, type CloudPolicyFetcher } from '../policy/agent-policy.js';
 import type {
   SpawnRequest,
   SpawnResult,

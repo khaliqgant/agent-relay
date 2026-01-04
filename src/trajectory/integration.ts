@@ -77,14 +77,6 @@ interface TrajectoryFile {
 }
 
 /**
- * Get the primary trajectories directory path (for writing)
- * Uses config to determine if repo or user-level storage
- */
-function getTrajectoriesDir(): string {
-  return getPrimaryTrajectoriesDir();
-}
-
-/**
  * Read a single trajectory index file from a directory
  */
 function readSingleTrajectoryIndex(trajectoriesDir: string): TrajectoryIndex | null {

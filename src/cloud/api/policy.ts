@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db/index.js';
-import type { WorkspaceAgentPolicy, AgentPolicyRule } from '../db/schema.js';
+import type { WorkspaceAgentPolicy } from '../db/schema.js';
 
 export const policyRouter = Router();
 
@@ -137,7 +137,7 @@ policyRouter.delete('/:workspaceId', async (req: Request, res: Response) => {
     }
 
     // Remove policy from config
-    const { agentPolicy, ...restConfig } = workspace.config ?? {};
+    const { agentPolicy: _agentPolicy, ...restConfig } = workspace.config ?? {};
     await db.workspaces.updateConfig(workspaceId, restConfig as any);
 
     res.json({

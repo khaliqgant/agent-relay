@@ -108,11 +108,6 @@ function isDeviceFlowProvider(provider: Provider): provider is DeviceFlowProvide
   return provider.authStrategy === 'device_flow';
 }
 
-// Type guard for CLI providers
-function isCliProvider(provider: Provider): provider is CliProvider {
-  return provider.authStrategy === 'cli';
-}
-
 type ProviderType = keyof typeof PROVIDERS;
 
 // In-memory store for active device flows (use Redis in production)

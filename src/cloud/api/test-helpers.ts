@@ -137,7 +137,7 @@ testHelpersRouter.delete('/cleanup', async (req: Request, res: Response) => {
   }
 
   try {
-    const db = getDb();
+    const _db = getDb();
 
     // Delete test data (users with test- prefix in githubId)
     // Note: This cascades to linked daemons due to FK constraints

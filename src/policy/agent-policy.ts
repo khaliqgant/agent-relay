@@ -267,7 +267,7 @@ export class AgentPolicyService {
   private parseSimpleYaml(content: string): Record<string, unknown> {
     const result: Record<string, unknown> = {};
     const lines = content.split('\n');
-    let currentKey = '';
+    let _currentKey = '';
     let currentArray: unknown[] | null = null;
     let currentObject: Record<string, unknown> | null = null;
     let indent = 0;
@@ -316,7 +316,7 @@ export class AgentPolicyService {
         // Top-level or section key
         if (value === '' || value === '|' || value === '>') {
           // Start of array or nested object
-          currentKey = key;
+          _currentKey = key;
           currentArray = [];
           currentObject = null;
           indent = lineIndent;
@@ -325,7 +325,7 @@ export class AgentPolicyService {
           // Simple key: value
           if (lineIndent === 0) {
             result[key] = this.parseValue(value);
-            currentKey = '';
+            _currentKey = '';
             currentArray = null;
             currentObject = null;
           } else if (currentObject) {
@@ -807,7 +807,7 @@ export class AgentPolicyService {
    * Get a concise policy instruction for injection into agent prompts
    */
   async getPolicyInstruction(agentName: string): Promise<string | null> {
-    const { matchedPolicy, policySource } = await this.getAgentPolicy(agentName);
+    const { matchedPolicy, policySource: _policySource } = await this.getAgentPolicy(agentName);
 
     // Only generate instructions if there are restrictions
     const hasRestrictions =
