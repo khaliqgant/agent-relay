@@ -83,6 +83,30 @@
             "reasoning": "Users should configure .relay/config.json after connecting repo to cloud workspace. This happens in the workspace onboarding flow."
           },
           "significance": "high"
+        },
+        {
+          "ts": 1767510018871,
+          "type": "decision",
+          "content": "Add dashboard API for trajectory preferences: Add dashboard API for trajectory preferences",
+          "raw": {
+            "question": "Add dashboard API for trajectory preferences",
+            "chosen": "Add dashboard API for trajectory preferences",
+            "alternatives": [],
+            "reasoning": "Users configure via dashboard after GitHub app setup, during workspace onboarding"
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1767510106990,
+          "type": "decision",
+          "content": "Add comprehensive settings with trajectory explanations: Add comprehensive settings with trajectory explanations",
+          "raw": {
+            "question": "Add comprehensive settings with trajectory explanations",
+            "chosen": "Add comprehensive settings with trajectory explanations",
+            "alternatives": [],
+            "reasoning": "Users need to understand what trajectories are (PDERO paradigm), why they'd opt-in, and link to pdero.com for more info"
+          },
+          "significance": "high"
         }
       ]
     }
