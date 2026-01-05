@@ -218,7 +218,7 @@ export function MessageList({
 
   return (
     <div
-      className="flex flex-col gap-1 p-4 bg-bg-secondary h-full overflow-y-auto"
+      className="flex flex-col gap-1 p-2 sm:p-4 bg-bg-secondary h-full overflow-y-auto"
       ref={scrollContainerRef}
       onScroll={handleScroll}
     >
@@ -292,9 +292,9 @@ function MessageItem({ message, isHighlighted, onThreadClick, recipientProcessin
   return (
     <div
       className={`
-        group flex gap-3 py-3 px-4 rounded-xl transition-all duration-150
+        group flex gap-2 sm:gap-3 py-2 sm:py-3 px-2 sm:px-4 rounded-xl transition-all duration-150
         hover:bg-bg-card/50
-        ${isHighlighted ? 'bg-warning-light/20 border-l-2 border-l-warning pl-3' : ''}
+        ${isHighlighted ? 'bg-warning-light/20 border-l-2 border-l-warning pl-2 sm:pl-3' : ''}
       `}
     >
       {/* Avatar/Icon */}
@@ -302,7 +302,7 @@ function MessageItem({ message, isHighlighted, onThreadClick, recipientProcessin
         <img
           src={currentUser.avatarUrl}
           alt={displayName}
-          className="shrink-0 w-10 h-10 rounded-xl border-2 object-cover"
+          className="shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl border-2 object-cover"
           style={{
             borderColor: provider.color,
             boxShadow: `0 0 16px ${provider.color}30`,
@@ -310,7 +310,7 @@ function MessageItem({ message, isHighlighted, onThreadClick, recipientProcessin
         />
       ) : (
         <div
-          className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-lg font-medium border-2"
+          className="shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center text-base sm:text-lg font-medium border-2"
           style={{
             backgroundColor: `${provider.color}15`,
             borderColor: provider.color,

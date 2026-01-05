@@ -66,16 +66,16 @@ export function Header({
   const hasMultipleProjects = projects.length > 1;
 
   return (
-    <header className="h-[52px] bg-bg-secondary border-b border-border-subtle flex items-center justify-between px-4">
-      {/* Mobile hamburger menu button */}
+    <header className="h-[52px] bg-bg-secondary border-b border-border-subtle flex items-center justify-between px-2 sm:px-4">
+      {/* Mobile hamburger menu button - always visible on mobile */}
       <button
-        className="hidden max-md:flex items-center justify-center w-11 h-11 bg-transparent border-none text-text-primary cursor-pointer rounded-lg transition-colors hover:bg-bg-hover relative"
+        className="flex md:hidden items-center justify-center w-10 h-10 sm:w-11 sm:h-11 bg-transparent border-none text-text-primary cursor-pointer rounded-lg transition-colors hover:bg-bg-hover active:bg-bg-hover relative flex-shrink-0"
         onClick={onMenuClick}
         aria-label="Open menu"
       >
         <MenuIcon />
         {hasUnreadNotifications && (
-          <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-error rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
+          <span className="absolute top-1 right-1 sm:top-1.5 sm:right-1.5 w-2.5 h-2.5 bg-error rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
         )}
       </button>
 
@@ -102,19 +102,19 @@ export function Header({
       {/* Divider after workspace status */}
       <div className="w-px h-6 bg-border-subtle mr-3 max-md:hidden" />
 
-      <div className="flex items-center gap-3 flex-1 min-w-0">
+      <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
         {isGeneral ? (
           <>
-            <span className="text-accent-cyan text-lg font-mono">#</span>
-            <span className="font-display font-semibold text-base text-text-primary max-md:max-w-[150px] max-md:truncate">general</span>
-            <span className="text-text-muted text-sm ml-2 pl-3 border-l border-border-subtle max-md:hidden">
+            <span className="text-accent-cyan text-base sm:text-lg font-mono">#</span>
+            <span className="font-display font-semibold text-sm sm:text-base text-text-primary truncate max-w-[100px] sm:max-w-none">general</span>
+            <span className="text-text-muted text-sm ml-2 pl-3 border-l border-border-subtle hidden md:inline">
               All agent communications
             </span>
           </>
         ) : selectedAgent ? (
           <>
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center font-semibold text-xs border-2"
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center font-semibold text-[10px] sm:text-xs border-2 flex-shrink-0"
               style={{
                 backgroundColor: colors?.primary,
                 borderColor: colors?.primary,
@@ -125,16 +125,16 @@ export function Header({
                 {getAgentInitials(selectedAgent.name)}
               </span>
             </div>
-            <div className="flex flex-col">
-              <span className="font-display font-semibold text-base text-text-primary max-md:max-w-[150px] max-md:truncate">
+            <div className="flex flex-col min-w-0">
+              <span className="font-display font-semibold text-sm sm:text-base text-text-primary truncate">
                 {selectedAgent.name}
               </span>
-              <span className="text-text-muted text-xs font-mono max-md:hidden">
+              <span className="text-text-muted text-xs font-mono hidden md:block truncate">
                 {getAgentBreadcrumb(selectedAgent.name)}
               </span>
             </div>
             {selectedAgent.status && (
-              <span className={`text-xs py-1 px-2.5 rounded-full font-medium ml-2 ${
+              <span className={`hidden sm:inline text-xs py-1 px-2.5 rounded-full font-medium ml-2 flex-shrink-0 ${
                 selectedAgent.status === 'online'
                   ? 'bg-success/20 text-success'
                   : 'bg-bg-tertiary text-text-muted'
@@ -145,46 +145,47 @@ export function Header({
           </>
         ) : (
           <>
-            <span className="text-accent-cyan text-lg font-mono">@</span>
-            <span className="font-display font-semibold text-base text-text-primary">{currentChannel}</span>
+            <span className="text-accent-cyan text-base sm:text-lg font-mono">@</span>
+            <span className="font-display font-semibold text-sm sm:text-base text-text-primary truncate">{currentChannel}</span>
           </>
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 sm:gap-2">
         <button
-          className="flex items-center gap-2 py-2 px-4 bg-gradient-to-r from-accent-cyan to-[#00b8d9] text-bg-deep font-semibold border-none rounded-lg text-sm cursor-pointer transition-all duration-150 hover:shadow-glow-cyan hover:-translate-y-0.5"
+          className="flex items-center gap-1 sm:gap-2 py-1.5 sm:py-2 px-2 sm:px-4 bg-gradient-to-r from-accent-cyan to-[#00b8d9] text-bg-deep font-semibold border-none rounded-lg text-xs sm:text-sm cursor-pointer transition-all duration-150 hover:shadow-glow-cyan hover:-translate-y-0.5"
           onClick={onNewConversationClick}
           title="Start new conversation (⌘N)"
         >
           <NewMessageIcon />
-          <span className="max-md:hidden">New Message</span>
+          <span className="hidden sm:inline">New</span>
+          <span className="hidden md:inline">Message</span>
         </button>
 
         <button
-          className="flex items-center gap-2 py-2 px-3 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary text-sm cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-text-primary"
+          className="flex items-center gap-1 sm:gap-2 py-1.5 sm:py-2 px-2 sm:px-3 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary text-xs sm:text-sm cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-text-primary"
           onClick={onCommandPaletteOpen}
           title="Command Palette (⌘K)"
         >
           <SearchIcon />
-          <span className="max-md:hidden">Search</span>
-          <kbd className="bg-bg-card border border-border-subtle rounded px-1.5 py-0.5 text-xs text-text-muted font-mono max-md:hidden">
+          <span className="hidden md:inline">Search</span>
+          <kbd className="hidden md:inline bg-bg-card border border-border-subtle rounded px-1.5 py-0.5 text-xs text-text-muted font-mono">
             ⌘K
           </kbd>
         </button>
 
         <button
-          className="flex items-center justify-center p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-cyan"
+          className="hidden sm:flex items-center justify-center p-1.5 sm:p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-cyan"
           onClick={onHistoryClick}
           title="Message History"
         >
           <HistoryIcon />
         </button>
 
-        {/* Coordinator button - shown when multiple projects are connected */}
+        {/* Coordinator button - shown when multiple projects are connected (hidden on mobile) */}
         {hasMultipleProjects && (
           <button
-            className="flex items-center justify-center p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-purple"
+            className="hidden md:flex items-center justify-center p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-purple"
             onClick={onCoordinatorClick}
             title="Coordinator Agent"
           >
@@ -192,10 +193,10 @@ export function Header({
           </button>
         )}
 
-        {/* Fleet Overview toggle */}
+        {/* Fleet Overview toggle (hidden on small mobile) */}
         {onFleetClick && (
           <button
-            className={`flex items-center justify-center p-2 border rounded-lg cursor-pointer transition-all duration-150 ${
+            className={`hidden sm:flex items-center justify-center p-1.5 sm:p-2 border rounded-lg cursor-pointer transition-all duration-150 ${
               isFleetViewActive
                 ? 'bg-accent-cyan/20 border-accent-cyan text-accent-cyan'
                 : 'bg-bg-tertiary border-border-subtle text-text-secondary hover:bg-bg-elevated hover:border-border-medium hover:text-accent-cyan'
@@ -207,10 +208,10 @@ export function Header({
           </button>
         )}
 
-        {/* Trajectory Viewer toggle */}
+        {/* Trajectory Viewer toggle (hidden on mobile) */}
         {onTrajectoryClick && (
           <button
-            className={`flex items-center justify-center p-2 border rounded-lg cursor-pointer transition-all duration-150 relative ${
+            className={`hidden md:flex items-center justify-center p-2 border rounded-lg cursor-pointer transition-all duration-150 relative ${
               hasActiveTrajectory
                 ? 'bg-accent-cyan/20 border-accent-cyan text-accent-cyan'
                 : 'bg-bg-tertiary border-border-subtle text-text-secondary hover:bg-bg-elevated hover:border-border-medium hover:text-accent-cyan'
@@ -227,14 +228,14 @@ export function Header({
 
         <a
           href="/metrics"
-          className="flex items-center justify-center p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-orange no-underline"
+          className="hidden sm:flex items-center justify-center p-1.5 sm:p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-orange no-underline"
           title="Fleet Metrics"
         >
           <MetricsIcon />
         </a>
 
         <button
-          className="flex items-center justify-center p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-purple"
+          className="flex items-center justify-center p-1.5 sm:p-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary cursor-pointer transition-all duration-150 hover:bg-bg-elevated hover:border-border-medium hover:text-accent-purple"
           onClick={onSettingsClick}
           title="Settings"
         >

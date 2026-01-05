@@ -122,14 +122,14 @@ export function Sidebar({
       className="flex-1 flex flex-col overflow-hidden"
     >
       {/* Header */}
-      <div className="p-4 border-b border-border-subtle">
-        <div className="flex items-center gap-3 mb-3">
-          <LogoIcon size={28} withGlow={true} />
-          <h1 className="text-lg font-display font-semibold m-0 text-text-primary">Agent Relay</h1>
+      <div className="p-3 sm:p-4 border-b border-border-subtle">
+        <div className="flex items-center gap-2 sm:gap-3 mb-3">
+          <LogoIcon size={24} withGlow={true} />
+          <h1 className="text-base sm:text-lg font-display font-semibold m-0 text-text-primary">Agent Relay</h1>
           <ConnectionIndicator isConnected={isConnected} />
           {/* Mobile close button */}
           <button
-            className="md:hidden ml-auto p-2 -mr-2 bg-transparent border-none text-text-muted cursor-pointer rounded-lg transition-colors hover:bg-bg-hover hover:text-text-primary"
+            className="md:hidden ml-auto p-2 -mr-1 sm:-mr-2 bg-transparent border-none text-text-muted cursor-pointer rounded-lg transition-colors hover:bg-bg-hover hover:text-text-primary active:bg-bg-hover"
             onClick={onClose}
             aria-label="Close sidebar"
           >
@@ -203,7 +203,7 @@ export function Sidebar({
       )}
 
       {/* Search */}
-      <div className="flex items-center gap-2 py-2.5 px-3 bg-bg-tertiary m-3 rounded-lg border border-border-subtle focus-within:border-accent-cyan/50 transition-colors">
+      <div className="flex items-center gap-2 py-2 sm:py-2.5 px-2 sm:px-3 bg-bg-tertiary m-2 sm:m-3 rounded-lg border border-border-subtle focus-within:border-accent-cyan/50 transition-colors">
         <SearchIcon />
         <input
           type="text"
@@ -214,7 +214,7 @@ export function Sidebar({
         />
         {searchQuery && (
           <button
-            className="bg-transparent border-none text-text-muted cursor-pointer p-1 flex items-center justify-center hover:text-text-secondary rounded transition-colors"
+            className="bg-transparent border-none text-text-muted cursor-pointer p-1 flex items-center justify-center hover:text-text-secondary rounded transition-colors active:text-text-secondary"
             onClick={() => setSearchQuery('')}
           >
             <ClearIcon />
@@ -308,16 +308,16 @@ export function Sidebar({
       </div>
 
       {/* Footer Actions */}
-      <div className="p-4 border-t border-border-subtle space-y-2">
+      <div className="p-3 sm:p-4 border-t border-border-subtle space-y-2">
         <button
-          className="w-full py-3 px-4 bg-gradient-to-r from-accent-cyan to-[#00b8d9] text-bg-deep font-semibold text-sm cursor-pointer flex items-center justify-center gap-2 rounded-lg transition-all duration-150 hover:shadow-glow-cyan hover:-translate-y-0.5"
+          className="w-full py-2.5 sm:py-3 px-3 sm:px-4 bg-gradient-to-r from-accent-cyan to-[#00b8d9] text-bg-deep font-semibold text-sm cursor-pointer flex items-center justify-center gap-2 rounded-lg transition-all duration-150 hover:shadow-glow-cyan hover:-translate-y-0.5 active:scale-[0.98]"
           onClick={onSpawnClick}
         >
           <PlusIcon />
           Spawn Agent
         </button>
         <button
-          className="w-full py-2.5 px-4 bg-bg-tertiary text-text-secondary text-sm cursor-pointer flex items-center justify-center gap-2 rounded-lg border border-border-subtle transition-all duration-150 hover:bg-bg-hover hover:text-text-primary hover:border-border-subtle"
+          className="w-full py-2 sm:py-2.5 px-3 sm:px-4 bg-bg-tertiary text-text-secondary text-sm cursor-pointer flex items-center justify-center gap-2 rounded-lg border border-border-subtle transition-all duration-150 hover:bg-bg-hover hover:text-text-primary hover:border-border-subtle active:bg-bg-hover"
           onClick={onSettingsClick}
         >
           <SettingsIcon />
