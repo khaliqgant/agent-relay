@@ -470,6 +470,10 @@ class FlyProvisioner implements ComputeProvisioner {
     const secrets: Record<string, string> = {};
     for (const [provider, token] of credentials) {
       secrets[`${provider.toUpperCase()}_TOKEN`] = token;
+      // Also set GH_TOKEN for gh CLI compatibility
+      if (provider === 'github') {
+        secrets['GH_TOKEN'] = token;
+      }
     }
 
     if (Object.keys(secrets).length > 0) {
@@ -894,6 +898,10 @@ class RailwayProvisioner implements ComputeProvisioner {
 
     for (const [provider, token] of credentials) {
       envVars[`${provider.toUpperCase()}_TOKEN`] = token;
+      // Also set GH_TOKEN for gh CLI compatibility
+      if (provider === 'github') {
+        envVars['GH_TOKEN'] = token;
+      }
     }
 
     await fetchWithRetry('https://backboard.railway.app/graphql/v2', {
@@ -1135,6 +1143,10 @@ class DockerProvisioner implements ComputeProvisioner {
 
     for (const [provider, token] of credentials) {
       envArgs.push(`-e ${provider.toUpperCase()}_TOKEN=${token}`);
+      // Also set GH_TOKEN for gh CLI compatibility
+      if (provider === 'github') {
+        envArgs.push(`-e GH_TOKEN=${token}`);
+      }
     }
 
     // Run container
