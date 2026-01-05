@@ -169,10 +169,15 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   }, [isCloudMode, switchWorkspace]);
 
   // Presence tracking for online users and typing indicators
-  const { onlineUsers, typingUsers, sendTyping, isConnected: isPresenceConnected } = usePresence({
-    currentUser: currentUser
+  // Memoize the user object to prevent reconnection on every render
+  const presenceUser = useMemo(() =>
+    currentUser
       ? { username: currentUser.displayName, avatarUrl: currentUser.avatarUrl }
       : undefined,
+    [currentUser?.displayName, currentUser?.avatarUrl]
+  );
+  const { onlineUsers, typingUsers, sendTyping, isConnected: isPresenceConnected } = usePresence({
+    currentUser: presenceUser,
   });
 
   // User profile panel state
