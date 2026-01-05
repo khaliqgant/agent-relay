@@ -384,7 +384,7 @@ export function BillingSettingsPanel({ onUpgrade }: BillingSettingsPanelProps) {
             </p>
           </div>
           <a
-            href="mailto:enterprise@agentrelay.dev"
+            href="mailto:enterprise@agent-relay.com"
             className="px-4 md:px-6 py-2 md:py-2.5 bg-amber-400 text-bg-deep rounded-lg text-xs md:text-sm font-bold hover:bg-amber-300 transition-colors text-center shrink-0"
           >
             Contact Sales

@@ -583,7 +583,7 @@ workspacesRouter.post('/:id/domain', async (req: Request, res: Response) => {
       instructions: {
         type: 'CNAME',
         name: domain,
-        value: workspace.publicUrl?.replace('https://', '') || `${id}.agentrelay.dev`,
+        value: workspace.publicUrl?.replace('https://', '') || `${id}.agent-relay.com`,
         ttl: 300,
       },
       verifyEndpoint: `/api/workspaces/${id}/domain/verify`,
@@ -622,7 +622,7 @@ workspacesRouter.post('/:id/domain/verify', async (req: Request, res: Response) 
     const dns = await import('dns').then(m => m.promises);
     try {
       const records = await dns.resolveCname(workspace.customDomain);
-      const expectedTarget = workspace.publicUrl?.replace('https://', '') || `${id}.agentrelay.dev`;
+      const expectedTarget = workspace.publicUrl?.replace('https://', '') || `${id}.agent-relay.com`;
 
       if (records.some(r => r.includes(expectedTarget) || r.includes('agentrelay'))) {
         // DNS is configured, now provision SSL cert

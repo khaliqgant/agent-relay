@@ -2619,7 +2619,7 @@ program
   .command('codex-auth')
   .description('Capture Codex OAuth callback locally (run this when connecting Codex in Agent Relay)')
   .option('--token <token>', 'Auth session token from Agent Relay dashboard')
-  .option('--cloud-url <url>', 'Cloud API URL', process.env.AGENT_RELAY_CLOUD_URL || 'https://agentrelay.dev')
+  .option('--cloud-url <url>', 'Cloud API URL', process.env.AGENT_RELAY_CLOUD_URL || 'https://agent-relay.com')
   .option('--port <port>', 'Callback port (default: 1455)', '1455')
   .option('--timeout <seconds>', 'Timeout in seconds (default: 300)', '300')
   .action(async (options: { token?: string; cloudUrl: string; port: string; timeout: string }) => {
