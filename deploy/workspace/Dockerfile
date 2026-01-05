@@ -32,6 +32,7 @@ WORKDIR /app
 # Install system dependencies for AI CLIs and git
 # Note: tmux not needed - daemon uses node-pty directly
 # gosu is used to drop privileges from root to workspace user
+# Build tools (make, g++) needed for agents to npm install repos with native modules
 RUN apt-get update && apt-get install -y \
     bash \
     ca-certificates \
@@ -40,6 +41,8 @@ RUN apt-get update && apt-get install -y \
     python3 \
     jq \
     gosu \
+    make \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI (gh)
