@@ -1034,7 +1034,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         )}
 
         {/* Message Composer */}
-        <div className="p-4 bg-bg-tertiary border-t border-border-subtle">
+        <div className="p-2 sm:p-4 bg-bg-tertiary border-t border-border-subtle">
           <MessageComposer
             recipient={currentChannel === 'general' ? '*' : currentChannel}
             agents={agents}
@@ -1534,10 +1534,10 @@ function MessageComposer({ recipient, agents, humanUsers, onSend, onTyping, isSe
     !attachments.some(a => a.isUploading);
 
   return (
-    <form className="flex flex-col gap-2" onSubmit={handleSubmit}>
+    <form className="flex flex-col gap-1.5 sm:gap-2" onSubmit={handleSubmit}>
       {/* Attachment previews */}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 p-2 bg-bg-card rounded-lg border border-border-subtle">
+        <div className="flex flex-wrap gap-1.5 sm:gap-2 p-1.5 sm:p-2 bg-bg-card rounded-lg border border-border-subtle">
           {attachments.map(attachment => (
             <div
               key={attachment.id}
@@ -1577,7 +1577,7 @@ function MessageComposer({ recipient, agents, humanUsers, onSend, onTyping, isSe
       )}
 
       {/* Input row */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1.5 sm:gap-3">
         {/* Image upload button */}
         <input
           ref={fileInputRef}
@@ -1590,17 +1590,17 @@ function MessageComposer({ recipient, agents, humanUsers, onSend, onTyping, isSe
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="p-2.5 bg-bg-card border border-border-subtle rounded-xl text-text-muted hover:text-accent-cyan hover:border-accent-cyan/50 transition-colors"
+          className="p-2 sm:p-2.5 bg-bg-card border border-border-subtle rounded-lg sm:rounded-xl text-text-muted hover:text-accent-cyan hover:border-accent-cyan/50 transition-colors flex-shrink-0"
           title="Attach screenshot (or paste from clipboard)"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="sm:w-[18px] sm:h-[18px]">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
             <circle cx="8.5" cy="8.5" r="1.5" />
             <polyline points="21 15 16 10 5 21" />
           </svg>
         </button>
 
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-0">
           {/* Agent mention autocomplete */}
           <MentionAutocomplete
             agents={agents}
@@ -1621,8 +1621,8 @@ function MessageComposer({ recipient, agents, humanUsers, onSend, onTyping, isSe
           />
           <textarea
             ref={textareaRef}
-            className="w-full py-3 px-4 bg-bg-card border border-border-subtle rounded-xl text-sm font-sans text-text-primary outline-none transition-all duration-200 resize-none min-h-[44px] max-h-[120px] overflow-y-auto focus:border-accent-cyan/50 focus:shadow-[0_0_0_3px_rgba(0,217,255,0.1)] placeholder:text-text-muted"
-            placeholder={`Message ${recipient === '*' ? 'everyone' : '@' + recipient}... (@ for agents/files)`}
+            className="w-full py-2 sm:py-3 px-3 sm:px-4 bg-bg-card border border-border-subtle rounded-lg sm:rounded-xl text-sm font-sans text-text-primary outline-none transition-all duration-200 resize-none min-h-[40px] sm:min-h-[44px] max-h-[100px] sm:max-h-[120px] overflow-y-auto focus:border-accent-cyan/50 focus:shadow-[0_0_0_3px_rgba(0,217,255,0.1)] placeholder:text-text-muted"
+            placeholder={`Message ${recipient === '*' ? 'everyone' : '@' + recipient}...`}
             value={message}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
@@ -1634,17 +1634,17 @@ function MessageComposer({ recipient, agents, humanUsers, onSend, onTyping, isSe
         </div>
         <button
           type="submit"
-          className="py-3 px-5 bg-gradient-to-r from-accent-cyan to-[#00b8d9] text-bg-deep font-semibold border-none rounded-xl text-sm cursor-pointer transition-all duration-150 hover:shadow-glow-cyan hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
+          className="py-2 sm:py-3 px-3 sm:px-5 bg-gradient-to-r from-accent-cyan to-[#00b8d9] text-bg-deep font-semibold border-none rounded-lg sm:rounded-xl text-xs sm:text-sm cursor-pointer transition-all duration-150 hover:shadow-glow-cyan hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none flex-shrink-0"
           disabled={!canSend}
           title={isSending ? 'Sending...' : attachments.some(a => a.isUploading) ? 'Uploading...' : 'Send message'}
         >
           {isSending ? (
-            <span>Sending...</span>
+            <span className="hidden sm:inline">Sending...</span>
           ) : attachments.some(a => a.isUploading) ? (
-            <span>Uploading...</span>
+            <span className="hidden sm:inline">Uploading...</span>
           ) : (
-            <span className="flex items-center gap-2">
-              Send
+            <span className="flex items-center gap-1 sm:gap-2">
+              <span className="hidden sm:inline">Send</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="22" y1="2" x2="11" y2="13"></line>
                 <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>

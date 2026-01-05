@@ -181,7 +181,7 @@ export function AgentCard({
             <button
               className="relative bg-transparent border border-transparent text-text-dim p-1.5 cursor-pointer
                          flex items-center justify-center rounded-md transition-all duration-200
-                         opacity-0 group-hover:opacity-100
+                         opacity-100 md:opacity-0 md:group-hover:opacity-100
                          hover:bg-[#a855f7]/10 hover:border-[#a855f7]/30 hover:text-[#a855f7]
                          hover:shadow-[0_0_12px_rgba(168,85,247,0.25)]"
               onClick={handleProfileClick}
@@ -194,7 +194,7 @@ export function AgentCard({
             <button
               className="relative bg-transparent border border-transparent text-text-dim p-1.5 cursor-pointer
                          flex items-center justify-center rounded-md transition-all duration-200
-                         opacity-0 group-hover:opacity-100
+                         opacity-100 md:opacity-0 md:group-hover:opacity-100
                          hover:bg-accent-cyan/10 hover:border-accent-cyan/30 hover:text-accent-cyan
                          hover:shadow-[0_0_12px_rgba(0,217,255,0.25)]"
               onClick={handleLogsClick}
@@ -207,7 +207,7 @@ export function AgentCard({
             <button
               className="relative bg-transparent border border-transparent text-text-dim p-1.5 cursor-pointer
                          flex items-center justify-center rounded-md transition-all duration-200
-                         opacity-0 group-hover:opacity-100
+                         opacity-100 md:opacity-0 md:group-hover:opacity-100
                          hover:bg-error/10 hover:border-error/30 hover:text-error
                          hover:shadow-[0_0_12px_rgba(255,68,68,0.25)]"
               onClick={handleReleaseClick}

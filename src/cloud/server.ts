@@ -122,7 +122,9 @@ export async function createServer(): Promise<CloudServer> {
     })
   );
   // Custom JSON parser that preserves raw body for webhook signature verification
+  // Increase limit to 10mb for base64 image uploads (screenshots)
   app.use(express.json({
+    limit: '10mb',
     verify: (req: Request, _res, buf) => {
       // Store raw body for webhook signature verification
       (req as Request & { rawBody?: string }).rawBody = buf.toString();
