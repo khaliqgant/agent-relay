@@ -9,6 +9,7 @@ import helmet from 'helmet';
 import crypto from 'crypto';
 import path from 'node:path';
 import http from 'node:http';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createClient, RedisClientType } from 'redis';
 import { RedisStore } from 'connect-redis';
@@ -310,18 +311,32 @@ export async function createServer(): Promise<CloudServer> {
   // Path: dist/cloud/server.js -> ../../src/dashboard/out
   const dashboardPath = path.join(__dirname, '../../src/dashboard/out');
 
-  // Serve static files with .html extension fallback for clean URLs
-  // e.g., /signup will try /signup.html
-  app.use(express.static(dashboardPath, { extensions: ['html'] }));
+  // Serve static files (JS, CSS, images, etc.)
+  app.use(express.static(dashboardPath));
 
-  // SPA fallback - serve index.html for all non-API routes that don't match static files
-  // Express 5 requires named wildcard params instead of bare '*'
+  // Handle clean URLs for Next.js static export
+  // When a directory exists (e.g., /app/), express.static won't serve app.html
+  // So we need to explicitly check for .html files
   app.get('/{*splat}', (req, res, next) => {
-    // Don't serve index.html for API routes
+    // Don't handle API routes
     if (req.path.startsWith('/api/')) {
       return next();
     }
-    res.sendFile(path.join(dashboardPath, 'index.html'));
+
+    // Clean the path (remove trailing slash)
+    const cleanPath = req.path.replace(/\/$/, '') || '/';
+
+    // Try to serve the corresponding .html file
+    const htmlFile = cleanPath === '/' ? 'index.html' : `${cleanPath}.html`;
+    const htmlPath = path.join(dashboardPath, htmlFile);
+
+    // Check if the HTML file exists
+    if (fs.existsSync(htmlPath)) {
+      res.sendFile(htmlPath);
+    } else {
+      // Fallback to index.html for SPA-style routing
+      res.sendFile(path.join(dashboardPath, 'index.html'));
+    }
   });
 
   // Error handler
