@@ -10,6 +10,7 @@ import type { Agent, Message, Session, AgentSummary, FleetData } from '../../typ
 
 export interface DashboardData {
   agents: Agent[];
+  users?: Agent[]; // Human users (cli === 'dashboard')
   messages: Message[];
   sessions?: Session[];
   summaries?: AgentSummary[];

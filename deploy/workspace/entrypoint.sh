@@ -30,6 +30,13 @@ if [[ -n "${CLOUD_API_URL:-}" && -n "${WORKSPACE_ID:-}" && -n "${WORKSPACE_TOKEN
   git config --global credential.useHttpPath true
   export GIT_TERMINAL_PROMPT=0
 
+  # Configure git identity for commits
+  # Use env vars if set, otherwise default to "Agent Relay" / "agent@agent-relay.com"
+  DEFAULT_GIT_EMAIL="${AGENT_NAME:-agent}@agent-relay.com"
+  git config --global user.name "${GIT_USER_NAME:-Agent Relay}"
+  git config --global user.email "${GIT_USER_EMAIL:-${DEFAULT_GIT_EMAIL}}"
+  log "Git identity configured: ${GIT_USER_NAME:-Agent Relay} <${GIT_USER_EMAIL:-${DEFAULT_GIT_EMAIL}}>"
+
   # Configure gh CLI to use the same token mechanism
   # gh auth login expects a token via stdin or GH_TOKEN env var
   # We'll set up a wrapper that fetches fresh tokens
@@ -87,6 +94,12 @@ EOF
   export GIT_ASKPASS="${GIT_ASKPASS_SCRIPT}"
   export GIT_TERMINAL_PROMPT=0
   export GH_TOKEN="${GITHUB_TOKEN}"
+
+  # Configure git identity for commits
+  DEFAULT_GIT_EMAIL="${AGENT_NAME:-agent}@agent-relay.com"
+  git config --global user.name "${GIT_USER_NAME:-Agent Relay}"
+  git config --global user.email "${GIT_USER_EMAIL:-${DEFAULT_GIT_EMAIL}}"
+  log "Git identity configured: ${GIT_USER_NAME:-Agent Relay} <${GIT_USER_EMAIL:-${DEFAULT_GIT_EMAIL}}>"
 fi
 
 clone_or_update_repo() {

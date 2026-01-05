@@ -1377,15 +1377,18 @@ export async function startDashboard(
       getAgentSummaries(),
     ]);
 
-    // Filter agents:
+    // Filter and separate agents from human users:
     // 1. Exclude "Dashboard" (internal agent, not a real team member)
     // 2. Exclude offline agents (no lastSeen or lastSeen > threshold)
     // 3. Exclude agents without a known CLI (these are improperly registered or stale)
+    // 4. Separate human users (cli === 'dashboard') from AI agents
     const now = Date.now();
     // 30 seconds - aligns with heartbeat timeout (5s heartbeat * 6 multiplier = 30s)
     // This ensures agents disappear quickly after they stop responding to heartbeats
     const OFFLINE_THRESHOLD_MS = 30 * 1000;
-    const filteredAgents = Array.from(agentsMap.values())
+
+    // First pass: filter out invalid/offline entries
+    const validEntries = Array.from(agentsMap.values())
       .filter(agent => {
         // Exclude Dashboard
         if (agent.name === 'Dashboard') return false;
@@ -1402,15 +1405,26 @@ export async function startDashboard(
         if (now - lastSeenTime > OFFLINE_THRESHOLD_MS) return false;
 
         return true;
-      })
+      });
+
+    // Separate AI agents from human users
+    const filteredAgents = validEntries
+      .filter(agent => agent.cli !== 'dashboard')
       .map(agent => ({
         ...agent,
-        // All agents that pass the filter have a known CLI and are AI agents
         isHuman: false,
+      }));
+
+    const humanUsers = validEntries
+      .filter(agent => agent.cli === 'dashboard')
+      .map(agent => ({
+        ...agent,
+        isHuman: true,
       }));
 
     return {
       agents: filteredAgents,
+      users: humanUsers,
       messages: allMessages,
       activity: allMessages, // For now, activity log is just the message log
       sessions,

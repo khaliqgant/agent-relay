@@ -125,14 +125,8 @@ const PLACEHOLDER_TARGETS = new Set([
   'targetagent',
   'someagent',
   'otheragent',
-  'name',          // Generic placeholder
-  // NOTE: Removed 'lead', 'developer', 'reviewer', 'architect', 'designer' - these are valid agent names!
-  // Only include truly placeholder names that would never be real agents
-  'sender',
-  'agent',
-  'workername',    // ->relay:spawn WorkerName examples
-  'myagent',
-  'youragent',
+  'worker',        // Too generic, often used in examples
+  // NOTE: Don't add 'agent', 'name', 'lead', 'developer', etc. - these can be valid agent names!
 ]);
 
 /**

@@ -762,12 +762,24 @@ class RailwayProvisioner implements ComputeProvisioner {
  */
 class DockerProvisioner implements ComputeProvisioner {
   private cloudApiUrl: string;
+  private cloudApiUrlForContainer: string;
   private sessionSecret: string;
 
   constructor() {
     const config = getConfig();
     this.cloudApiUrl = config.publicUrl;
     this.sessionSecret = config.sessionSecret;
+
+    // For Docker containers, localhost won't work - they need to reach the host
+    // Convert localhost URLs to host.docker.internal for container access
+    if (this.cloudApiUrl.includes('localhost') || this.cloudApiUrl.includes('127.0.0.1')) {
+      this.cloudApiUrlForContainer = this.cloudApiUrl
+        .replace('localhost', 'host.docker.internal')
+        .replace('127.0.0.1', 'host.docker.internal');
+      console.log(`[docker] Container API URL: ${this.cloudApiUrlForContainer} (host: ${this.cloudApiUrl})`);
+    } else {
+      this.cloudApiUrlForContainer = this.cloudApiUrl;
+    }
   }
 
   private generateWorkspaceToken(workspaceId: string): string {
@@ -822,7 +834,7 @@ class DockerProvisioner implements ComputeProvisioner {
       `-e PROVIDERS=${(workspace.config.providers ?? []).join(',')}`,
       `-e PORT=${WORKSPACE_PORT}`,
       `-e AGENT_RELAY_DASHBOARD_PORT=${WORKSPACE_PORT}`,
-      `-e CLOUD_API_URL=${this.cloudApiUrl}`,
+      `-e CLOUD_API_URL=${this.cloudApiUrlForContainer}`,
       `-e WORKSPACE_TOKEN=${this.generateWorkspaceToken(workspace.id)}`,
     ];
 
