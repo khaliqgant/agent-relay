@@ -413,8 +413,9 @@ export async function startDashboard(
   const workspacePath = detectWorkspacePath(projectRoot || dataDir);
   console.log(`[dashboard] Workspace path: ${workspacePath}`);
 
+  // Pass dashboard port to spawner so spawned agents can call spawn/release APIs for nested spawning
   const spawner: AgentSpawner | undefined = enableSpawner
-    ? new AgentSpawner(workspacePath, tmuxSession)
+    ? new AgentSpawner(workspacePath, tmuxSession, port)
     : undefined;
 
   // Initialize cloud persistence and memory monitoring if enabled (RELAY_CLOUD_ENABLED=true)
