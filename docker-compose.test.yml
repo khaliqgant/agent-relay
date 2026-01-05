@@ -71,8 +71,8 @@ services:
       # Session
       SESSION_SECRET: test-session-secret
 
-      # Vault master key (test only)
-      VAULT_MASTER_KEY: dGVzdC12YXVsdC1rZXktZm9yLXRlc3Rpbmctb25seQ==
+      # Vault master key (test only) - "test-vault-key-32-bytes-testing!" = 32 bytes
+      VAULT_MASTER_KEY: dGVzdC12YXVsdC1rZXktMzItYnl0ZXMtdGVzdGluZyE=
 
       # Disable external services in test mode
       STRIPE_SECRET_KEY: sk_test_placeholder

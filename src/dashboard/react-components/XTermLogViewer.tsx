@@ -10,6 +10,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { getAgentColor } from '../lib/colors';
+import { useWorkspaceWsUrl } from './WorkspaceContext';
 
 export interface XTermLogViewerProps {
   /** Agent name to stream logs from */
@@ -50,27 +51,7 @@ const TERMINAL_THEME = {
   brightWhite: '#ffffff',
 };
 
-/**
- * Get WebSocket URL for agent log streaming
- */
-function getLogStreamUrl(agentName: string): string {
-  const path = `/ws/logs/${encodeURIComponent(agentName)}`;
-  const isDev = process.env.NODE_ENV === 'development';
-
-  if (typeof window === 'undefined') {
-    return `ws://localhost:3889${path}`;
-  }
-
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const { hostname, port } = window.location;
-
-  if (isDev && port === '3888') {
-    const host = hostname || 'localhost';
-    return `${protocol}//${host}:3889${path}`;
-  }
-
-  return `${protocol}//${window.location.host}${path}`;
-}
+// getLogStreamUrl removed - now using useWorkspaceWsUrl hook
 
 export function XTermLogViewer({
   agentName,
@@ -96,6 +77,9 @@ export function XTermLogViewer({
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const colors = getAgentColor(agentName);
+
+  // Get WebSocket URL from workspace context (handles cloud vs local mode)
+  const logStreamUrl = useWorkspaceWsUrl(`/ws/logs/${encodeURIComponent(agentName)}`);
 
   // Initialize terminal
   useEffect(() => {
@@ -152,8 +136,7 @@ export function XTermLogViewer({
     setIsConnecting(true);
     setError(null);
 
-    const url = getLogStreamUrl(agentName);
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(logStreamUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -254,7 +237,7 @@ export function XTermLogViewer({
         }
       }
     };
-  }, [agentName]);
+  }, [logStreamUrl, agentName]);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {

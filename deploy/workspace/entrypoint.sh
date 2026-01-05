@@ -6,6 +6,12 @@ log() {
   echo "[workspace] $*"
 }
 
+# Drop to workspace user if running as root
+if [[ "$(id -u)" == "0" ]]; then
+  log "Dropping privileges to workspace user..."
+  exec gosu workspace "$0" "$@"
+fi
+
 PORT="${AGENT_RELAY_DASHBOARD_PORT:-${PORT:-3888}}"
 export AGENT_RELAY_DASHBOARD_PORT="${PORT}"
 export PORT="${PORT}"
@@ -16,8 +22,64 @@ REPO_LIST="${REPOSITORIES:-}"
 mkdir -p "${WORKSPACE_DIR}"
 cd "${WORKSPACE_DIR}"
 
-# Configure Git credentials for GitHub clones (avoid storing tokens in remotes)
-if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+# Configure Git credentials via the gateway (tokens auto-refresh via Nango)
+# The credential helper fetches fresh tokens from the cloud API on each git operation
+if [[ -n "${CLOUD_API_URL:-}" && -n "${WORKSPACE_ID:-}" && -n "${WORKSPACE_TOKEN:-}" ]]; then
+  log "Configuring git credential helper (gateway mode)"
+  git config --global credential.helper "/usr/local/bin/git-credential-relay"
+  git config --global credential.useHttpPath true
+  export GIT_TERMINAL_PROMPT=0
+
+  # Configure git identity for commits
+  # Use env vars if set, otherwise default to "Agent Relay" / "agent@agent-relay.com"
+  DEFAULT_GIT_EMAIL="${AGENT_NAME:-agent}@agent-relay.com"
+  git config --global user.name "${GIT_USER_NAME:-Agent Relay}"
+  git config --global user.email "${GIT_USER_EMAIL:-${DEFAULT_GIT_EMAIL}}"
+  log "Git identity configured: ${GIT_USER_NAME:-Agent Relay} <${GIT_USER_EMAIL:-${DEFAULT_GIT_EMAIL}}>"
+
+  # Configure gh CLI to use the same token mechanism
+  # gh auth login expects a token via stdin or GH_TOKEN env var
+  # We'll set up a wrapper that fetches fresh tokens
+  mkdir -p "${HOME}/.config/gh"
+  cat > "${HOME}/.config/gh/hosts.yml" <<EOF
+github.com:
+  oauth_token: placeholder
+  git_protocol: https
+EOF
+
+  # Create gh token wrapper script
+  cat > "/tmp/gh-token-helper.sh" <<'GHEOF'
+#!/usr/bin/env bash
+# Fetch fresh token for gh CLI
+response=$(curl -sf \
+  -H "Authorization: Bearer ${WORKSPACE_TOKEN}" \
+  "${CLOUD_API_URL}/api/git/token?workspaceId=${WORKSPACE_ID}" 2>/dev/null)
+if [[ -n "$response" ]]; then
+  echo "$response" | jq -r '.token // empty'
+fi
+GHEOF
+  chmod +x "/tmp/gh-token-helper.sh"
+
+  # gh CLI will use GH_TOKEN if set; we export a function to refresh it
+  # For now, set it once at startup (will be refreshed by the credential helper for git operations)
+  # Retry a few times in case the cloud API isn't ready yet
+  export GH_TOKEN=""
+  for attempt in 1 2 3; do
+    GH_TOKEN=$(/tmp/gh-token-helper.sh 2>/dev/null || echo "")
+    if [[ -n "${GH_TOKEN}" ]]; then
+      break
+    fi
+    sleep 1
+  done
+  if [[ -n "${GH_TOKEN}" ]]; then
+    log "GitHub CLI configured with fresh token"
+  else
+    log "WARN: Could not fetch GitHub token for gh CLI"
+  fi
+
+# Fallback: Use static GITHUB_TOKEN if provided (legacy mode)
+elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  log "Configuring git credentials (legacy static token mode)"
   GIT_ASKPASS_SCRIPT="/tmp/git-askpass.sh"
   cat > "${GIT_ASKPASS_SCRIPT}" <<'EOF'
 #!/usr/bin/env bash
@@ -31,6 +93,13 @@ EOF
   chmod +x "${GIT_ASKPASS_SCRIPT}"
   export GIT_ASKPASS="${GIT_ASKPASS_SCRIPT}"
   export GIT_TERMINAL_PROMPT=0
+  export GH_TOKEN="${GITHUB_TOKEN}"
+
+  # Configure git identity for commits
+  DEFAULT_GIT_EMAIL="${AGENT_NAME:-agent}@agent-relay.com"
+  git config --global user.name "${GIT_USER_NAME:-Agent Relay}"
+  git config --global user.email "${GIT_USER_EMAIL:-${DEFAULT_GIT_EMAIL}}"
+  log "Git identity configured: ${GIT_USER_NAME:-Agent Relay} <${GIT_USER_EMAIL:-${DEFAULT_GIT_EMAIL}}>"
 fi
 
 clone_or_update_repo() {
@@ -70,34 +139,128 @@ if [[ -n "${REPO_LIST}" ]]; then
 fi
 
 # ============================================================================
+# Configure agent policy enforcement for cloud workspaces
+# Policy is fetched from cloud API and enforced at runtime
+# ============================================================================
+
+if [[ -n "${CLOUD_API_URL:-}" && -n "${WORKSPACE_ID:-}" ]]; then
+  log "Enabling agent policy enforcement"
+  export AGENT_POLICY_ENFORCEMENT=1
+  # Policy is fetched from ${CLOUD_API_URL}/api/policy/${WORKSPACE_ID}/internal
+fi
+
+# ============================================================================
 # Configure AI provider credentials
 # Create credential files that CLIs expect from ENV vars passed by provisioner
 # ============================================================================
 
-# Claude CLI expects ~/.claude/credentials.json
+# Claude CLI expects ~/.claude/.credentials.json (note the dot prefix on filename)
+# Format: { claudeAiOauth: { accessToken: "...", refreshToken: "...", expiresAt: ... } }
 if [[ -n "${ANTHROPIC_TOKEN:-}" ]]; then
   log "Configuring Claude credentials..."
   mkdir -p "${HOME}/.claude"
-  cat > "${HOME}/.claude/credentials.json" <<EOF
+  cat > "${HOME}/.claude/.credentials.json" <<EOF
 {
-  "oauth_token": "${ANTHROPIC_TOKEN}",
-  "expires_at": null
+  "claudeAiOauth": {
+    "accessToken": "${ANTHROPIC_TOKEN}",
+    "refreshToken": "${ANTHROPIC_REFRESH_TOKEN:-}",
+    "expiresAt": ${ANTHROPIC_TOKEN_EXPIRES_AT:-null}
+  }
 }
 EOF
-  chmod 600 "${HOME}/.claude/credentials.json"
+  chmod 600 "${HOME}/.claude/.credentials.json"
 fi
 
-# Codex CLI expects ~/.codex/credentials.json
+# Configure Claude Code for cloud workspaces
+# Create both settings and instructions files
+log "Configuring Claude Code for cloud workspace..."
+mkdir -p "${HOME}/.claude"
+
+# Create settings.json to auto-accept permissions (required for cloud workspaces)
+# This tells Claude Code to skip the "Ready to code here?" permission prompt
+# Reference: Claude Code uses this for headless/automated environments
+cat > "${HOME}/.claude/settings.json" <<'SETTINGSEOF'
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash",
+      "Glob",
+      "Grep",
+      "Task",
+      "WebFetch",
+      "WebSearch",
+      "NotebookEdit",
+      "TodoWrite"
+    ],
+    "deny": []
+  },
+  "autoApproveApiRequest": true
+}
+SETTINGSEOF
+chmod 600 "${HOME}/.claude/settings.json"
+log "Created Claude Code settings (auto-approve enabled)"
+
+# Create CLAUDE.md with agent relay protocol instructions
+# This is loaded automatically by Claude Code and provides the relay protocol
+if [[ -f "/app/docs/agent-relay-snippet.md" ]]; then
+  cp "/app/docs/agent-relay-snippet.md" "${HOME}/.claude/CLAUDE.md"
+  log "Copied relay protocol from /app/docs/agent-relay-snippet.md"
+else
+  # Fallback: create minimal instructions
+  log "WARN: /app/docs/agent-relay-snippet.md not found, creating minimal instructions"
+  cat > "${HOME}/.claude/CLAUDE.md" <<'RELAYEOF'
+# Agent Relay
+
+Real-time agent-to-agent messaging. Output `->relay:` patterns to communicate.
+
+## Sending Messages
+
+Use fenced format for reliable delivery:
+```
+->relay:AgentName <<<
+Your message here.>>>
+```
+
+Broadcast to all: `->relay:* <<<message>>>`
+
+## Protocol
+
+1. ACK immediately when you receive a task
+2. Do the work
+3. Send DONE: summary when complete
+
+## Session Persistence
+
+Output periodically to checkpoint progress:
+```
+[[SUMMARY]]{"currentTask":"...","completedTasks":[...],"context":"..."}[[/SUMMARY]]
+```
+
+When session is complete:
+```
+[[SESSION_END]]{"summary":"...","completedTasks":[...]}[[/SESSION_END]]
+```
+RELAYEOF
+fi
+log "Claude Code configuration complete"
+
+# Codex CLI expects ~/.codex/auth.json
+# Format: { tokens: { access_token: "...", refresh_token: "...", ... } }
 if [[ -n "${OPENAI_TOKEN:-}" ]]; then
   log "Configuring Codex credentials..."
   mkdir -p "${HOME}/.codex"
-  cat > "${HOME}/.codex/credentials.json" <<EOF
+  cat > "${HOME}/.codex/auth.json" <<EOF
 {
-  "token": "${OPENAI_TOKEN}",
-  "expires_at": null
+  "tokens": {
+    "access_token": "${OPENAI_TOKEN}",
+    "refresh_token": "${OPENAI_REFRESH_TOKEN:-}"
+  }
 }
 EOF
-  chmod 600 "${HOME}/.codex/credentials.json"
+  chmod 600 "${HOME}/.codex/auth.json"
 fi
 
 # Google/Gemini - uses application default credentials
@@ -113,7 +276,55 @@ EOF
   chmod 600 "${HOME}/.config/gcloud/application_default_credentials.json"
 fi
 
-log "Starting agent-relay daemon on port ${PORT}"
+# ============================================================================
+# Detect workspace path and start daemon
+# The daemon must start from the same directory that spawned agents will use
+# to ensure consistent socket paths
+# ============================================================================
+
+# Function to detect the actual workspace path (same logic as project-namespace.ts)
+detect_workspace_path() {
+  local base_dir="${1}"
+
+  # 1. Explicit override via env var
+  if [[ -n "${WORKSPACE_CWD:-}" ]]; then
+    echo "${WORKSPACE_CWD}"
+    return
+  fi
+
+  # 2. Check if base_dir itself is a git repo
+  if [[ -d "${base_dir}/.git" ]]; then
+    echo "${base_dir}"
+    return
+  fi
+
+  # 3. Scan for cloned repos (directories with .git)
+  local first_repo=""
+  for dir in "${base_dir}"/*/; do
+    if [[ -d "${dir}.git" ]]; then
+      # Use first repo found (alphabetically sorted by bash glob)
+      first_repo="${dir%/}"
+      break
+    fi
+  done
+
+  if [[ -n "${first_repo}" ]]; then
+    echo "${first_repo}"
+    return
+  fi
+
+  # 4. Fall back to base_dir
+  echo "${base_dir}"
+}
+
+# Detect the actual workspace path
+ACTUAL_WORKSPACE=$(detect_workspace_path "${WORKSPACE_DIR}")
+log "Detected workspace path: ${ACTUAL_WORKSPACE}"
+
+# Change to the detected workspace before starting daemon
+cd "${ACTUAL_WORKSPACE}"
+
+log "Starting agent-relay daemon on port ${PORT} from ${ACTUAL_WORKSPACE}"
 args=(/app/dist/cli/index.js up --port "${PORT}")
 
 if [[ "${SUPERVISOR_ENABLED:-true}" == "true" ]]; then

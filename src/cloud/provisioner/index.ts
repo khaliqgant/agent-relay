@@ -4,6 +4,7 @@
  * One-click provisioning for compute resources (Fly.io, Railway, Docker).
  */
 
+import * as crypto from 'crypto';
 import { getConfig } from '../config.js';
 import { db, Workspace } from '../db/index.js';
 import { vault } from '../vault/index.js';
@@ -11,6 +12,7 @@ import { nangoService } from '../services/nango.js';
 
 const WORKSPACE_PORT = 3888;
 const FETCH_TIMEOUT_MS = 10_000;
+const WORKSPACE_IMAGE = process.env.WORKSPACE_IMAGE || 'ghcr.io/agentworkforce/relay-workspace:latest';
 
 /**
  * Get a fresh GitHub App installation token from Nango.
@@ -104,6 +106,8 @@ export interface ProvisionConfig {
   repositories: string[];
   supervisorEnabled?: boolean;
   maxAgents?: number;
+  /** Direct GitHub token for testing (bypasses Nango lookup) */
+  githubToken?: string;
 }
 
 export interface ProvisionResult {
@@ -164,6 +168,8 @@ class FlyProvisioner implements ComputeProvisioner {
   private org: string;
   private region: string;
   private workspaceDomain?: string;
+  private cloudApiUrl: string;
+  private sessionSecret: string;
 
   constructor() {
     const config = getConfig();
@@ -174,6 +180,19 @@ class FlyProvisioner implements ComputeProvisioner {
     this.org = config.compute.fly.org;
     this.region = config.compute.fly.region || 'sjc';
     this.workspaceDomain = config.compute.fly.workspaceDomain;
+    this.cloudApiUrl = config.publicUrl;
+    this.sessionSecret = config.sessionSecret;
+  }
+
+  /**
+   * Generate a workspace token for API authentication
+   * This is a simple HMAC - in production, consider using JWTs
+   */
+  private generateWorkspaceToken(workspaceId: string): string {
+    return crypto
+      .createHmac('sha256', this.sessionSecret)
+      .update(`workspace:${workspaceId}`)
+      .digest('hex');
   }
 
   async provision(
@@ -195,20 +214,22 @@ class FlyProvisioner implements ComputeProvisioner {
       }),
     });
 
-    // Set secrets (credentials)
+    // Set secrets (provider credentials)
     const secrets: Record<string, string> = {};
     for (const [provider, token] of credentials) {
       secrets[`${provider.toUpperCase()}_TOKEN`] = token;
     }
 
-    await fetchWithRetry(`https://api.machines.dev/v1/apps/${appName}/secrets`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(secrets),
-    });
+    if (Object.keys(secrets).length > 0) {
+      await fetchWithRetry(`https://api.machines.dev/v1/apps/${appName}/secrets`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(secrets),
+      });
+    }
 
     // If custom workspace domain is configured, add certificate
     const customHostname = this.workspaceDomain
@@ -231,7 +252,7 @@ class FlyProvisioner implements ComputeProvisioner {
         body: JSON.stringify({
           region: this.region,
           config: {
-            image: 'ghcr.io/khaliqgant/agent-relay-workspace:latest',
+            image: WORKSPACE_IMAGE,
             env: {
               WORKSPACE_ID: workspace.id,
               SUPERVISOR_ENABLED: String(workspace.config.supervisorEnabled ?? false),
@@ -240,6 +261,9 @@ class FlyProvisioner implements ComputeProvisioner {
               PROVIDERS: (workspace.config.providers ?? []).join(','),
               PORT: String(WORKSPACE_PORT),
               AGENT_RELAY_DASHBOARD_PORT: String(WORKSPACE_PORT),
+              // Git gateway configuration
+              CLOUD_API_URL: this.cloudApiUrl,
+              WORKSPACE_TOKEN: this.generateWorkspaceToken(workspace.id),
             },
             services: [
               {
@@ -479,6 +503,8 @@ class FlyProvisioner implements ComputeProvisioner {
  */
 class RailwayProvisioner implements ComputeProvisioner {
   private apiToken: string;
+  private cloudApiUrl: string;
+  private sessionSecret: string;
 
   constructor() {
     const config = getConfig();
@@ -486,6 +512,15 @@ class RailwayProvisioner implements ComputeProvisioner {
       throw new Error('Railway configuration missing');
     }
     this.apiToken = config.compute.railway.apiToken;
+    this.cloudApiUrl = config.publicUrl;
+    this.sessionSecret = config.sessionSecret;
+  }
+
+  private generateWorkspaceToken(workspaceId: string): string {
+    return crypto
+      .createHmac('sha256', this.sessionSecret)
+      .update(`workspace:${workspaceId}`)
+      .digest('hex');
   }
 
   async provision(
@@ -539,7 +574,7 @@ class RailwayProvisioner implements ComputeProvisioner {
             projectId,
             name: 'workspace',
             source: {
-              image: 'ghcr.io/khaliqgant/agent-relay-workspace:latest',
+              image: WORKSPACE_IMAGE,
             },
           },
         },
@@ -558,6 +593,8 @@ class RailwayProvisioner implements ComputeProvisioner {
       PROVIDERS: (workspace.config.providers ?? []).join(','),
       PORT: String(WORKSPACE_PORT),
       AGENT_RELAY_DASHBOARD_PORT: String(WORKSPACE_PORT),
+      CLOUD_API_URL: this.cloudApiUrl,
+      WORKSPACE_TOKEN: this.generateWorkspaceToken(workspace.id),
     };
 
     for (const [provider, token] of credentials) {
@@ -724,6 +761,64 @@ class RailwayProvisioner implements ComputeProvisioner {
  * Local Docker provisioner (for development/self-hosted)
  */
 class DockerProvisioner implements ComputeProvisioner {
+  private cloudApiUrl: string;
+  private cloudApiUrlForContainer: string;
+  private sessionSecret: string;
+
+  constructor() {
+    const config = getConfig();
+    this.cloudApiUrl = config.publicUrl;
+    this.sessionSecret = config.sessionSecret;
+
+    // For Docker containers, localhost won't work - they need to reach the host
+    // Convert localhost URLs to host.docker.internal for container access
+    if (this.cloudApiUrl.includes('localhost') || this.cloudApiUrl.includes('127.0.0.1')) {
+      this.cloudApiUrlForContainer = this.cloudApiUrl
+        .replace('localhost', 'host.docker.internal')
+        .replace('127.0.0.1', 'host.docker.internal');
+      console.log(`[docker] Container API URL: ${this.cloudApiUrlForContainer} (host: ${this.cloudApiUrl})`);
+    } else {
+      this.cloudApiUrlForContainer = this.cloudApiUrl;
+    }
+  }
+
+  private generateWorkspaceToken(workspaceId: string): string {
+    return crypto
+      .createHmac('sha256', this.sessionSecret)
+      .update(`workspace:${workspaceId}`)
+      .digest('hex');
+  }
+
+  /**
+   * Wait for container to be healthy by polling the health endpoint
+   */
+  private async waitForHealthy(publicUrl: string, timeoutMs: number = 60_000): Promise<void> {
+    const startTime = Date.now();
+    const pollInterval = 2000;
+
+    console.log(`[docker] Waiting for container to be healthy at ${publicUrl}...`);
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        const response = await fetch(`${publicUrl}/health`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (response.ok) {
+          console.log(`[docker] Container healthy after ${Date.now() - startTime}ms`);
+          return;
+        }
+      } catch {
+        // Container not ready yet, continue polling
+      }
+
+      await wait(pollInterval);
+    }
+
+    throw new Error(`Container did not become healthy within ${timeoutMs}ms`);
+  }
+
   async provision(
     workspace: Workspace,
     credentials: Map<string, string>
@@ -739,6 +834,8 @@ class DockerProvisioner implements ComputeProvisioner {
       `-e PROVIDERS=${(workspace.config.providers ?? []).join(',')}`,
       `-e PORT=${WORKSPACE_PORT}`,
       `-e AGENT_RELAY_DASHBOARD_PORT=${WORKSPACE_PORT}`,
+      `-e CLOUD_API_URL=${this.cloudApiUrlForContainer}`,
+      `-e WORKSPACE_TOKEN=${this.generateWorkspaceToken(workspace.id)}`,
     ];
 
     for (const [provider, token] of credentials) {
@@ -749,17 +846,47 @@ class DockerProvisioner implements ComputeProvisioner {
     const { execSync } = await import('child_process');
     const hostPort = 3000 + Math.floor(Math.random() * 1000);
 
+    // When running in Docker, connect to the same network for container-to-container communication
+    const runningInDocker = process.env.RUNNING_IN_DOCKER === 'true';
+    const networkArg = runningInDocker ? '--network agent-relay-dev' : '';
+
+    // In development, mount local dist and docs folders for faster iteration
+    // Set WORKSPACE_DEV_MOUNT=true to enable
+    const devMount = process.env.WORKSPACE_DEV_MOUNT === 'true';
+    const volumeArgs = devMount
+      ? `-v "${process.cwd()}/dist:/app/dist:ro" -v "${process.cwd()}/docs:/app/docs:ro"`
+      : '';
+    if (devMount) {
+      console.log('[provisioner] Dev mode: mounting local dist/ and docs/ folders into workspace container');
+    }
+
     try {
       execSync(
-        `docker run -d --name ${containerName} -p ${hostPort}:${WORKSPACE_PORT} ${envArgs.join(' ')} ghcr.io/khaliqgant/agent-relay-workspace:latest`,
+        `docker run -d --user root --name ${containerName} ${networkArg} ${volumeArgs} -p ${hostPort}:${WORKSPACE_PORT} ${envArgs.join(' ')} ${WORKSPACE_IMAGE}`,
         { stdio: 'pipe' }
       );
 
+      const publicUrl = `http://localhost:${hostPort}`;
+
+      // Wait for container to be healthy before returning
+      // When running in Docker, use the internal container name for health check
+      const healthCheckUrl = runningInDocker
+        ? `http://${containerName}:${WORKSPACE_PORT}`
+        : publicUrl;
+      await this.waitForHealthy(healthCheckUrl);
+
       return {
         computeId: containerName,
-        publicUrl: `http://localhost:${hostPort}`,
+        publicUrl,
       };
     } catch (error) {
+      // Clean up container if it was created but health check failed
+      try {
+        const { execSync: execSyncCleanup } = await import('child_process');
+        execSyncCleanup(`docker rm -f ${containerName}`, { stdio: 'pipe' });
+      } catch {
+        // Ignore cleanup errors
+      }
       throw new Error(`Failed to start Docker container: ${error}`);
     }
   }
@@ -853,6 +980,16 @@ export class WorkspaceProvisioner {
       },
     });
 
+    // Add creator as owner in workspace_members for team collaboration support
+    await db.workspaceMembers.addMember({
+      workspaceId: workspace.id,
+      userId: config.userId,
+      role: 'owner',
+      invitedBy: config.userId, // Self-invited as creator
+    });
+    // Auto-accept the creator's membership
+    await db.workspaceMembers.acceptInvite(workspace.id, config.userId);
+
     // Get credentials
     const credentials = new Map<string, string>();
     for (const provider of config.providers) {
@@ -863,13 +1000,20 @@ export class WorkspaceProvisioner {
     }
 
     // GitHub token is required for cloning repositories
-    // Use Nango GitHub App token (fresh installation token, not from vault)
+    // Use direct token if provided (for testing), otherwise get from Nango
     if (config.repositories.length > 0) {
-      const githubToken = await getGithubAppTokenForUser(config.userId);
-      if (githubToken) {
-        credentials.set('github', githubToken);
+      if (config.githubToken) {
+        // Direct token provided (for testing)
+        credentials.set('github', config.githubToken);
+        console.log('[provisioner] Using provided GitHub token');
       } else {
-        console.warn(`[provisioner] No GitHub App token for user ${config.userId}; repository cloning may fail.`);
+        // Get fresh installation token from Nango GitHub App
+        const githubToken = await getGithubAppTokenForUser(config.userId);
+        if (githubToken) {
+          credentials.set('github', githubToken);
+        } else {
+          console.warn(`[provisioner] No GitHub App token for user ${config.userId}; repository cloning may fail.`);
+        }
       }
     }
 

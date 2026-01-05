@@ -11,6 +11,7 @@ import { getProjectPaths } from '../utils/project-namespace.js';
 import { resolveCommand } from '../utils/command-resolver.js';
 import { PtyWrapper, type PtyWrapperConfig, type SummaryEvent, type SessionEndEvent } from '../wrapper/pty-wrapper.js';
 import { selectShadowCli } from './shadow-cli.js';
+import { AgentPolicyService, type CloudPolicyFetcher } from '../policy/agent-policy.js';
 import type {
   SpawnRequest,
   SpawnResult,
@@ -64,6 +65,19 @@ export type OnAgentDeathCallback = (info: {
   resumeInstructions?: string;
 }) => void;
 
+/**
+ * Get a minimal relay reminder.
+ * Agents already have full relay docs via CLAUDE.md - this is just a brief reminder.
+ * Loading full docs (400+ lines) overwhelms agents and causes "meandering".
+ */
+function getMinimalRelayReminder(): string {
+  return `# Quick Relay Reference
+- Send: \`->relay:Name <<<message>>>\`
+- ACK tasks, send DONE when complete
+- Use \`trail start/decision/complete\` for trajectories
+- Output \`[[SESSION_END]]..[[/SESSION_END]]\` when done`;
+}
+
 export class AgentSpawner {
   private activeWorkers: Map<string, ActiveWorker> = new Map();
   private agentsPath: string;
@@ -74,6 +88,8 @@ export class AgentSpawner {
   private dashboardPort?: number;
   private onAgentDeath?: OnAgentDeathCallback;
   private cloudPersistence?: CloudPersistenceHandler;
+  private policyService?: AgentPolicyService;
+  private policyEnforcementEnabled = false;
 
   constructor(projectRoot: string, _tmuxSession?: string, dashboardPort?: number) {
     const paths = getProjectPaths(projectRoot);
@@ -86,6 +102,39 @@ export class AgentSpawner {
 
     // Ensure logs directory exists
     fs.mkdirSync(this.logsDir, { recursive: true });
+
+    // Initialize policy service if enforcement is enabled
+    if (process.env.AGENT_POLICY_ENFORCEMENT === '1') {
+      this.policyEnforcementEnabled = true;
+      this.policyService = new AgentPolicyService({
+        projectRoot: this.projectRoot,
+        workspaceId: process.env.WORKSPACE_ID,
+        strictMode: process.env.AGENT_POLICY_STRICT === '1',
+      });
+      console.log('[spawner] Policy enforcement enabled');
+    }
+  }
+
+  /**
+   * Set cloud policy fetcher for workspace-level policies
+   */
+  setCloudPolicyFetcher(fetcher: CloudPolicyFetcher): void {
+    if (this.policyService) {
+      // Recreate policy service with cloud fetcher
+      this.policyService = new AgentPolicyService({
+        projectRoot: this.projectRoot,
+        workspaceId: process.env.WORKSPACE_ID,
+        cloudFetcher: fetcher,
+        strictMode: process.env.AGENT_POLICY_STRICT === '1',
+      });
+    }
+  }
+
+  /**
+   * Get the policy service (for external access to policy checks)
+   */
+  getPolicyService(): AgentPolicyService | undefined {
+    return this.policyService;
   }
 
   /**
@@ -93,6 +142,7 @@ export class AgentSpawner {
    * Called after the dashboard server starts and we know the actual port.
    */
   setDashboardPort(port: number): void {
+    console.log(`[spawner] Dashboard port set to ${port} - nested spawns now enabled`);
     this.dashboardPort = port;
   }
 
@@ -166,7 +216,7 @@ export class AgentSpawner {
    * Spawn a new worker agent using node-pty
    */
   async spawn(request: SpawnRequest): Promise<SpawnResult> {
-    const { name, cli, task, team } = request;
+    const { name, cli, task, team, spawnerName } = request;
     const debug = process.env.DEBUG_SPAWN === '1';
 
     // Check if worker already exists
@@ -176,6 +226,23 @@ export class AgentSpawner {
         name,
         error: `Worker ${name} already exists`,
       };
+    }
+
+    // Policy enforcement: check if the spawner is authorized to spawn this agent
+    if (this.policyEnforcementEnabled && this.policyService && spawnerName) {
+      const decision = await this.policyService.canSpawn(spawnerName, name, cli);
+      if (!decision.allowed) {
+        console.warn(`[spawner] Policy blocked spawn: ${spawnerName} -> ${name}: ${decision.reason}`);
+        return {
+          success: false,
+          name,
+          error: `Policy denied: ${decision.reason}`,
+          policyDecision: decision,
+        };
+      }
+      if (debug) {
+        console.log(`[spawner:debug] Policy allowed spawn: ${spawnerName} -> ${name} (source: ${decision.policySource})`);
+      }
     }
 
     try {
@@ -208,15 +275,21 @@ export class AgentSpawner {
 
       // Create PtyWrapper config
       // Use dashboardPort for nested spawns (API-based, works in non-TTY contexts)
-      // Fall back to callbacks only if no dashboardPort is set
+      // Fall back to callbacks only if no dashboardPort is not set
       // Note: Spawned agents CAN spawn sub-workers intentionally - the parser is strict enough
       // to avoid accidental spawns from documentation text (requires line start, PascalCase, known CLI)
+      // Use request.cwd if specified, otherwise use projectRoot
+      const agentCwd = request.cwd || this.projectRoot;
+
+      // Log whether nested spawning will be enabled for this agent
+      console.log(`[spawner] Spawning ${name}: dashboardPort=${this.dashboardPort || 'none'} (${this.dashboardPort ? 'nested spawns enabled' : 'nested spawns disabled'})`);
+
       const ptyConfig: PtyWrapperConfig = {
         name,
         command,
         args,
         socketPath: this.socketPath,
-        cwd: this.projectRoot,
+        cwd: agentCwd,
         logsDir: this.logsDir,
         dashboardPort: this.dashboardPort,
         // Shadow agent configuration
@@ -308,10 +381,30 @@ export class AgentSpawner {
         };
       }
 
+      // Build the full message: minimal relay reminder + policy instructions (if any) + task
+      let fullMessage = task || '';
+
+      // Prepend a brief relay reminder (agents have full docs via CLAUDE.md)
+      // Note: Previously loaded full 400+ line docs which overwhelmed agents
+      const relayReminder = getMinimalRelayReminder();
+      if (relayReminder) {
+        fullMessage = `${relayReminder}\n\n---\n\n${fullMessage}`;
+        if (debug) console.log(`[spawner:debug] Prepended relay reminder for ${name}`);
+      }
+
+      // Prepend policy instructions if enforcement is enabled
+      if (this.policyEnforcementEnabled && this.policyService) {
+        const policyInstruction = await this.policyService.getPolicyInstruction(name);
+        if (policyInstruction) {
+          fullMessage = `${policyInstruction}\n\n${fullMessage}`;
+          if (debug) console.log(`[spawner:debug] Prepended policy instructions to task for ${name}`);
+        }
+      }
+
       // Send task via relay message if provided (not via direct PTY injection)
       // This ensures the agent is ready to receive before processing the task
-      if (task && task.trim()) {
-        if (debug) console.log(`[spawner:debug] Will send task via relay: ${task.substring(0, 50)}...`);
+      if (fullMessage && fullMessage.trim()) {
+        if (debug) console.log(`[spawner:debug] Will send task via relay: ${fullMessage.substring(0, 50)}...`);
 
         // If we have dashboard API, send task as relay message
         if (this.dashboardPort) {
@@ -323,7 +416,7 @@ export class AgentSpawner {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 to: name,
-                message: task,
+                message: fullMessage,
                 from: '__spawner__',
               }),
             });
@@ -333,16 +426,16 @@ export class AgentSpawner {
             } else {
               console.warn(`[spawner] Failed to send task via relay: ${result.error}`);
               // Fall back to direct injection
-              pty.write(task + '\r');
+              pty.write(fullMessage + '\r');
             }
           } catch (err: any) {
             console.warn(`[spawner] Relay send failed, falling back to direct injection: ${err.message}`);
-            pty.write(task + '\r');
+            pty.write(fullMessage + '\r');
           }
         } else {
           // No dashboard API available - use direct injection as fallback
           if (debug) console.log(`[spawner:debug] No dashboard API, using direct injection`);
-          pty.write(task + '\r');
+          pty.write(fullMessage + '\r');
         }
       }
 

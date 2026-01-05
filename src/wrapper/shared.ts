@@ -41,7 +41,7 @@ export interface InjectionMetrics {
 /**
  * CLI types for special handling
  */
-export type CliType = 'claude' | 'codex' | 'gemini' | 'droid' | 'spawned' | 'other';
+export type CliType = 'claude' | 'codex' | 'gemini' | 'droid' | 'opencode' | 'spawned' | 'other';
 
 /**
  * Injection timing constants
@@ -167,6 +167,7 @@ export function detectCliType(command: string): CliType {
   if (cmdLower.includes('codex')) return 'codex';
   if (cmdLower.includes('claude')) return 'claude';
   if (cmdLower.includes('droid')) return 'droid';
+  if (cmdLower.includes('opencode')) return 'opencode';
   return 'other';
 }
 
@@ -186,7 +187,7 @@ export const CLI_QUIRKS = {
    * Others may interpret the escape sequences literally.
    */
   supportsBracketedPaste: (cli: CliType): boolean => {
-    return cli === 'claude' || cli === 'codex' || cli === 'gemini';
+    return cli === 'claude' || cli === 'codex' || cli === 'gemini' || cli === 'opencode';
   },
 
   /**
@@ -207,6 +208,7 @@ export const CLI_QUIRKS = {
       gemini: /^[>›»]\s*$/,
       codex: /^[>›»]\s*$/,
       droid: /^[>›»]\s*$/,
+      opencode: /^[>›»]\s*$/,
       spawned: /^[>›»]\s*$/,
       other: /^[>$%#➜›»]\s*$/,
     };
@@ -239,6 +241,12 @@ export interface InjectionCallbacks {
   logError: (message: string) => void;
   /** Get the injection metrics object to update */
   getMetrics: () => InjectionMetrics;
+  /**
+   * Skip verification and trust that write succeeded.
+   * Set to true for PTY-based injection where CLIs don't echo input.
+   * When true, injection succeeds on first attempt without verification.
+   */
+  skipVerification?: boolean;
 }
 
 /**
@@ -297,6 +305,20 @@ export async function injectWithRetry(
 ): Promise<InjectionResult> {
   const metrics = callbacks.getMetrics();
   metrics.total++;
+
+  // Skip verification mode: trust that write() succeeds without checking output
+  // Used for PTY-based injection where CLIs don't echo input back
+  if (callbacks.skipVerification) {
+    try {
+      await callbacks.performInjection(injection);
+      metrics.successFirstTry++;
+      return { success: true, attempts: 1 };
+    } catch (err: any) {
+      callbacks.logError(`Injection error: ${err?.message || err}`);
+      metrics.failed++;
+      return { success: false, attempts: 1 };
+    }
+  }
 
   for (let attempt = 0; attempt < INJECTION_CONSTANTS.MAX_RETRIES; attempt++) {
     try {

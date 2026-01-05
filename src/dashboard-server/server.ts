@@ -18,6 +18,15 @@ import type { ProjectConfig, SpawnRequest } from '../bridge/types.js';
 import { listTrajectorySteps, getTrajectoryStatus, getTrajectoryHistory } from '../trajectory/integration.js';
 import { loadTeamsConfig } from '../bridge/teams-config.js';
 import { getMemoryMonitor } from '../resiliency/memory-monitor.js';
+import { detectWorkspacePath } from '../utils/project-namespace.js';
+import {
+  startCLIAuth,
+  getAuthSession,
+  cancelAuthSession,
+  submitAuthCode,
+  completeAuthSession,
+  getSupportedProviders,
+} from '../daemon/cli-auth.js';
 
 /**
  * Initialize cloud persistence for session tracking.
@@ -400,8 +409,13 @@ export async function startDashboard(
     : undefined;
 
   // Initialize spawner if enabled
+  // Use detectWorkspacePath to find the actual repo directory in cloud workspaces
+  const workspacePath = detectWorkspacePath(projectRoot || dataDir);
+  console.log(`[dashboard] Workspace path: ${workspacePath}`);
+
+  // Pass dashboard port to spawner so spawned agents can call spawn/release APIs for nested spawning
   const spawner: AgentSpawner | undefined = enableSpawner
-    ? new AgentSpawner(projectRoot || dataDir, tmuxSession)
+    ? new AgentSpawner(workspacePath, tmuxSession, port)
     : undefined;
 
   // Initialize cloud persistence and memory monitoring if enabled (RELAY_CLOUD_ENABLED=true)
@@ -1363,30 +1377,54 @@ export async function startDashboard(
       getAgentSummaries(),
     ]);
 
-    // Filter agents:
+    // Filter and separate agents from human users:
     // 1. Exclude "Dashboard" (internal agent, not a real team member)
     // 2. Exclude offline agents (no lastSeen or lastSeen > threshold)
+    // 3. Exclude agents without a known CLI (these are improperly registered or stale)
+    // 4. Separate human users (cli === 'dashboard') from AI agents
     const now = Date.now();
     // 30 seconds - aligns with heartbeat timeout (5s heartbeat * 6 multiplier = 30s)
     // This ensures agents disappear quickly after they stop responding to heartbeats
     const OFFLINE_THRESHOLD_MS = 30 * 1000;
-    const filteredAgents = Array.from(agentsMap.values()).filter(agent => {
-      // Exclude Dashboard
-      if (agent.name === 'Dashboard') return false;
 
-      // Exclude agents starting with __ (internal/system agents)
-      if (agent.name.startsWith('__')) return false;
+    // First pass: filter out invalid/offline entries
+    const validEntries = Array.from(agentsMap.values())
+      .filter(agent => {
+        // Exclude Dashboard
+        if (agent.name === 'Dashboard') return false;
 
-      // Exclude offline agents (no lastSeen or too old)
-      if (!agent.lastSeen) return false;
-      const lastSeenTime = new Date(agent.lastSeen).getTime();
-      if (now - lastSeenTime > OFFLINE_THRESHOLD_MS) return false;
+        // Exclude agents starting with __ (internal/system agents)
+        if (agent.name.startsWith('__')) return false;
 
-      return true;
-    });
+        // Exclude agents without a proper CLI (improperly registered or stale)
+        if (!agent.cli || agent.cli === 'Unknown') return false;
+
+        // Exclude offline agents (no lastSeen or too old)
+        if (!agent.lastSeen) return false;
+        const lastSeenTime = new Date(agent.lastSeen).getTime();
+        if (now - lastSeenTime > OFFLINE_THRESHOLD_MS) return false;
+
+        return true;
+      });
+
+    // Separate AI agents from human users
+    const filteredAgents = validEntries
+      .filter(agent => agent.cli !== 'dashboard')
+      .map(agent => ({
+        ...agent,
+        isHuman: false,
+      }));
+
+    const humanUsers = validEntries
+      .filter(agent => agent.cli === 'dashboard')
+      .map(agent => ({
+        ...agent,
+        isHuman: true,
+      }));
 
     return {
       agents: filteredAgents,
+      users: humanUsers,
       messages: allMessages,
       activity: allMessages, // For now, activity log is just the message log
       sessions,
@@ -1726,10 +1764,55 @@ export async function startDashboard(
     });
   });
 
+  // Deduplication for log output - prevent same content from being broadcast multiple times
+  // Key: agentName -> Set of recent content hashes (rolling window)
+  const recentLogHashes = new Map<string, Set<string>>();
+  const MAX_LOG_HASH_WINDOW = 50; // Keep last 50 hashes per agent
+
+  // Simple hash function for log dedup
+  const hashLogContent = (content: string): string => {
+    // Normalize whitespace and create a simple hash
+    const normalized = content.replace(/\s+/g, ' ').trim().slice(0, 200);
+    let hash = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      const char = normalized.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return hash.toString(36);
+  };
+
   // Function to broadcast log output to subscribed clients
   const broadcastLogOutput = (agentName: string, output: string) => {
     const clients = logSubscriptions.get(agentName);
     if (!clients || clients.size === 0) return;
+
+    // Skip empty or whitespace-only output
+    const trimmed = output.trim();
+    if (!trimmed) return;
+
+    // Dedup: Check if we've recently broadcast this content
+    const hash = hashLogContent(output);
+    let agentHashes = recentLogHashes.get(agentName);
+    if (!agentHashes) {
+      agentHashes = new Set();
+      recentLogHashes.set(agentName, agentHashes);
+    }
+
+    if (agentHashes.has(hash)) {
+      // Already broadcast this content recently, skip
+      return;
+    }
+
+    // Add to rolling window
+    agentHashes.add(hash);
+    if (agentHashes.size > MAX_LOG_HASH_WINDOW) {
+      // Remove oldest entry (first in Set iteration order)
+      const oldest = agentHashes.values().next().value;
+      if (oldest !== undefined) {
+        agentHashes.delete(oldest);
+      }
+    }
 
     const payload = JSON.stringify({
       type: 'output',
@@ -1765,8 +1848,39 @@ export async function startDashboard(
     return Array.from(onlineUsers.values()).map((state) => state.info);
   };
 
+  // Heartbeat to detect dead connections (30 seconds)
+  const PRESENCE_HEARTBEAT_INTERVAL = 30000;
+  const presenceHealth = new WeakMap<WebSocket, { isAlive: boolean }>();
+
+  const presenceHeartbeat = setInterval(() => {
+    wssPresence.clients.forEach((ws) => {
+      const health = presenceHealth.get(ws);
+      if (!health) {
+        presenceHealth.set(ws, { isAlive: true });
+        return;
+      }
+      if (!health.isAlive) {
+        ws.terminate();
+        return;
+      }
+      health.isAlive = false;
+      ws.ping();
+    });
+  }, PRESENCE_HEARTBEAT_INTERVAL);
+
+  wssPresence.on('close', () => {
+    clearInterval(presenceHeartbeat);
+  });
+
   wssPresence.on('connection', (ws) => {
-    console.log('[dashboard] Presence WebSocket client connected');
+    // Initialize health tracking (no log - too noisy)
+    presenceHealth.set(ws, { isAlive: true });
+
+    ws.on('pong', () => {
+      const health = presenceHealth.get(ws);
+      if (health) health.isAlive = true;
+    });
+
     let clientUsername: string | undefined;
 
     ws.on('message', (data) => {
@@ -1797,7 +1911,11 @@ export async function startDashboard(
               // Add this connection to existing user
               existing.connections.add(ws);
               existing.info.lastSeen = now;
-              console.log(`[dashboard] User ${username} opened new tab (${existing.connections.size} connections)`);
+              // Only log at milestones to reduce noise
+              const count = existing.connections.size;
+              if (count === 2 || count === 5 || count === 10 || count % 50 === 0) {
+                console.log(`[dashboard] User ${username} has ${count} connections`);
+              }
             } else {
               // New user - create presence state
               onlineUsers.set(username, {
@@ -1988,6 +2106,189 @@ export async function startDashboard(
       relayConnected,
       websocketClients: wss.clients.size,
     });
+  });
+
+  // ===== CLI Auth API (for workspace-based provider authentication) =====
+
+  /**
+   * POST /auth/cli/:provider/start - Start CLI auth flow
+   * Body: { useDeviceFlow?: boolean }
+   */
+  app.post('/auth/cli/:provider/start', async (req, res) => {
+    const { provider } = req.params;
+    const { useDeviceFlow } = req.body || {};
+    try {
+      const session = await startCLIAuth(provider, { useDeviceFlow });
+      res.json({
+        sessionId: session.id,
+        status: session.status,
+        authUrl: session.authUrl,
+      });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : 'Failed to start CLI auth',
+      });
+    }
+  });
+
+  /**
+   * GET /auth/cli/:provider/status/:sessionId - Get auth session status
+   */
+  app.get('/auth/cli/:provider/status/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const session = getAuthSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    res.json({
+      status: session.status,
+      authUrl: session.authUrl,
+      error: session.error,
+    });
+  });
+
+  /**
+   * GET /auth/cli/:provider/creds/:sessionId - Get credentials from completed auth
+   */
+  app.get('/auth/cli/:provider/creds/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const session = getAuthSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (session.status !== 'success') {
+      return res.status(400).json({ error: 'Auth not complete', status: session.status });
+    }
+    res.json({
+      token: session.token,
+      refreshToken: session.refreshToken,
+      expiresAt: session.tokenExpiresAt?.toISOString(),
+    });
+  });
+
+  /**
+   * POST /auth/cli/:provider/cancel/:sessionId - Cancel auth session
+   */
+  app.post('/auth/cli/:provider/cancel/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const cancelled = cancelAuthSession(sessionId);
+    if (!cancelled) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    res.json({ success: true });
+  });
+
+  /**
+   * POST /auth/cli/:provider/code/:sessionId - Submit auth code to PTY
+   * Used when OAuth returns a code that must be pasted into the CLI
+   */
+  app.post('/auth/cli/:provider/code/:sessionId', async (req, res) => {
+    const { provider, sessionId } = req.params;
+    const { code } = req.body;
+
+    console.log('[cli-auth] Auth code submission received', { provider, sessionId, codeLength: code?.length });
+
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ error: 'Auth code is required' });
+    }
+
+    try {
+      const result = await submitAuthCode(sessionId, code);
+      console.log('[cli-auth] Auth code submission result', { provider, sessionId, result });
+
+      if (!result.success) {
+        // Use 400 for all errors since they can be retried
+        return res.status(400).json({
+          error: result.error || 'Session not found or process not running',
+          needsRestart: result.needsRestart ?? true,
+        });
+      }
+
+      // Wait a few seconds for CLI to process and write credentials
+      // The 1s delay in submitAuthCode + CLI processing time means credentials
+      // should be available within 3-5 seconds
+      let sessionStatus = 'waiting_auth';
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const session = getAuthSession(sessionId);
+        if (session?.status === 'success') {
+          sessionStatus = 'success';
+          console.log('[cli-auth] Credentials found after code submission', { provider, sessionId, attempt: i + 1 });
+          break;
+        }
+        if (session?.status === 'error') {
+          sessionStatus = 'error';
+          break;
+        }
+      }
+
+      res.json({
+        success: true,
+        message: 'Auth code submitted',
+        status: sessionStatus,
+      });
+    } catch (err) {
+      console.error('[cli-auth] Auth code submission error', { provider, sessionId, error: String(err) });
+      return res.status(500).json({
+        error: 'Internal error submitting auth code. Please try again.',
+        needsRestart: true,
+      });
+    }
+  });
+
+  /**
+   * POST /auth/cli/:provider/complete/:sessionId - Complete auth
+   * For providers like Claude: just polls for credentials
+   * For providers like Codex: accepts authCode (redirect URL) and extracts the code
+   */
+  app.post('/auth/cli/:provider/complete/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    const { authCode } = req.body || {};
+
+    // If authCode provided, try to extract code and submit it
+    if (authCode && typeof authCode === 'string') {
+      let code = authCode;
+
+      // If it's a URL, extract the code parameter
+      if (authCode.startsWith('http')) {
+        try {
+          const url = new URL(authCode);
+          const codeParam = url.searchParams.get('code');
+          if (codeParam) {
+            code = codeParam;
+          }
+        } catch {
+          // Not a valid URL, use as-is
+        }
+      }
+
+      // Submit the code to the CLI process
+      const submitResult = await submitAuthCode(sessionId, code);
+      if (!submitResult.success) {
+        return res.status(400).json({
+          error: submitResult.error,
+          needsRestart: submitResult.needsRestart,
+        });
+      }
+
+      // Wait a moment for credentials to be written
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    // Poll for credentials
+    const result = await completeAuthSession(sessionId);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.json({ success: true, message: 'Authentication complete' });
+  });
+
+  /**
+   * GET /auth/cli/providers - List supported providers
+   */
+  app.get('/auth/cli/providers', (req, res) => {
+    res.json({ providers: getSupportedProviders() });
   });
 
   // ===== Metrics API =====
@@ -2981,6 +3282,140 @@ Start by greeting the project leads and asking for status updates.`;
       res.status(500).json({
         success: false,
         trajectories: [],
+        error: err.message,
+      });
+    }
+  });
+
+  // ===== Settings API =====
+
+  /**
+   * GET /api/settings - Get all workspace settings with documentation
+   */
+  app.get('/api/settings', async (_req, res) => {
+    try {
+      const { readRelayConfig, shouldStoreInRepo, getTrajectoriesStorageDescription } = await import('../trajectory/config.js');
+      const config = readRelayConfig();
+
+      res.json({
+        success: true,
+        settings: {
+          trajectories: {
+            storeInRepo: shouldStoreInRepo(),
+            storageLocation: getTrajectoriesStorageDescription(),
+            description: 'Trajectories record the journey of agent work using the PDERO paradigm (Plan, Design, Execute, Review, Observe). They capture decisions, phase transitions, and retrospectives.',
+            benefits: [
+              'Track why decisions were made, not just what was built',
+              'Enable session recovery when agents crash or context is lost',
+              'Provide learning data for future agents working on similar tasks',
+              'Create an audit trail of agent work for review',
+            ],
+            learnMore: 'https://pdero.com',
+            optInReason: 'Enable "Store in repo" to version-control your trajectories alongside your code. This is useful for teams who want to review agent decision-making processes.',
+          },
+        },
+        config,
+      });
+    } catch (err: any) {
+      console.error('[api] Settings error:', err);
+      res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  });
+
+  /**
+   * GET /api/settings/trajectory - Get trajectory storage settings
+   */
+  app.get('/api/settings/trajectory', async (_req, res) => {
+    try {
+      const { readRelayConfig, shouldStoreInRepo, getTrajectoriesStorageDescription } = await import('../trajectory/config.js');
+      const config = readRelayConfig();
+
+      res.json({
+        success: true,
+        settings: {
+          storeInRepo: shouldStoreInRepo(),
+          storageLocation: getTrajectoriesStorageDescription(),
+        },
+        config: config.trajectories || {},
+        // Documentation for the UI
+        documentation: {
+          title: 'Trajectory Storage',
+          description: 'Trajectories record the journey of agent work using the PDERO paradigm (Plan, Design, Execute, Review, Observe).',
+          whatIsIt: 'A trajectory captures not just what an agent built, but WHY it made specific decisions. This includes phase transitions, key decisions with reasoning, and retrospective summaries.',
+          benefits: [
+            'Understand agent decision-making for code review',
+            'Enable session recovery if agents crash',
+            'Train future agents on your codebase patterns',
+            'Create audit trails of AI work',
+          ],
+          storeInRepoExplanation: 'When enabled, trajectories are stored in .trajectories/ in your repo and can be committed to source control. When disabled (default), they are stored in your user directory (~/.config/agent-relay/trajectories/).',
+          learnMore: 'https://pdero.com',
+        },
+      });
+    } catch (err: any) {
+      console.error('[api] Settings trajectory error:', err);
+      res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  });
+
+  /**
+   * PUT /api/settings/trajectory - Update trajectory storage settings
+   *
+   * Body: { storeInRepo: boolean }
+   *
+   * This writes to .relay/config.json in the project root
+   */
+  app.put('/api/settings/trajectory', async (req, res) => {
+    try {
+      const { storeInRepo } = req.body;
+
+      if (typeof storeInRepo !== 'boolean') {
+        return res.status(400).json({
+          success: false,
+          error: 'storeInRepo must be a boolean',
+        });
+      }
+
+      const { getRelayConfigPath, readRelayConfig } = await import('../trajectory/config.js');
+      const { getProjectPaths } = await import('../utils/project-namespace.js');
+      const { projectRoot: _projectRoot } = getProjectPaths();
+
+      // Read existing config
+      const config = readRelayConfig();
+
+      // Update trajectory settings
+      config.trajectories = {
+        ...config.trajectories,
+        storeInRepo,
+      };
+
+      // Ensure .relay directory exists
+      const configPath = getRelayConfigPath();
+      const configDir = path.dirname(configPath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+
+      // Write updated config
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+      res.json({
+        success: true,
+        settings: {
+          storeInRepo,
+          storageLocation: storeInRepo ? 'repo (.trajectories/)' : 'user (~/.config/agent-relay/trajectories/)',
+        },
+      });
+    } catch (err: any) {
+      console.error('[api] Settings trajectory update error:', err);
+      res.status(500).json({
+        success: false,
         error: err.message,
       });
     }

@@ -126,6 +126,7 @@ const PLACEHOLDER_TARGETS = new Set([
   'someagent',
   'otheragent',
   'worker',        // Too generic, often used in examples
+  // NOTE: Don't add 'agent', 'name', 'lead', 'developer', etc. - these can be valid agent names!
 ]);
 
 /**
@@ -140,7 +141,7 @@ function isInstructionalText(body: string): boolean {
  * Check if a target name is a placeholder commonly used in documentation/examples.
  * These should not be treated as real message targets.
  */
-function isPlaceholderTarget(target: string): boolean {
+export function isPlaceholderTarget(target: string): boolean {
   return PLACEHOLDER_TARGETS.has(target.toLowerCase());
 }
 

@@ -87,6 +87,7 @@ export function usePresence(options: UsePresenceOptions = {}): UsePresenceReturn
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isConnectingRef = useRef(false); // Prevent race conditions
 
   // Clear stale typing indicators (after 3 seconds of no update)
   useEffect(() => {
@@ -103,13 +104,16 @@ export function usePresence(options: UsePresenceOptions = {}): UsePresenceReturn
   const connect = useCallback(() => {
     if (!currentUser) return; // Don't connect without user info
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (isConnectingRef.current) return; // Prevent concurrent connect attempts
 
+    isConnectingRef.current = true;
     const url = wsUrl || getPresenceUrl();
 
     try {
       const ws = new WebSocket(url);
 
       ws.onopen = () => {
+        isConnectingRef.current = false;
         setIsConnected(true);
 
         // Announce presence
@@ -124,13 +128,16 @@ export function usePresence(options: UsePresenceOptions = {}): UsePresenceReturn
       };
 
       ws.onclose = () => {
+        isConnectingRef.current = false;
         setIsConnected(false);
         wsRef.current = null;
 
-        // Reconnect after 2 seconds
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connect();
-        }, 2000);
+        // Reconnect after 2 seconds (only if not intentionally disconnected)
+        if (currentUser) {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connect();
+          }, 2000);
+        }
       };
 
       ws.onerror = (event) => {
@@ -200,21 +207,30 @@ export function usePresence(options: UsePresenceOptions = {}): UsePresenceReturn
   }, [currentUser, wsUrl]);
 
   const disconnect = useCallback(() => {
+    // Clear reconnect timeout first
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
 
+    // Reset connecting flag
+    isConnectingRef.current = false;
+
     if (wsRef.current) {
+      // Prevent auto-reconnect by removing onclose handler before closing
+      const ws = wsRef.current;
+      ws.onclose = null;
+      ws.onerror = null;
+
       // Send leave message before closing
-      if (wsRef.current.readyState === WebSocket.OPEN && currentUser) {
-        wsRef.current.send(JSON.stringify({
+      if (ws.readyState === WebSocket.OPEN && currentUser) {
+        ws.send(JSON.stringify({
           type: 'presence',
           action: 'leave',
           username: currentUser.username,
         }));
       }
-      wsRef.current.close();
+      ws.close();
       wsRef.current = null;
     }
 
@@ -249,15 +265,25 @@ export function usePresence(options: UsePresenceOptions = {}): UsePresenceReturn
   }, [currentUser]);
 
   // Connect when user is available
+  // Use refs to avoid effect re-running on function reference changes
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+
   useEffect(() => {
-    if (autoConnect && currentUser) {
-      connect();
+    if (!autoConnect || !currentUserRef.current) return;
+
+    // Prevent connecting if already connected or connecting
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      return;
     }
+
+    connect();
 
     return () => {
       disconnect();
     };
-  }, [autoConnect, currentUser, connect, disconnect]);
+    // Only re-run when autoConnect or currentUser identity changes
+  }, [autoConnect, currentUser?.username, connect, disconnect]);
 
   // Send leave on page unload
   useEffect(() => {

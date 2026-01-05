@@ -38,6 +38,12 @@ export {
   useCloudSessionOptional,
   type CloudSessionProviderProps,
 } from './CloudSessionProvider';
+export {
+  WorkspaceProvider,
+  useWorkspace,
+  useWorkspaceWsUrl,
+  type WorkspaceProviderProps,
+} from './WorkspaceContext';
 
 // Layout Components
 export { Sidebar, type SidebarProps } from './layout/Sidebar';

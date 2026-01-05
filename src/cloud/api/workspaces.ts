@@ -105,6 +105,136 @@ workspacesRouter.post('/', checkWorkspaceLimit, async (req: Request, res: Respon
 });
 
 /**
+ * GET /api/workspaces/summary
+ * Get summary of all user workspaces for dashboard status indicator
+ * NOTE: This route MUST be before /:id to avoid being caught by parameterized route
+ */
+workspacesRouter.get('/summary', async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+
+  try {
+    const workspaces = await db.workspaces.findByUserId(userId);
+    const provisioner = getProvisioner();
+
+    // Get live status for each workspace
+    const workspaceSummaries = await Promise.all(
+      workspaces.map(async (w) => {
+        let liveStatus = w.status;
+        try {
+          liveStatus = await provisioner.getStatus(w.id);
+        } catch {
+          // Fall back to DB status
+        }
+
+        return {
+          id: w.id,
+          name: w.name,
+          status: liveStatus,
+          publicUrl: w.publicUrl,
+          isStopped: liveStatus === 'stopped',
+          isRunning: liveStatus === 'running',
+          isProvisioning: liveStatus === 'provisioning',
+          hasError: liveStatus === 'error',
+        };
+      })
+    );
+
+    // Overall status for quick dashboard indicator
+    const hasRunningWorkspace = workspaceSummaries.some(w => w.isRunning);
+    const hasStoppedWorkspace = workspaceSummaries.some(w => w.isStopped);
+    const hasProvisioningWorkspace = workspaceSummaries.some(w => w.isProvisioning);
+
+    res.json({
+      workspaces: workspaceSummaries,
+      summary: {
+        total: workspaceSummaries.length,
+        running: workspaceSummaries.filter(w => w.isRunning).length,
+        stopped: workspaceSummaries.filter(w => w.isStopped).length,
+        provisioning: workspaceSummaries.filter(w => w.isProvisioning).length,
+        error: workspaceSummaries.filter(w => w.hasError).length,
+      },
+      overallStatus: hasRunningWorkspace
+        ? 'ready'
+        : hasProvisioningWorkspace
+          ? 'provisioning'
+          : hasStoppedWorkspace
+            ? 'stopped'
+            : workspaceSummaries.length === 0
+              ? 'none'
+              : 'error',
+    });
+  } catch (error) {
+    console.error('Error getting workspace summary:', error);
+    res.status(500).json({ error: 'Failed to get workspace summary' });
+  }
+});
+
+/**
+ * GET /api/workspaces/primary
+ * Get the user's primary workspace (first/default) with live status
+ * Used by dashboard to show quick status indicator
+ * NOTE: This route MUST be before /:id to avoid being caught by parameterized route
+ */
+workspacesRouter.get('/primary', async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+
+  try {
+    const workspaces = await db.workspaces.findByUserId(userId);
+
+    if (workspaces.length === 0) {
+      return res.json({
+        exists: false,
+        message: 'No workspace found. Connect a repository to auto-provision one.',
+      });
+    }
+
+    const primary = workspaces[0];
+    const provisioner = getProvisioner();
+
+    let liveStatus = primary.status;
+    try {
+      liveStatus = await provisioner.getStatus(primary.id);
+    } catch {
+      // Fall back to DB status
+    }
+
+    res.json({
+      exists: true,
+      workspace: {
+        id: primary.id,
+        name: primary.name,
+        status: liveStatus,
+        publicUrl: primary.publicUrl,
+        isStopped: liveStatus === 'stopped',
+        isRunning: liveStatus === 'running',
+        isProvisioning: liveStatus === 'provisioning',
+        hasError: liveStatus === 'error',
+        config: {
+          providers: primary.config.providers || [],
+          repositories: primary.config.repositories || [],
+        },
+      },
+      // Quick messages for UI
+      statusMessage: liveStatus === 'running'
+        ? 'Workspace is running'
+        : liveStatus === 'stopped'
+          ? 'Workspace is idle (will start automatically when needed)'
+          : liveStatus === 'provisioning'
+            ? 'Workspace is being provisioned...'
+            : 'Workspace has an error',
+      actionNeeded: liveStatus === 'stopped'
+        ? 'wakeup'
+        : liveStatus === 'error'
+          ? 'check_error'
+          : null,
+    });
+  } catch (error) {
+    console.error('Error getting primary workspace:', error);
+    res.status(500).json({ error: 'Failed to get primary workspace' });
+  }
+});
+
+/**
  * GET /api/workspaces/:id
  * Get workspace details
  */
@@ -531,8 +661,121 @@ async function removeDomainFromCompute(workspace: Workspace): Promise<void> {
 }
 
 /**
+ * POST /api/workspaces/:id/proxy/*
+ * Proxy API requests to the workspace container
+ * This allows the dashboard to make REST calls through the cloud server
+ */
+workspacesRouter.all('/:id/proxy/{*proxyPath}', async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { id } = req.params;
+  // Express 5 wildcard params return an array of path segments, not a slash-separated string
+  const proxyPathParam = req.params.proxyPath;
+  const proxyPath = Array.isArray(proxyPathParam) ? proxyPathParam.join('/') : proxyPathParam;
+
+  try {
+    const workspace = await db.workspaces.findById(id);
+
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    if (workspace.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    if (workspace.status !== 'running' || !workspace.publicUrl) {
+      return res.status(400).json({ error: 'Workspace is not running' });
+    }
+
+    // Determine the internal URL for proxying
+    // When running inside Docker, localhost URLs won't work - use the container name instead
+    let targetBaseUrl = workspace.publicUrl;
+    const runningInDocker = process.env.RUNNING_IN_DOCKER === 'true';
+
+    if (runningInDocker && workspace.computeId && targetBaseUrl.includes('localhost')) {
+      // Replace localhost URL with container name for Docker networking
+      // workspace.computeId is the container name (e.g., "ar-abc12345")
+      // The workspace port is 3888 inside the container
+      targetBaseUrl = `http://${workspace.computeId}:3888`;
+    }
+
+    const targetUrl = `${targetBaseUrl}/api/${proxyPath}`;
+    console.log(`[workspace-proxy] ${req.method} ${targetUrl}`);
+
+    // Store targetUrl for error handling
+    (req as any)._proxyTargetUrl = targetUrl;
+
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
+    const fetchOptions: RequestInit = {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    };
+
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    let proxyRes: globalThis.Response;
+    try {
+      proxyRes = await fetch(targetUrl, fetchOptions);
+    } finally {
+      clearTimeout(timeout);
+    }
+    console.log(`[workspace-proxy] Response: ${proxyRes.status} ${proxyRes.statusText}`);
+
+    // Handle non-JSON responses gracefully
+    const contentType = proxyRes.headers.get('content-type');
+    if (contentType?.includes('application/json')) {
+      const data = await proxyRes.json();
+      res.status(proxyRes.status).json(data);
+    } else {
+      const text = await proxyRes.text();
+      res.status(proxyRes.status).send(text);
+    }
+  } catch (error) {
+    const targetUrl = (req as any)._proxyTargetUrl || 'unknown';
+    console.error('[workspace-proxy] Error proxying to:', targetUrl);
+    console.error('[workspace-proxy] Error details:', error);
+
+    // Check for timeout/abort errors
+    if (error instanceof Error && error.name === 'AbortError') {
+      res.status(504).json({
+        error: 'Workspace request timed out',
+        details: 'The workspace did not respond within 15 seconds',
+        targetUrl: targetUrl,
+      });
+      return;
+    }
+
+    // Check for connection refused (workspace not running)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('fetch failed')) {
+      res.status(503).json({
+        error: 'Workspace is not reachable',
+        details: 'The workspace container may not be running or accepting connections',
+        targetUrl: targetUrl,
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error: 'Failed to proxy request to workspace',
+      details: errorMessage,
+      targetUrl: targetUrl, // Include target URL for debugging
+    });
+  }
+});
+
+/**
  * POST /api/workspaces/quick
  * Quick provision: one-click with defaults
+ * Providers are optional - can be connected after workspace creation via CLI login
  */
 workspacesRouter.post('/quick', checkWorkspaceLimit, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
@@ -543,17 +786,11 @@ workspacesRouter.post('/quick', checkWorkspaceLimit, async (req: Request, res: R
   }
 
   try {
-    // Get user's connected providers
+    // Get user's connected providers (optional now)
     const credentials = await db.credentials.findByUserId(userId);
     const providers = credentials
       .filter((c) => c.provider !== 'github')
       .map((c) => c.provider);
-
-    if (providers.length === 0) {
-      return res.status(400).json({
-        error: 'No AI providers connected. Please connect at least one provider.',
-      });
-    }
 
     // Create workspace with defaults
     const provisioner = getProvisioner();
@@ -562,7 +799,7 @@ workspacesRouter.post('/quick', checkWorkspaceLimit, async (req: Request, res: R
     const result = await provisioner.provision({
       userId,
       name: workspaceName,
-      providers,
+      providers: providers.length > 0 ? providers : [], // Empty is OK now
       repositories: [repositoryFullName],
       supervisorEnabled: true,
       maxAgents: 10,
@@ -579,7 +816,10 @@ workspacesRouter.post('/quick', checkWorkspaceLimit, async (req: Request, res: R
       workspaceId: result.workspaceId,
       status: result.status,
       publicUrl: result.publicUrl,
-      message: 'Workspace provisioned successfully!',
+      providersConnected: providers.length > 0,
+      message: providers.length > 0
+        ? 'Workspace provisioned successfully!'
+        : 'Workspace provisioned! Connect an AI provider to start using agents.',
     });
   } catch (error) {
     console.error('Error quick provisioning:', error);

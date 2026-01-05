@@ -2,17 +2,60 @@
  * Onboarding API Routes
  *
  * Handles CLI proxy authentication for Claude Code and other providers.
- * Spawns CLI tools to get auth URLs, captures tokens.
+ * Spawns CLI tools via PTY to get auth URLs, captures tokens.
+ *
+ * We use node-pty instead of child_process.spawn because:
+ * 1. Many CLIs detect if they're in a TTY and behave differently
+ * 2. Interactive OAuth flows often require TTY for proper output
+ * 3. PTY ensures the CLI outputs auth URLs correctly
  */
 
 import { Router, Request, Response } from 'express';
-import { spawn, ChildProcess } from 'child_process';
-import crypto from 'crypto';
+import type { IPty } from 'node-pty';
+import * as crypto from 'crypto';
 import { requireAuth } from './auth.js';
 import { db } from '../db/index.js';
 import { vault } from '../vault/index.js';
 
+// Import for local use
+import {
+  CLI_AUTH_CONFIG,
+  runCLIAuthViaPTY,
+  stripAnsiCodes,
+  matchesSuccessPattern,
+  findMatchingPrompt,
+  validateProviderConfig,
+  validateAllProviderConfigs,
+  getSupportedProviders,
+  type CLIAuthConfig,
+  type PTYAuthResult,
+  type PTYAuthOptions,
+  type PromptHandler,
+} from './cli-pty-runner.js';
+
+// Re-export from shared module for backward compatibility
+export {
+  CLI_AUTH_CONFIG,
+  runCLIAuthViaPTY,
+  stripAnsiCodes,
+  matchesSuccessPattern,
+  findMatchingPrompt,
+  validateProviderConfig,
+  validateAllProviderConfigs,
+  getSupportedProviders,
+  type CLIAuthConfig,
+  type PTYAuthResult,
+  type PTYAuthOptions,
+  type PromptHandler,
+};
+
 export const onboardingRouter = Router();
+
+// Debug: log all requests to this router
+onboardingRouter.use((req, res, next) => {
+  console.log(`[onboarding] ${req.method} ${req.path} - body:`, JSON.stringify(req.body));
+  next();
+});
 
 // All routes require authentication
 onboardingRouter.use(requireAuth);
@@ -24,13 +67,19 @@ onboardingRouter.use(requireAuth);
 interface CLIAuthSession {
   userId: string;
   provider: string;
-  process?: ChildProcess;
+  process?: IPty;
   authUrl?: string;
   callbackUrl?: string;
   status: 'starting' | 'waiting_auth' | 'success' | 'error' | 'timeout';
   token?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: Date;
   error?: string;
   createdAt: Date;
+  output: string; // Accumulated output for debugging
+  // Workspace delegation fields (set when auth runs in workspace daemon)
+  workspaceUrl?: string;
+  workspaceSessionId?: string;
 }
 
 const activeSessions = new Map<string, CLIAuthSession>();
@@ -38,52 +87,34 @@ const activeSessions = new Map<string, CLIAuthSession>();
 // Clean up old sessions periodically
 setInterval(() => {
   const now = Date.now();
-  for (const [id, session] of activeSessions) {
+  activeSessions.forEach((session, id) => {
     // Remove sessions older than 10 minutes
     if (now - session.createdAt.getTime() > 10 * 60 * 1000) {
       if (session.process) {
-        session.process.kill();
+        try {
+          session.process.kill();
+        } catch {
+          // Process may already be dead
+        }
       }
       activeSessions.delete(id);
     }
-  }
+  });
 }, 60000);
 
 /**
- * CLI commands and URL patterns for each provider
- */
-const CLI_AUTH_CONFIG: Record<string, {
-  command: string;
-  args: string[];
-  urlPattern: RegExp;
-  tokenPattern?: RegExp;
-  credentialPath?: string;
-}> = {
-  anthropic: {
-    // Claude Code CLI login
-    command: 'claude',
-    args: ['login', '--no-open'],
-    // Claude outputs: "Please open: https://..."
-    urlPattern: /(?:open|visit|go to)[:\s]+(\S+anthropic\S+)/i,
-    // Token might be in output or in credentials file
-    credentialPath: '~/.claude/credentials.json',
-  },
-  openai: {
-    // Codex CLI auth
-    command: 'codex',
-    args: ['auth', '--no-browser'],
-    urlPattern: /(?:open|visit|go to)[:\s]+(\S+openai\S+)/i,
-    credentialPath: '~/.codex/credentials.json',
-  },
-};
-
-/**
  * POST /api/onboarding/cli/:provider/start
- * Start CLI-based auth - spawns the CLI and captures auth URL
+ * Start CLI-based auth - forwards to workspace daemon if available
+ *
+ * CLI auth requires a running workspace since CLI tools are installed there.
+ * For onboarding without a workspace, users should use the API key flow.
  */
 onboardingRouter.post('/cli/:provider/start', async (req: Request, res: Response) => {
+  console.log('[onboarding] Route handler entered! provider:', req.params.provider);
   const { provider } = req.params;
   const userId = req.session.userId!;
+  const { workspaceId, useDeviceFlow } = req.body; // Optional: specific workspace, device flow option
+  console.log('[onboarding] userId:', userId, 'workspaceId:', workspaceId, 'useDeviceFlow:', useDeviceFlow);
 
   const config = CLI_AUTH_CONFIG[provider];
   if (!config) {
@@ -93,89 +124,99 @@ onboardingRouter.post('/cli/:provider/start', async (req: Request, res: Response
     });
   }
 
-  // Create session
-  const sessionId = crypto.randomUUID();
-  const session: CLIAuthSession = {
-    userId,
-    provider,
-    status: 'starting',
-    createdAt: new Date(),
-  };
-  activeSessions.set(sessionId, session);
-
   try {
-    // Spawn CLI process
-    const proc = spawn(config.command, config.args, {
-      env: { ...process.env, NO_COLOR: '1' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    session.process = proc;
-    let _output = '';
-
-    // Capture stdout/stderr for auth URL
-    const handleOutput = (data: Buffer) => {
-      const text = data.toString();
-      _output += text;
-
-      // Look for auth URL
-      const match = text.match(config.urlPattern);
-      if (match && match[1]) {
-        session.authUrl = match[1];
-        session.status = 'waiting_auth';
+    // Find a running workspace to use for CLI auth
+    let workspace;
+    if (workspaceId) {
+      workspace = await db.workspaces.findById(workspaceId);
+      if (!workspace) {
+        console.log(`[onboarding] Workspace ${workspaceId} not found in database`);
+        return res.status(404).json({ error: 'Workspace not found' });
       }
-
-      // Look for success indicators
-      if (text.toLowerCase().includes('success') ||
-          text.toLowerCase().includes('authenticated') ||
-          text.toLowerCase().includes('logged in')) {
-        session.status = 'success';
+      if (workspace.userId !== userId) {
+        console.log(`[onboarding] Workspace ${workspaceId} belongs to ${workspace.userId}, not ${userId}`);
+        return res.status(404).json({ error: 'Workspace not found' });
       }
-    };
-
-    proc.stdout.on('data', handleOutput);
-    proc.stderr.on('data', handleOutput);
-
-    proc.on('error', (err) => {
-      session.status = 'error';
-      session.error = `Failed to start CLI: ${err.message}`;
-    });
-
-    proc.on('exit', async (code) => {
-      if (code === 0 && session.status !== 'error') {
-        session.status = 'success';
-        // Try to read credentials from file
-        await extractCredentials(session, config);
-      } else if (session.status === 'starting') {
-        session.status = 'error';
-        session.error = `CLI exited with code ${code}`;
-      }
-    });
-
-    // Wait a moment for URL to appear
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Return session info
-    if (session.authUrl) {
-      res.json({
-        sessionId,
-        status: 'waiting_auth',
-        authUrl: session.authUrl,
-        message: 'Open the auth URL to complete login',
-      });
-    } else if (session.status === 'error') {
-      activeSessions.delete(sessionId);
-      res.status(500).json({ error: session.error || 'CLI auth failed to start' });
     } else {
-      // Still starting, return session ID to poll
-      res.json({
-        sessionId,
-        status: 'starting',
-        message: 'Auth session starting, poll for status',
+      // Find any running workspace for this user
+      const workspaces = await db.workspaces.findByUserId(userId);
+      workspace = workspaces.find(w => w.status === 'running' && w.publicUrl);
+    }
+
+    if (!workspace || workspace.status !== 'running' || !workspace.publicUrl) {
+      return res.status(400).json({
+        error: 'CLI auth requires a running workspace',
+        code: 'NO_RUNNING_WORKSPACE',
+        message: 'Please start a workspace first, or use the API key input to connect your provider.',
+        hint: 'You can create a workspace without providers and connect them afterward using CLI auth.',
       });
     }
+
+    // Forward auth request to workspace daemon
+    // When running in Docker, localhost refers to the container, not the host
+    // Use host.docker.internal on Mac/Windows to reach the host machine
+    let workspaceUrl = workspace.publicUrl.replace(/\/$/, '');
+
+    // Detect Docker by checking for /.dockerenv file or RUNNING_IN_DOCKER env var
+    const isInDocker = process.env.RUNNING_IN_DOCKER === 'true' ||
+                       await import('fs').then(fs => fs.existsSync('/.dockerenv')).catch(() => false);
+
+    console.log('[onboarding] isInDocker:', isInDocker, 'RUNNING_IN_DOCKER:', process.env.RUNNING_IN_DOCKER);
+
+    if (isInDocker && workspaceUrl.includes('localhost')) {
+      workspaceUrl = workspaceUrl.replace('localhost', 'host.docker.internal');
+      console.log('[onboarding] Translated localhost to host.docker.internal');
+    }
+    const targetUrl = `${workspaceUrl}/auth/cli/${provider}/start`;
+    console.log('[onboarding] Forwarding to workspace daemon:', targetUrl);
+
+    const authResponse = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ useDeviceFlow }),
+    });
+
+    console.log('[onboarding] Workspace daemon response:', authResponse.status);
+
+    if (!authResponse.ok) {
+      const errorData = await authResponse.json().catch(() => ({})) as { error?: string };
+      console.log('[onboarding] Workspace daemon error:', errorData);
+      return res.status(authResponse.status).json({
+        error: errorData.error || 'Failed to start CLI auth in workspace',
+      });
+    }
+
+    const workspaceSession = await authResponse.json() as {
+      sessionId: string;
+      status?: string;
+      authUrl?: string;
+    };
+
+    // Create cloud session to track this
+    const sessionId = crypto.randomUUID();
+    const session: CLIAuthSession = {
+      userId,
+      provider,
+      status: (workspaceSession.status as CLIAuthSession['status']) || 'starting',
+      authUrl: workspaceSession.authUrl,
+      createdAt: new Date(),
+      output: '',
+      // Store workspace info for status polling and auth code forwarding
+      workspaceUrl,
+      workspaceSessionId: workspaceSession.sessionId,
+    };
+
+    activeSessions.set(sessionId, session);
+    console.log('[onboarding] Session created:', { sessionId, workspaceUrl, workspaceSessionId: workspaceSession.sessionId });
+
+    res.json({
+      sessionId,
+      status: session.status,
+      authUrl: session.authUrl,
+      workspaceId: workspace.id,
+      message: session.authUrl ? 'Open the auth URL to complete login' : 'Auth session starting, poll for status',
+    });
   } catch (error) {
-    activeSessions.delete(sessionId);
     console.error(`Error starting CLI auth for ${provider}:`, error);
     res.status(500).json({ error: 'Failed to start CLI authentication' });
   }
@@ -183,10 +224,10 @@ onboardingRouter.post('/cli/:provider/start', async (req: Request, res: Response
 
 /**
  * GET /api/onboarding/cli/:provider/status/:sessionId
- * Check status of CLI auth session
+ * Check status of CLI auth session - forwards to workspace daemon
  */
-onboardingRouter.get('/cli/:provider/status/:sessionId', (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+onboardingRouter.get('/cli/:provider/status/:sessionId', async (req: Request, res: Response) => {
+  const { provider, sessionId } = req.params;
   const userId = req.session.userId!;
 
   const session = activeSessions.get(sessionId);
@@ -196,6 +237,28 @@ onboardingRouter.get('/cli/:provider/status/:sessionId', (req: Request, res: Res
 
   if (session.userId !== userId) {
     return res.status(403).json({ error: 'Unauthorized' });
+  }
+
+  // If we have workspace info, poll the workspace for status
+  if (session.workspaceUrl && session.workspaceSessionId) {
+    try {
+      const statusResponse = await fetch(
+        `${session.workspaceUrl}/auth/cli/${provider}/status/${session.workspaceSessionId}`
+      );
+      if (statusResponse.ok) {
+        const workspaceStatus = await statusResponse.json() as {
+          status?: string;
+          authUrl?: string;
+          error?: string;
+        };
+        // Update local session with workspace status
+        session.status = (workspaceStatus.status as CLIAuthSession['status']) || session.status;
+        session.authUrl = workspaceStatus.authUrl || session.authUrl;
+        session.error = workspaceStatus.error;
+      }
+    } catch (err) {
+      console.error('[onboarding] Failed to poll workspace status:', err);
+    }
   }
 
   res.json({
@@ -208,11 +271,17 @@ onboardingRouter.get('/cli/:provider/status/:sessionId', (req: Request, res: Res
 /**
  * POST /api/onboarding/cli/:provider/complete/:sessionId
  * Mark CLI auth as complete and store credentials
+ *
+ * Handles two modes:
+ * 1. Workspace delegation: Forwards to workspace daemon to complete auth, then fetches credentials
+ * 2. Direct: Uses token from body or session
  */
 onboardingRouter.post('/cli/:provider/complete/:sessionId', async (req: Request, res: Response) => {
   const { provider, sessionId } = req.params;
   const userId = req.session.userId!;
-  const { token } = req.body; // Optional: user can paste token directly
+  const { token, authCode } = req.body; // token for direct mode, authCode for Codex redirect
+
+  console.log(`[onboarding] POST /cli/${provider}/complete/${sessionId} - token: ${token ? 'provided' : 'none'}, authCode: ${authCode ? 'provided' : 'none'}`);
 
   const session = activeSessions.get(sessionId);
   if (!session) {
@@ -224,15 +293,58 @@ onboardingRouter.post('/cli/:provider/complete/:sessionId', async (req: Request,
   }
 
   try {
-    // If token provided directly, use it
     let accessToken = token || session.token;
+    let refreshToken = session.refreshToken;
+    let tokenExpiresAt = session.tokenExpiresAt;
 
-    // If no token yet, try to read from credentials file
-    if (!accessToken) {
-      const config = CLI_AUTH_CONFIG[provider];
-      if (config) {
-        await extractCredentials(session, config);
-        accessToken = session.token;
+    // If using workspace delegation, forward complete request first
+    if (session.workspaceUrl && session.workspaceSessionId) {
+      // Forward authCode to workspace if provided (for Codex-style redirects)
+      if (authCode) {
+        const backendProviderId = provider === 'anthropic' ? 'anthropic' : provider;
+        const targetUrl = `${session.workspaceUrl}/auth/cli/${backendProviderId}/complete/${session.workspaceSessionId}`;
+        console.log('[onboarding] Forwarding complete request to workspace:', targetUrl);
+
+        const completeResponse = await fetch(targetUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ authCode }),
+        });
+
+        if (!completeResponse.ok) {
+          const errorData = await completeResponse.json().catch(() => ({})) as { error?: string };
+          return res.status(completeResponse.status).json({
+            error: errorData.error || 'Failed to complete authentication in workspace',
+          });
+        }
+        session.status = 'success';
+      }
+
+      // Fetch credentials from workspace
+      if (!accessToken) {
+        try {
+          const credsResponse = await fetch(
+            `${session.workspaceUrl}/auth/cli/${provider}/creds/${session.workspaceSessionId}`
+          );
+          if (credsResponse.ok) {
+            const creds = await credsResponse.json() as {
+              token?: string;
+              refreshToken?: string;
+              expiresAt?: string;
+            };
+            accessToken = creds.token;
+            refreshToken = creds.refreshToken;
+            if (creds.expiresAt) {
+              tokenExpiresAt = new Date(creds.expiresAt);
+            }
+            console.log('[onboarding] Fetched credentials from workspace:', {
+              hasToken: !!accessToken,
+              hasRefreshToken: !!refreshToken,
+            });
+          }
+        } catch (err) {
+          console.error('[onboarding] Failed to get credentials from workspace:', err);
+        }
       }
     }
 
@@ -242,18 +354,17 @@ onboardingRouter.post('/cli/:provider/complete/:sessionId', async (req: Request,
       });
     }
 
-    // Store in vault
+    // Store in vault with refresh token and expiry
     await vault.storeCredential({
       userId,
       provider,
       accessToken,
+      refreshToken,
+      tokenExpiresAt,
       scopes: getProviderScopes(provider),
     });
 
     // Clean up session
-    if (session.process) {
-      session.process.kill();
-    }
     activeSessions.delete(sessionId);
 
     res.json({
@@ -267,17 +378,109 @@ onboardingRouter.post('/cli/:provider/complete/:sessionId', async (req: Request,
 });
 
 /**
+ * POST /api/onboarding/cli/:provider/code/:sessionId
+ * Submit auth code to the CLI PTY session
+ * Used when OAuth returns a code that must be pasted into the CLI
+ */
+onboardingRouter.post('/cli/:provider/code/:sessionId', async (req: Request, res: Response) => {
+  const { provider, sessionId } = req.params;
+  const userId = req.session.userId!;
+  const { code } = req.body;
+
+  console.log('[onboarding] Auth code submission request:', { provider, sessionId, codeLength: code?.length });
+
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ error: 'Auth code is required' });
+  }
+
+  const session = activeSessions.get(sessionId);
+  if (!session) {
+    console.log('[onboarding] Session not found:', { sessionId, activeSessions: Array.from(activeSessions.keys()) });
+    return res.status(404).json({ error: 'Session not found or expired. Please try connecting again.' });
+  }
+
+  if (session.userId !== userId) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+
+  console.log('[onboarding] Session found:', {
+    sessionId,
+    workspaceUrl: session.workspaceUrl,
+    workspaceSessionId: session.workspaceSessionId,
+    status: session.status,
+  });
+
+  // Forward to workspace daemon
+  if (session.workspaceUrl && session.workspaceSessionId) {
+    try {
+      const targetUrl = `${session.workspaceUrl}/auth/cli/${provider}/code/${session.workspaceSessionId}`;
+      console.log('[onboarding] Forwarding auth code to workspace:', targetUrl);
+
+      const codeResponse = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+
+      console.log('[onboarding] Workspace response:', { status: codeResponse.status });
+
+      if (codeResponse.ok) {
+        return res.json({ success: true, message: 'Auth code submitted' });
+      }
+
+      const errorData = await codeResponse.json().catch(() => ({})) as { error?: string };
+      console.log('[onboarding] Workspace error:', errorData);
+
+      // Provide more helpful error message
+      const needsRestart = (errorData as { needsRestart?: boolean }).needsRestart;
+      if (codeResponse.status === 404 || codeResponse.status === 400) {
+        return res.status(400).json({
+          error: errorData.error || 'Auth session expired in workspace. The CLI process may have timed out. Please try connecting again.',
+          needsRestart: needsRestart ?? true,
+        });
+      }
+
+      return res.status(codeResponse.status).json({
+        error: errorData.error || 'Failed to submit auth code to workspace',
+        needsRestart,
+      });
+    } catch (err) {
+      console.error('[onboarding] Failed to submit auth code to workspace:', err);
+      return res.status(500).json({
+        error: 'Failed to reach workspace. Please ensure your workspace is running and try again.',
+      });
+    }
+  }
+
+  console.log('[onboarding] No workspace session info available');
+  return res.status(400).json({
+    error: 'No workspace session available. This can happen if the workspace was restarted. Please try connecting again.',
+  });
+});
+
+// Note: POST /cli/:provider/complete/:sessionId handler is defined above (lines 269-368)
+// It handles both direct token storage and workspace delegation with authCode forwarding
+
+/**
  * POST /api/onboarding/cli/:provider/cancel/:sessionId
  * Cancel a CLI auth session
  */
-onboardingRouter.post('/cli/:provider/cancel/:sessionId', (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+onboardingRouter.post('/cli/:provider/cancel/:sessionId', async (req: Request, res: Response) => {
+  const { provider, sessionId } = req.params;
   const userId = req.session.userId!;
 
   const session = activeSessions.get(sessionId);
   if (session?.userId === userId) {
-    if (session.process) {
-      session.process.kill();
+    // Cancel on workspace side if applicable
+    if (session.workspaceUrl && session.workspaceSessionId) {
+      try {
+        await fetch(
+          `${session.workspaceUrl}/auth/cli/${provider}/cancel/${session.workspaceSessionId}`,
+          { method: 'POST' }
+        );
+      } catch {
+        // Ignore cancel errors
+      }
     }
     activeSessions.delete(sessionId);
   }
@@ -382,8 +585,9 @@ onboardingRouter.post('/complete', async (req: Request, res: Response) => {
 
 /**
  * Helper: Extract credentials from CLI credential file
+ * @deprecated Currently unused - kept for potential future use
  */
-async function extractCredentials(
+async function _extractCredentials(
   session: CLIAuthSession,
   config: typeof CLI_AUTH_CONFIG[string]
 ): Promise<void> {
@@ -398,11 +602,28 @@ async function extractCredentials(
 
     // Extract token based on provider structure
     if (session.provider === 'anthropic') {
-      // Claude stores: { "oauth_token": "...", ... } or { "api_key": "..." }
-      session.token = creds.oauth_token || creds.access_token || creds.api_key;
+      // Claude stores OAuth in: { claudeAiOauth: { accessToken: "...", refreshToken: "...", expiresAt: ... } }
+      if (creds.claudeAiOauth?.accessToken) {
+        session.token = creds.claudeAiOauth.accessToken;
+        session.refreshToken = creds.claudeAiOauth.refreshToken;
+        if (creds.claudeAiOauth.expiresAt) {
+          session.tokenExpiresAt = new Date(creds.claudeAiOauth.expiresAt);
+        }
+      } else {
+        // Fallback to legacy formats
+        session.token = creds.oauth_token || creds.access_token || creds.api_key;
+      }
     } else if (session.provider === 'openai') {
-      // Codex might store: { "token": "..." } or { "api_key": "..." }
-      session.token = creds.token || creds.access_token || creds.api_key;
+      // Codex stores OAuth in: { tokens: { access_token: "...", refresh_token: "...", ... } }
+      if (creds.tokens?.access_token) {
+        session.token = creds.tokens.access_token;
+        session.refreshToken = creds.tokens.refresh_token;
+        // Codex doesn't store expiry in the file, but JWTs have exp claim
+        // We could decode it, but for now just skip
+      } else {
+        // Fallback: API key or legacy formats
+        session.token = creds.OPENAI_API_KEY || creds.token || creds.access_token || creds.api_key;
+      }
     }
   } catch (error) {
     // Credentials file doesn't exist or isn't readable yet
@@ -425,9 +646,37 @@ function getProviderScopes(provider: string): string[] {
 
 /**
  * Helper: Validate a provider token by making a test API call
+ *
+ * Note: OAuth tokens from CLI flows (like `claude` CLI) are different from API keys.
+ * - API keys: sk-ant-api03-... (can be validated via API)
+ * - OAuth tokens: Session tokens from OAuth flow (can't be validated the same way)
+ *
+ * For OAuth tokens, we accept them if they look valid (non-empty, reasonable length).
+ * The CLI already validated the OAuth flow, so we trust those tokens.
  */
 async function validateProviderToken(provider: string, token: string): Promise<boolean> {
+  // Basic sanity check
+  if (!token || token.length < 10) {
+    return false;
+  }
+
   try {
+    // Check if this looks like an API key vs OAuth token
+    const isAnthropicApiKey = token.startsWith('sk-ant-');
+    const isOpenAIApiKey = token.startsWith('sk-');
+
+    // For OAuth tokens (not API keys), accept them without API validation
+    // The OAuth flow already authenticated the user
+    if (provider === 'anthropic' && !isAnthropicApiKey) {
+      console.log('[onboarding] Accepting OAuth token for anthropic (not an API key)');
+      return true;
+    }
+    if (provider === 'openai' && !isOpenAIApiKey) {
+      console.log('[onboarding] Accepting OAuth token for openai (not an API key)');
+      return true;
+    }
+
+    // For API keys, validate via API call
     const endpoints: Record<string, { url: string; headers: Record<string, string> }> = {
       anthropic: {
         url: 'https://api.anthropic.com/v1/messages',

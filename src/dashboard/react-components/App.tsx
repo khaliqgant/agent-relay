@@ -15,6 +15,7 @@ import { CommandPalette, type TaskCreateRequest, PRIORITY_CONFIG } from './Comma
 import { SpawnModal, type SpawnConfig } from './SpawnModal';
 import { NewConversationModal } from './NewConversationModal';
 import { SettingsPanel, defaultSettings, type Settings } from './SettingsPanel';
+import { SettingsPage } from './settings';
 import { ConversationHistory } from './ConversationHistory';
 import { MentionAutocomplete, getMentionQuery, completeMentionInValue, type HumanUser } from './MentionAutocomplete';
 import { FileAutocomplete, getFileQuery, completeFileInValue } from './FileAutocomplete';
@@ -37,7 +38,9 @@ import { useTrajectory } from './hooks/useTrajectory';
 import { useRecentRepos } from './hooks/useRecentRepos';
 import { usePresence, type UserPresence } from './hooks/usePresence';
 import { useCloudSessionOptional } from './CloudSessionProvider';
-import { api, convertApiDecision } from '../lib/api';
+import { WorkspaceProvider } from './WorkspaceContext';
+import { api, convertApiDecision, setActiveWorkspaceId as setApiWorkspaceId } from '../lib/api';
+import { cloudApi } from '../lib/cloudApi';
 import type { CurrentUser } from './MessageList';
 
 /**
@@ -87,6 +90,83 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
       }
     : undefined;
 
+  // Cloud workspaces state (for cloud mode)
+  const [cloudWorkspaces, setCloudWorkspaces] = useState<Array<{
+    id: string;
+    name: string;
+    status: string;
+    path?: string;
+  }>>([]);
+  const [activeCloudWorkspaceId, setActiveCloudWorkspaceId] = useState<string | null>(null);
+  const [isLoadingCloudWorkspaces, setIsLoadingCloudWorkspaces] = useState(false);
+
+  // Fetch cloud workspaces when in cloud mode
+  useEffect(() => {
+    if (!cloudSession?.user) return;
+
+    const fetchCloudWorkspaces = async () => {
+      setIsLoadingCloudWorkspaces(true);
+      try {
+        const result = await cloudApi.getWorkspaceSummary();
+        if (result.success && result.data.workspaces) {
+          setCloudWorkspaces(result.data.workspaces);
+          // Auto-select first workspace if none selected
+          if (!activeCloudWorkspaceId && result.data.workspaces.length > 0) {
+            setActiveCloudWorkspaceId(result.data.workspaces[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch cloud workspaces:', err);
+      } finally {
+        setIsLoadingCloudWorkspaces(false);
+      }
+    };
+
+    fetchCloudWorkspaces();
+    // Poll for updates every 30 seconds
+    const interval = setInterval(fetchCloudWorkspaces, 30000);
+    return () => clearInterval(interval);
+  }, [cloudSession?.user, activeCloudWorkspaceId]);
+
+  // Determine which workspaces to use (cloud mode or orchestrator)
+  const isCloudMode = Boolean(cloudSession?.user);
+  const effectiveWorkspaces = useMemo(() => {
+    if (isCloudMode && cloudWorkspaces.length > 0) {
+      // Convert cloud workspaces to the format expected by WorkspaceSelector
+      return cloudWorkspaces.map(ws => ({
+        id: ws.id,
+        name: ws.name,
+        path: ws.path || `/workspace/${ws.name}`,
+        status: ws.status === 'running' ? 'active' as const : 'inactive' as const,
+        provider: 'claude' as const,
+        lastActiveAt: new Date(),
+      }));
+    }
+    return workspaces;
+  }, [isCloudMode, cloudWorkspaces, workspaces]);
+
+  const effectiveActiveWorkspaceId = isCloudMode ? activeCloudWorkspaceId : activeWorkspaceId;
+  const effectiveIsLoading = isCloudMode ? isLoadingCloudWorkspaces : isOrchestratorLoading;
+
+  // Sync the active workspace ID with the api module for cloud mode proxying
+  useEffect(() => {
+    if (isCloudMode && activeCloudWorkspaceId) {
+      setApiWorkspaceId(activeCloudWorkspaceId);
+    } else if (!isCloudMode) {
+      // Clear the workspace ID when not in cloud mode
+      setApiWorkspaceId(null);
+    }
+  }, [isCloudMode, activeCloudWorkspaceId]);
+
+  // Handle workspace selection (works for both cloud and orchestrator)
+  const handleEffectiveWorkspaceSelect = useCallback(async (workspace: { id: string; name: string }) => {
+    if (isCloudMode) {
+      setActiveCloudWorkspaceId(workspace.id);
+    } else {
+      await switchWorkspace(workspace.id);
+    }
+  }, [isCloudMode, switchWorkspace]);
+
   // Presence tracking for online users and typing indicators
   const { onlineUsers, typingUsers, sendTyping, isConnected: isPresenceConnected } = usePresence({
     currentUser: currentUser
@@ -120,6 +200,10 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   // Settings panel state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
+
+  // Full settings page state
+  const [isFullSettingsOpen, setIsFullSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'dashboard' | 'workspace' | 'team' | 'billing'>('dashboard');
 
   // Conversation history panel state
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -467,9 +551,16 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     setIsSpawnModalOpen(true);
   }, []);
 
-  // Handle settings click
+  // Handle settings click - opens full settings page
   const handleSettingsClick = useCallback(() => {
-    setIsSettingsOpen(true);
+    setSettingsInitialTab('dashboard');
+    setIsFullSettingsOpen(true);
+  }, []);
+
+  // Handle workspace settings click - opens settings to workspace tab
+  const handleWorkspaceSettingsClick = useCallback(() => {
+    setSettingsInitialTab('workspace');
+    setIsFullSettingsOpen(true);
   }, []);
 
   // Handle history click
@@ -745,6 +836,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         setIsSpawnModalOpen(false);
         setIsNewConversationOpen(false);
         setIsTrajectoryOpen(false);
+        setIsFullSettingsOpen(false);
       }
     };
 
@@ -753,6 +845,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   }, [handleSpawnClick, handleNewConversationClick]);
 
   return (
+    <WorkspaceProvider wsUrl={wsUrl}>
     <div className="flex h-screen bg-bg-deep font-sans text-text-primary">
       {/* Mobile Sidebar Overlay */}
       <div
@@ -774,11 +867,12 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         {/* Workspace Selector */}
         <div className="p-3 border-b border-sidebar-border">
           <WorkspaceSelector
-            workspaces={workspaces}
-            activeWorkspaceId={activeWorkspaceId}
-            onSelect={handleWorkspaceSelect}
+            workspaces={effectiveWorkspaces}
+            activeWorkspaceId={effectiveActiveWorkspaceId ?? undefined}
+            onSelect={handleEffectiveWorkspaceSelect}
             onAddWorkspace={() => setIsAddWorkspaceOpen(true)}
-            isLoading={isOrchestratorLoading}
+            onWorkspaceSettings={handleWorkspaceSettingsClick}
+            isLoading={effectiveIsLoading}
           />
         </div>
 
@@ -804,6 +898,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           onLogsClick={handleLogsClick}
           onThreadSelect={setCurrentThread}
           onClose={() => setIsSidebarOpen(false)}
+          onSettingsClick={handleSettingsClick}
         />
       </div>
 
@@ -986,6 +1081,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         settings={settings}
         onSettingsChange={setSettings}
         onResetSettings={() => setSettings(defaultSettings)}
+        csrfToken={cloudSession?.csrfToken ?? undefined}
       />
 
       {/* Add Workspace Modal */}
@@ -1146,7 +1242,17 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           setIsCoordinatorOpen(false);
         }}
       />
+
+      {/* Full Settings Page */}
+      {isFullSettingsOpen && (
+        <SettingsPage
+          currentUserId={cloudSession?.user?.id}
+          initialTab={settingsInitialTab}
+          onClose={() => setIsFullSettingsOpen(false)}
+        />
+      )}
     </div>
+    </WorkspaceProvider>
   );
 }
 

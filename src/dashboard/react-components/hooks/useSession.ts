@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   cloudApi,
   onSessionExpired,
+  getCsrfToken,
   type CloudUser,
   type SessionError,
   type SessionStatus,
@@ -34,6 +35,8 @@ export interface UseSessionReturn {
   isExpired: boolean;
   /** Session error if any */
   error: SessionError | null;
+  /** CSRF token for API requests */
+  csrfToken: string | null;
   /** Manually check session status */
   checkSession: () => Promise<SessionStatus>;
   /** Clear the expired state (e.g., after dismissing modal) */
@@ -195,6 +198,7 @@ export function useSession(options: UseSessionOptions = {}): UseSessionReturn {
     isAuthenticated: user !== null,
     isExpired,
     error,
+    csrfToken: getCsrfToken(),
     checkSession,
     clearExpired,
     redirectToLogin,

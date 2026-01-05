@@ -168,3 +168,96 @@ export function listProjects(): Array<{ projectId: string; projectRoot: string; 
 
   return projects;
 }
+
+/**
+ * Detect the actual workspace directory for cloud deployments.
+ *
+ * In cloud workspaces, repos are cloned to /workspace/{repo-name}.
+ * This function finds the correct working directory:
+ *
+ * Priority:
+ * 1. WORKSPACE_CWD env var (explicit override)
+ * 2. If baseDir itself is a git repo, use it
+ * 3. Scan baseDir for cloned repos - use the first one found (alphabetically)
+ * 4. Fall back to baseDir
+ *
+ * @param baseDir - The base workspace directory (e.g., /workspace)
+ * @returns The actual workspace path to use
+ */
+export function detectWorkspacePath(baseDir: string): string {
+  // 1. Explicit override
+  if (process.env.WORKSPACE_CWD) {
+    return process.env.WORKSPACE_CWD;
+  }
+
+  // 2. Check if baseDir itself is a git repo
+  if (fs.existsSync(path.join(baseDir, '.git'))) {
+    return baseDir;
+  }
+
+  // 3. Scan for cloned repos (directories with .git)
+  try {
+    const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+    const repos: string[] = [];
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const repoPath = path.join(baseDir, entry.name);
+        const gitPath = path.join(repoPath, '.git');
+        if (fs.existsSync(gitPath)) {
+          repos.push(repoPath);
+        }
+      }
+    }
+
+    // Sort alphabetically for consistent behavior
+    repos.sort();
+
+    // Use the first repo found
+    if (repos.length > 0) {
+      if (repos.length > 1) {
+        console.log(`[workspace] Multiple repos found, using first: ${repos[0]} (others: ${repos.slice(1).join(', ')})`);
+      } else {
+        console.log(`[workspace] Detected repo: ${repos[0]}`);
+      }
+      return repos[0];
+    }
+  } catch (err) {
+    // Failed to scan, fall back
+    console.warn(`[workspace] Failed to scan ${baseDir}:`, err);
+  }
+
+  // 4. Fall back to baseDir
+  return baseDir;
+}
+
+/**
+ * List all git repos in a workspace directory.
+ * Useful for allowing users to select which repo to work in.
+ *
+ * @param baseDir - The base workspace directory
+ * @returns Array of repo paths
+ */
+export function listWorkspaceRepos(baseDir: string): string[] {
+  const repos: string[] = [];
+
+  try {
+    const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const repoPath = path.join(baseDir, entry.name);
+        const gitPath = path.join(repoPath, '.git');
+        if (fs.existsSync(gitPath)) {
+          repos.push(repoPath);
+        }
+      }
+    }
+
+    repos.sort();
+  } catch {
+    // Failed to scan
+  }
+
+  return repos;
+}

@@ -10,6 +10,26 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('registry');
 
+/**
+ * Agent profile information for display and understanding agent behavior
+ */
+export interface AgentProfileRecord {
+  /** Display title/role (e.g., "Lead Developer", "Code Reviewer") */
+  title?: string;
+  /** Short description of what this agent does */
+  description?: string;
+  /** The prompt/task the agent was spawned with */
+  spawnPrompt?: string;
+  /** Agent profile/persona prompt (e.g., lead agent instructions) */
+  personaPrompt?: string;
+  /** Name of the persona preset used (e.g., "lead", "reviewer", "shadow-auditor") */
+  personaName?: string;
+  /** Capabilities or tools available to the agent */
+  capabilities?: string[];
+  /** Tags for categorization */
+  tags?: string[];
+}
+
 export interface AgentRecord {
   id: string;
   name: string;
@@ -23,6 +43,8 @@ export interface AgentRecord {
   lastSeen: string;
   messagesSent: number;
   messagesReceived: number;
+  /** Profile information for understanding agent behavior */
+  profile?: AgentProfileRecord;
 }
 
 type AgentInput = {
@@ -33,6 +55,7 @@ type AgentInput = {
   task?: string;
   workingDirectory?: string;
   team?: string;
+  profile?: AgentProfileRecord;
 };
 
 export class AgentRegistry {
@@ -60,6 +83,11 @@ export class AgentRegistry {
     const existing = this.agents.get(agent.name);
 
     if (existing) {
+      // Merge profile data if provided
+      const mergedProfile = agent.profile
+        ? { ...existing.profile, ...agent.profile }
+        : existing.profile;
+
       const updated: AgentRecord = {
         ...existing,
         cli: agent.cli ?? existing.cli,
@@ -68,6 +96,7 @@ export class AgentRegistry {
         task: agent.task ?? existing.task,
         workingDirectory: agent.workingDirectory ?? existing.workingDirectory,
         team: agent.team ?? existing.team,
+        profile: mergedProfile,
         lastSeen: now,
       };
       this.agents.set(agent.name, updated);
@@ -84,6 +113,7 @@ export class AgentRegistry {
       task: agent.task,
       workingDirectory: agent.workingDirectory,
       team: agent.team,
+      profile: agent.profile,
       firstSeen: now,
       lastSeen: now,
       messagesSent: 0,
@@ -134,6 +164,42 @@ export class AgentRegistry {
     return Array.from(this.agents.values());
   }
 
+  /**
+   * Remove an agent from the registry.
+   */
+  remove(agentName: string): boolean {
+    const deleted = this.agents.delete(agentName);
+    if (deleted) {
+      this.save();
+    }
+    return deleted;
+  }
+
+  /**
+   * Remove agents that haven't been seen for longer than the threshold.
+   * @param thresholdMs - Time in milliseconds (default: 24 hours)
+   * @returns Number of agents removed
+   */
+  pruneStale(thresholdMs: number = 24 * 60 * 60 * 1000): number {
+    const cutoff = Date.now() - thresholdMs;
+    let removed = 0;
+
+    for (const [name, record] of this.agents) {
+      const lastSeenTime = new Date(record.lastSeen).getTime();
+      if (lastSeenTime < cutoff) {
+        this.agents.delete(name);
+        removed++;
+        log.info('Pruned stale agent', { name, lastSeen: record.lastSeen });
+      }
+    }
+
+    if (removed > 0) {
+      this.save();
+    }
+
+    return removed;
+  }
+
   private ensureRecord(agentName: string): AgentRecord {
     const existing = this.agents.get(agentName);
     if (existing) return existing;
@@ -182,6 +248,7 @@ export class AgentRegistry {
           task: raw.task,
           workingDirectory: raw.workingDirectory,
           team: raw.team,
+          profile: raw.profile,
           firstSeen: raw.firstSeen ?? new Date().toISOString(),
           lastSeen: raw.lastSeen ?? new Date().toISOString(),
           messagesSent: typeof raw.messagesSent === 'number' ? raw.messagesSent : 0,

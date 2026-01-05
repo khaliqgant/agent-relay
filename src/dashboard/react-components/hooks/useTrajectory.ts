@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TrajectoryStep } from '../TrajectoryViewer';
+import { getApiUrl } from '../../lib/api';
 
 interface TrajectoryStatus {
   active: boolean;
@@ -67,7 +68,11 @@ export function useTrajectory(options: UseTrajectoryOptions = {}): UseTrajectory
   // Fetch trajectory status
   const fetchStatus = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBaseUrl}/api/trajectory`);
+      // Use apiBaseUrl if provided, otherwise use getApiUrl for cloud mode routing
+      const url = apiBaseUrl
+        ? `${apiBaseUrl}/api/trajectory`
+        : getApiUrl('/api/trajectory');
+      const response = await fetch(url, { credentials: 'include' });
       const data = await response.json();
 
       if (data.success !== false) {
@@ -86,7 +91,10 @@ export function useTrajectory(options: UseTrajectoryOptions = {}): UseTrajectory
   // Fetch trajectory history
   const fetchHistory = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBaseUrl}/api/trajectory/history`);
+      const url = apiBaseUrl
+        ? `${apiBaseUrl}/api/trajectory/history`
+        : getApiUrl('/api/trajectory/history');
+      const response = await fetch(url, { credentials: 'include' });
       const data = await response.json();
 
       if (data.success) {
@@ -101,11 +109,14 @@ export function useTrajectory(options: UseTrajectoryOptions = {}): UseTrajectory
   const fetchSteps = useCallback(async () => {
     try {
       const trajectoryId = selectedTrajectoryId;
-      const url = trajectoryId
-        ? `${apiBaseUrl}/api/trajectory/steps?trajectoryId=${encodeURIComponent(trajectoryId)}`
-        : `${apiBaseUrl}/api/trajectory/steps`;
+      const basePath = trajectoryId
+        ? `/api/trajectory/steps?trajectoryId=${encodeURIComponent(trajectoryId)}`
+        : '/api/trajectory/steps';
+      const url = apiBaseUrl
+        ? `${apiBaseUrl}${basePath}`
+        : getApiUrl(basePath);
 
-      const response = await fetch(url);
+      const response = await fetch(url, { credentials: 'include' });
       const data = await response.json();
 
       if (data.success) {
