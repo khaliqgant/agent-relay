@@ -153,41 +153,72 @@ async function waitForMachineStarted(
 
 /**
  * Wait for health check to pass (with DNS propagation time)
+ * Tries internal Fly network first if available, then falls back to public URL
  */
-async function waitForHealthy(url: string, maxWaitMs = 90_000): Promise<void> {
+async function waitForHealthy(
+  url: string,
+  appName?: string,
+  maxWaitMs = 90_000
+): Promise<void> {
   const startTime = Date.now();
-  const healthUrl = `${url.replace(/\/$/, '')}/health`;
 
-  console.log(`[provisioner] Waiting for ${healthUrl} to become healthy...`);
+  // Build list of URLs to try - internal first (faster, more reliable from inside Fly)
+  const urlsToTry: string[] = [];
+
+  // If running on Fly and app name provided, try internal network first
+  const isOnFly = !!process.env.FLY_APP_NAME;
+  if (isOnFly && appName) {
+    urlsToTry.push(`http://${appName}.internal:8080/health`);
+  }
+
+  // Always add the public URL as fallback
+  urlsToTry.push(`${url.replace(/\/$/, '')}/health`);
+
+  console.log(
+    `[provisioner] Waiting for workspace to become healthy (trying: ${urlsToTry.join(', ')})...`
+  );
 
   while (Date.now() - startTime < maxWaitMs) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10_000);
+    // Try each URL in order
+    for (const healthUrl of urlsToTry) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5_000);
 
-      const res = await fetch(healthUrl, {
-        method: 'GET',
-        signal: controller.signal,
-      });
+        const res = await fetch(healthUrl, {
+          method: 'GET',
+          signal: controller.signal,
+        });
 
-      clearTimeout(timer);
+        clearTimeout(timer);
 
-      if (res.ok) {
-        console.log(`[provisioner] Health check passed for ${url}`);
-        return;
+        if (res.ok) {
+          console.log(`[provisioner] Health check passed via ${healthUrl}`);
+          return;
+        }
+
+        console.log(
+          `[provisioner] Health check to ${healthUrl} returned ${res.status}`
+        );
+      } catch (error) {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        const errMsg = (error as Error).message;
+        // Only log detailed error for last URL attempt
+        if (healthUrl === urlsToTry[urlsToTry.length - 1]) {
+          console.log(
+            `[provisioner] Health check failed (${elapsed}s elapsed): ${errMsg}`
+          );
+        }
       }
-
-      console.log(`[provisioner] Health check returned ${res.status}, retrying...`);
-    } catch (error) {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      console.log(`[provisioner] Health check failed (${elapsed}s elapsed), retrying... ${(error as Error).message}`);
     }
 
-    await wait(5000);
+    await wait(3000);
   }
 
   // Don't throw - workspace is provisioned, health check is best-effort
-  console.warn(`[provisioner] Health check did not pass within ${maxWaitMs}ms, continuing anyway`);
+  console.warn(
+    `[provisioner] Health check did not pass within ${maxWaitMs}ms, continuing anyway`
+  );
 }
 
 export interface ProvisionConfig {
@@ -307,6 +338,29 @@ class FlyProvisioner implements ComputeProvisioner {
       }),
     });
 
+    // Allocate IPs for the app (required for public DNS)
+    // Shared IPv4 is free, IPv6 is free
+    console.log(`[fly] Allocating IPs for ${appName}...`);
+    await Promise.all([
+      fetchWithRetry(`https://api.machines.dev/v1/apps/${appName}/ips`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'shared_v4' }),
+      }).catch(err => console.warn(`[fly] Failed to allocate shared IPv4: ${err.message}`)),
+      fetchWithRetry(`https://api.machines.dev/v1/apps/${appName}/ips`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'v6' }),
+      }).catch(err => console.warn(`[fly] Failed to allocate IPv6: ${err.message}`)),
+    ]);
+    console.log(`[fly] IPs allocated for ${appName}`);
+
     // Set secrets (provider credentials)
     const secrets: Record<string, string> = {};
     for (const [provider, token] of credentials) {
@@ -369,7 +423,15 @@ class FlyProvisioner implements ComputeProvisioner {
             services: [
               {
                 ports: [
-                  { port: 443, handlers: ['tls', 'http'] },
+                  {
+                    port: 443,
+                    handlers: ['tls', 'http'],
+                    // Force HTTP/1.1 to backend for WebSocket upgrade compatibility
+                    // HTTP/2 doesn't support traditional WebSocket upgrade mechanism
+                    http_options: {
+                      h2_backend: false,
+                    },
+                  },
                   { port: 80, handlers: ['http'] },
                 ],
                 protocol: 'tcp',
@@ -380,6 +442,16 @@ class FlyProvisioner implements ComputeProvisioner {
                 min_machines_running: 0,
               },
             ],
+            checks: {
+              health: {
+                type: 'http',
+                port: WORKSPACE_PORT,
+                path: '/health',
+                interval: '30s',
+                timeout: '5s',
+                grace_period: '10s',
+              },
+            },
             guest: {
               cpu_kind: 'shared',
               cpus: 2,
@@ -406,7 +478,8 @@ class FlyProvisioner implements ComputeProvisioner {
     await waitForMachineStarted(this.apiToken, appName, machine.id);
 
     // Wait for health check to pass (includes DNS propagation time)
-    await waitForHealthy(publicUrl);
+    // Pass appName to enable internal Fly network health checks
+    await waitForHealthy(publicUrl, appName);
 
     return {
       computeId: machine.id,

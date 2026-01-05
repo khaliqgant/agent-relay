@@ -688,11 +688,19 @@ workspacesRouter.all('/:id/proxy/{*proxyPath}', async (req: Request, res: Respon
     }
 
     // Determine the internal URL for proxying
-    // When running inside Docker, localhost URLs won't work - use the container name instead
+    // When running inside Docker or Fly.io, use internal networking
     let targetBaseUrl = workspace.publicUrl;
     const runningInDocker = process.env.RUNNING_IN_DOCKER === 'true';
+    const runningOnFly = !!process.env.FLY_APP_NAME;
 
-    if (runningInDocker && workspace.computeId && targetBaseUrl.includes('localhost')) {
+    if (runningOnFly && targetBaseUrl.includes('.fly.dev')) {
+      // Use Fly.io internal networking (.internal uses IPv6, works by default)
+      // ar-583f273b.fly.dev -> http://ar-583f273b.internal:3888
+      const appName = targetBaseUrl.match(/https?:\/\/([^.]+)\.fly\.dev/)?.[1];
+      if (appName) {
+        targetBaseUrl = `http://${appName}.internal:3888`;
+      }
+    } else if (runningInDocker && workspace.computeId && targetBaseUrl.includes('localhost')) {
       // Replace localhost URL with container name for Docker networking
       // workspace.computeId is the container name (e.g., "ar-abc12345")
       // The workspace port is 3888 inside the container
