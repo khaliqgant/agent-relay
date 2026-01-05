@@ -1749,10 +1749,55 @@ export async function startDashboard(
     });
   });
 
+  // Deduplication for log output - prevent same content from being broadcast multiple times
+  // Key: agentName -> Set of recent content hashes (rolling window)
+  const recentLogHashes = new Map<string, Set<string>>();
+  const MAX_LOG_HASH_WINDOW = 50; // Keep last 50 hashes per agent
+
+  // Simple hash function for log dedup
+  const hashLogContent = (content: string): string => {
+    // Normalize whitespace and create a simple hash
+    const normalized = content.replace(/\s+/g, ' ').trim().slice(0, 200);
+    let hash = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      const char = normalized.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return hash.toString(36);
+  };
+
   // Function to broadcast log output to subscribed clients
   const broadcastLogOutput = (agentName: string, output: string) => {
     const clients = logSubscriptions.get(agentName);
     if (!clients || clients.size === 0) return;
+
+    // Skip empty or whitespace-only output
+    const trimmed = output.trim();
+    if (!trimmed) return;
+
+    // Dedup: Check if we've recently broadcast this content
+    const hash = hashLogContent(output);
+    let agentHashes = recentLogHashes.get(agentName);
+    if (!agentHashes) {
+      agentHashes = new Set();
+      recentLogHashes.set(agentName, agentHashes);
+    }
+
+    if (agentHashes.has(hash)) {
+      // Already broadcast this content recently, skip
+      return;
+    }
+
+    // Add to rolling window
+    agentHashes.add(hash);
+    if (agentHashes.size > MAX_LOG_HASH_WINDOW) {
+      // Remove oldest entry (first in Set iteration order)
+      const oldest = agentHashes.values().next().value;
+      if (oldest !== undefined) {
+        agentHashes.delete(oldest);
+      }
+    }
 
     const payload = JSON.stringify({
       type: 'output',

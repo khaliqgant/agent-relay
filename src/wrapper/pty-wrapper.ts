@@ -149,6 +149,8 @@ export class PtyWrapper extends EventEmitter {
   private outputsSinceSummary = 0; // Count outputs since last summary
   private detectedTask?: string; // Auto-detected task from agent config
   private sessionEndData?: SessionEndMarker; // Store SESSION_END data for handoff
+  private instructionsInjected = false; // Track if init instructions have been injected
+  private continuityInjected = false; // Track if continuity context has been injected
 
   constructor(config: PtyWrapperConfig) {
     super();
@@ -373,8 +375,20 @@ export class PtyWrapper extends EventEmitter {
   private async injectContinuityContext(): Promise<void> {
     if (!this.continuity || !this.running) return;
 
+    // Guard: Only inject once per session
+    if (this.continuityInjected) {
+      console.log(`[pty:${this.config.name}] Continuity context already injected, skipping`);
+      return;
+    }
+    this.continuityInjected = true;
+
     try {
       const context = await this.continuity.getStartupContext(this.config.name);
+      // Skip if no meaningful context (empty ledger or just boilerplate)
+      if (!context?.formatted || context.formatted.length < 50) {
+        console.log(`[pty:${this.config.name}] Skipping continuity injection (no meaningful context)`);
+        return;
+      }
       if (context?.formatted) {
         // Build context notification similar to TmuxWrapper
         const taskInfo = context.ledger?.currentTask
@@ -846,14 +860,17 @@ export class PtyWrapper extends EventEmitter {
     const msgHash = `${cmd.to}:${cmd.body}`;
 
     if (this.sentMessageHashes.has(msgHash)) {
+      console.log(`[pty:${this.config.name}] Skipping duplicate message to ${cmd.to}`);
       return;
     }
 
     if (this.client.state !== 'READY') {
+      console.log(`[pty:${this.config.name}] Cannot send to ${cmd.to} - relay not ready (state: ${this.client.state})`);
       return;
     }
 
     const success = this.client.sendMessage(cmd.to, cmd.body, cmd.kind, cmd.data, cmd.thread);
+    console.log(`[pty:${this.config.name}] Sent message to ${cmd.to}: ${success ? 'success' : 'failed'}`);
     if (success) {
       this.sentMessageHashes.add(msgHash);
 
@@ -902,14 +919,45 @@ export class PtyWrapper extends EventEmitter {
     const spawnAllowed = this.config.allowSpawn !== false;
     const canSpawn = spawnAllowed && (this.config.dashboardPort || this.config.onSpawn);
     const canRelease = this.config.dashboardPort || this.config.onRelease;
+
+    // Debug: always log spawn detection for debugging
+    if (content.includes('->relay:spawn')) {
+      console.log(`[pty:${this.config.name}] [SPAWN-DEBUG] Spawn pattern detected in content`);
+      console.log(`[pty:${this.config.name}] [SPAWN-DEBUG] canSpawn=${canSpawn} (allowSpawn=${spawnAllowed}, dashboardPort=${this.config.dashboardPort}, hasOnSpawn=${!!this.config.onSpawn})`);
+      // Log the actual lines containing spawn
+      const spawnLines = content.split('\n').filter(l => l.includes('->relay:spawn'));
+      spawnLines.forEach((line, i) => {
+        console.log(`[pty:${this.config.name}] [SPAWN-DEBUG] Line ${i}: "${line.substring(0, 100)}"`);
+      });
+    }
+
+    // Debug: always log release detection for debugging
+    if (content.includes('->relay:release')) {
+      console.log(`[pty:${this.config.name}] [RELEASE-DEBUG] Release pattern detected in content`);
+      console.log(`[pty:${this.config.name}] [RELEASE-DEBUG] canRelease=${canRelease} (dashboardPort=${this.config.dashboardPort}, hasOnRelease=${!!this.config.onRelease})`);
+    }
+
     if (!canSpawn && !canRelease) return;
 
     const lines = content.split('\n');
     const spawnPrefix = '->relay:spawn';
     const releasePrefix = '->relay:release';
 
+    // Pattern to strip common line prefixes (bullets, prompts, etc.)
+    // Same prefixes allowed in the message parser
+    const linePrefixPattern = /^(?:[>$%#→➜›»●•◦‣⁃\-*⏺◆◇○□■│┃┆┇┊┋╎╏✦]\s*)+/;
+
     for (const line of lines) {
-      const trimmed = line.trim();
+      let trimmed = line.trim();
+
+      // Strip common line prefixes (bullets, prompts) before checking for commands
+      const originalTrimmed = trimmed;
+      trimmed = trimmed.replace(linePrefixPattern, '');
+
+      // Debug: log prefix stripping when spawn detected
+      if (originalTrimmed.includes('->relay:spawn') && originalTrimmed !== trimmed) {
+        console.log(`[pty:${this.config.name}] [SPAWN-DEBUG] Stripped prefix: "${originalTrimmed.substring(0, 50)}" -> "${trimmed.substring(0, 50)}"`);
+      }
 
       // Skip escaped commands: \->relay:spawn should not trigger
       if (trimmed.includes('\\->relay:')) {
@@ -949,9 +997,11 @@ export class PtyWrapper extends EventEmitter {
       // STRICT: Must be at start of line (after whitespace)
       if (canSpawn && trimmed.startsWith(spawnPrefix)) {
         const afterSpawn = trimmed.substring(spawnPrefix.length).trim();
+        console.log(`[pty:${this.config.name}] [SPAWN-DEBUG] Detected spawn prefix, afterSpawn: "${afterSpawn.substring(0, 60)}"`);
 
         // Check for fenced format: Name [cli] <<< (CLI optional, defaults to 'claude')
         const fencedMatch = afterSpawn.match(/^(\S+)(?:\s+(\S+))?\s+<<<(.*)$/);
+        console.log(`[pty:${this.config.name}] [SPAWN-DEBUG] Fenced match result: ${fencedMatch ? 'MATCHED' : 'NO MATCH'}`);
         if (fencedMatch) {
           const [, name, cliOrUndefined, inlineContent] = fencedMatch;
           let cli = cliOrUndefined || 'claude';
@@ -979,7 +1029,12 @@ export class PtyWrapper extends EventEmitter {
               this.executeSpawn(name, cli, taskStr);
             }
           } else {
-            // Start multi-line fenced mode
+            // Start multi-line fenced mode - but only if not already processed
+            const spawnKey = `${name}:${cli}`;
+            if (this.processedSpawnCommands.has(spawnKey)) {
+              // Already processed this spawn, skip the fenced capture
+              continue;
+            }
             this.pendingFencedSpawn = {
               name,
               cli,
@@ -1031,14 +1086,18 @@ export class PtyWrapper extends EventEmitter {
 
       // Check for release command
       // STRICT: Must be at start of line (after whitespace)
-      if (canRelease && trimmed.startsWith(releasePrefix)) {
-        const afterRelease = trimmed.substring(releasePrefix.length).trim();
-        const name = afterRelease.split(/\s+/)[0];
+      if (trimmed.startsWith(releasePrefix)) {
+        console.log(`[pty:${this.config.name}] [RELEASE-DEBUG] Release prefix detected, canRelease=${canRelease}`);
+        if (canRelease) {
+          const afterRelease = trimmed.substring(releasePrefix.length).trim();
+          const name = afterRelease.split(/\s+/)[0];
+          console.log(`[pty:${this.config.name}] [RELEASE-DEBUG] Parsed name: ${name}, isValidName=${name ? this.isValidAgentName(name) : false}, alreadyProcessed=${this.processedReleaseCommands.has(name)}`);
 
-        // STRICT: Validate agent name format
-        if (name && this.isValidAgentName(name) && !this.processedReleaseCommands.has(name)) {
-          this.processedReleaseCommands.add(name);
-          this.executeRelease(name);
+          // STRICT: Validate agent name format
+          if (name && this.isValidAgentName(name) && !this.processedReleaseCommands.has(name)) {
+            this.processedReleaseCommands.add(name);
+            this.executeRelease(name);
+          }
         }
       }
     }
@@ -1048,6 +1107,9 @@ export class PtyWrapper extends EventEmitter {
    * Execute spawn via API or callback
    */
   private async executeSpawn(name: string, cli: string, task: string): Promise<void> {
+    console.log(`[pty:${this.config.name}] [SPAWN-DEBUG] executeSpawn called: name=${name}, cli=${cli}, task="${task.substring(0, 50)}..."`);
+    console.log(`[pty:${this.config.name}] [SPAWN-DEBUG] dashboardPort=${this.config.dashboardPort}, hasOnSpawn=${!!this.config.onSpawn}`);
+
     if (this.config.dashboardPort) {
       // Use dashboard API for spawning (works from spawned agents)
       try {
@@ -1292,6 +1354,13 @@ export class PtyWrapper extends EventEmitter {
    */
   private injectInstructions(): void {
     if (!this.running) return;
+
+    // Guard: Only inject once per session
+    if (this.instructionsInjected) {
+      console.log(`[pty:${this.config.name}] Init instructions already injected, skipping`);
+      return;
+    }
+    this.instructionsInjected = true;
 
     // Minimal notification - full protocol is in ~/.claude/CLAUDE.md
     const notification = `You are agent "${this.config.name}" connected to Agent Relay. See CLAUDE.md for the messaging protocol. ACK messages, do work, send DONE when complete.`;

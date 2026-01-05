@@ -1265,8 +1265,15 @@ export class TmuxWrapper {
 
     const lines = content.split('\n');
 
+    // Pattern to strip common line prefixes (bullets, prompts, etc.)
+    // Must include ● (U+25CF BLACK CIRCLE) used by Claude's TUI
+    const linePrefixPattern = /^(?:[>$%#→➜›»●•◦‣⁃\-*⏺◆◇○□■│┃┆┇┊┋╎╏✦]\s*)+/;
+
     for (const line of lines) {
-      const trimmed = line.trim();
+      let trimmed = line.trim();
+
+      // Strip common line prefixes (bullets, prompts) before checking for commands
+      trimmed = trimmed.replace(linePrefixPattern, '');
 
       // If we're in fenced spawn mode, accumulate lines until we see >>>
       if (this.pendingFencedSpawn) {
@@ -1303,7 +1310,8 @@ export class TmuxWrapper {
       }
 
       // Check for fenced spawn start: ->relay:spawn Name [cli] <<< (CLI optional, defaults to 'claude')
-      const fencedSpawnMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:spawn\s+(\S+)(?:\s+(\S+))?\s+<<<(.*)$/);
+      // Prefixes are stripped above, so we just look for the command at start of line
+      const fencedSpawnMatch = trimmed.match(/^->relay:spawn\s+(\S+)(?:\s+(\S+))?\s+<<<(.*)$/);
       if (fencedSpawnMatch && canSpawn) {
         const [, name, cliOrUndefined, inlineContent] = fencedSpawnMatch;
         const cli = cliOrUndefined || 'claude';
@@ -1344,7 +1352,8 @@ export class TmuxWrapper {
 
       // Match single-line spawn: ->relay:spawn WorkerName [cli] ["task"]
       // CLI is optional - defaults to 'claude'. Task is also optional.
-      const spawnMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:spawn\s+(\S+)(?:\s+(\S+))?(?:\s+["'](.+?)["'])?\s*$/);
+      // Prefixes are stripped above, so we just look for the command at start of line
+      const spawnMatch = trimmed.match(/^->relay:spawn\s+(\S+)(?:\s+(\S+))?(?:\s+["'](.+?)["'])?\s*$/);
       if (spawnMatch && canSpawn) {
         const [, name, cliOrUndefined, task] = spawnMatch;
         const cli = cliOrUndefined || 'claude';
@@ -1375,7 +1384,8 @@ export class TmuxWrapper {
       }
 
       // Match ->relay:release WorkerName
-      const releaseMatch = trimmed.match(/^(?:[•\-*]\s*)?->relay:release\s+(\S+)\s*$/);
+      // Prefixes are stripped above, so we just look for the command at start of line
+      const releaseMatch = trimmed.match(/^->relay:release\s+(\S+)\s*$/);
       if (releaseMatch && canRelease) {
         const [, name] = releaseMatch;
 
