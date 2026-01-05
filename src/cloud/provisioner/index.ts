@@ -1407,6 +1407,12 @@ export class WorkspaceProvisioner {
       throw new Error('Workspace not found');
     }
 
+    // During early provisioning, computeId isn't set yet
+    // Return the database status instead of querying the provider
+    if (!workspace.computeId && workspace.status === 'provisioning') {
+      return 'provisioning';
+    }
+
     const status = await this.provisioner.getStatus(workspace);
 
     // Update database if status changed
