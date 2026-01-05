@@ -9,6 +9,7 @@ import { requireAuth } from './auth.js';
 import { db, Workspace } from '../db/index.js';
 import { getProvisioner, getProvisioningStage } from '../provisioner/index.js';
 import { checkWorkspaceLimit } from './middleware/planLimits.js';
+import { getConfig } from '../config.js';
 
 export const workspacesRouter = Router();
 
@@ -301,8 +302,9 @@ workspacesRouter.get('/:id/status', async (req: Request, res: Response) => {
     const provisioner = getProvisioner();
     const status = await provisioner.getStatus(id);
 
-    // Include provisioning progress info if status is 'provisioning'
-    const provisioningProgress = status === 'provisioning' ? getProvisioningStage(id) : null;
+    // Include provisioning progress info if it exists (even after status changes to 'running')
+    // This allows the frontend to see all stages including 'complete'
+    const provisioningProgress = getProvisioningStage(id);
 
     res.json({
       status,
@@ -438,6 +440,89 @@ workspacesRouter.post('/:id/repos', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error adding repos to workspace:', error);
     res.status(500).json({ error: 'Failed to add repositories' });
+  }
+});
+
+/**
+ * POST /api/workspaces/:id/autoscale
+ * Trigger auto-scaling based on current agent count
+ * Supports both user session auth and workspace token auth
+ * Called by workspace container when spawning new agents
+ */
+workspacesRouter.post('/:id/autoscale', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { agentCount } = req.body;
+
+  if (typeof agentCount !== 'number' || agentCount < 0) {
+    return res.status(400).json({ error: 'agentCount must be a non-negative number' });
+  }
+
+  try {
+    const workspace = await db.workspaces.findById(id);
+
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    // Verify auth: either user session or workspace token
+    const userId = req.session?.userId;
+    const authHeader = req.get('authorization');
+
+    if (userId) {
+      // User session auth
+      if (workspace.userId !== userId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+    } else if (authHeader?.startsWith('Bearer ')) {
+      // Workspace token auth (for calls from within the workspace)
+      const crypto = await import('crypto');
+      const config = getConfig();
+      const providedToken = authHeader.slice(7);
+      const expectedToken = crypto.default
+        .createHmac('sha256', config.sessionSecret)
+        .update(`workspace:${id}`)
+        .digest('hex');
+
+      const isValid = crypto.default.timingSafeEqual(
+        Buffer.from(providedToken),
+        Buffer.from(expectedToken)
+      );
+
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid workspace token' });
+      }
+    } else {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const provisioner = getProvisioner();
+    const currentTier = await provisioner.getCurrentTier(id);
+    const recommendedTier = provisioner.getRecommendedTier(agentCount);
+
+    // Check if scaling is needed
+    if (recommendedTier.memoryMb <= currentTier.memoryMb) {
+      return res.json({
+        scaled: false,
+        currentTier: currentTier.name,
+        message: 'Current tier is sufficient',
+      });
+    }
+
+    // Perform the scale-up (respects plan limits)
+    const result = await provisioner.autoScale(id, agentCount);
+
+    res.json({
+      scaled: result.scaled,
+      previousTier: result.currentTier || currentTier.name,
+      newTier: result.targetTier || currentTier.name,
+      reason: result.reason,
+      message: result.scaled
+        ? `Scaled up to ${result.targetTier} tier`
+        : result.reason || 'Scaling not required',
+    });
+  } catch (error) {
+    console.error('Error auto-scaling workspace:', error);
+    res.status(500).json({ error: 'Failed to auto-scale workspace' });
   }
 });
 

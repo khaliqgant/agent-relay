@@ -42,3 +42,4 @@ src/dashboard/out
 
 .env.local
 .env
+.env.production

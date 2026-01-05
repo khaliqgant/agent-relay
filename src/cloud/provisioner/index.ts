@@ -6,9 +6,15 @@
 
 import * as crypto from 'crypto';
 import { getConfig } from '../config.js';
-import { db, Workspace } from '../db/index.js';
+import { db, Workspace, PlanType } from '../db/index.js';
 import { vault } from '../vault/index.js';
 import { nangoService } from '../services/nango.js';
+import {
+  canAutoScale,
+  canScaleToTier,
+  getResourceTierForPlan,
+  type ResourceTierName,
+} from '../services/planLimits.js';
 
 const WORKSPACE_PORT = 3888;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -299,13 +305,16 @@ export interface ResourceTier {
   cpuCores: number;
   memoryMb: number;
   maxAgents: number;
+  cpuKind: 'shared' | 'performance';
 }
 
+// Resource tiers sized for Claude Code agents (~1-2GB RAM per agent)
+// cpuKind: 'shared' = cheaper but can be throttled, 'performance' = dedicated
 export const RESOURCE_TIERS: Record<string, ResourceTier> = {
-  small: { name: 'small', cpuCores: 1, memoryMb: 512, maxAgents: 5 },
-  medium: { name: 'medium', cpuCores: 2, memoryMb: 1024, maxAgents: 10 },
-  large: { name: 'large', cpuCores: 4, memoryMb: 2048, maxAgents: 20 },
-  xlarge: { name: 'xlarge', cpuCores: 8, memoryMb: 4096, maxAgents: 50 },
+  small: { name: 'small', cpuCores: 2, memoryMb: 2048, maxAgents: 2, cpuKind: 'shared' },
+  medium: { name: 'medium', cpuCores: 2, memoryMb: 4096, maxAgents: 5, cpuKind: 'shared' },
+  large: { name: 'large', cpuCores: 4, memoryMb: 8192, maxAgents: 10, cpuKind: 'performance' },
+  xlarge: { name: 'xlarge', cpuCores: 8, memoryMb: 16384, maxAgents: 20, cpuKind: 'performance' },
 };
 
 /**
@@ -548,10 +557,18 @@ class FlyProvisioner implements ComputeProvisioner {
                 ],
                 protocol: 'tcp',
                 internal_port: WORKSPACE_PORT,
-                // Auto-stop after 5 minutes of inactivity
-                auto_stop_machines: true,
+                // Auto-stop after inactivity to reduce costs
+                // Fly Proxy automatically wakes machines on incoming requests
+                auto_stop_machines: 'stop',  // stop (not suspend) for faster wake
                 auto_start_machines: true,
                 min_machines_running: 0,
+                // Idle timeout before auto-stop (in seconds)
+                // Longer timeout = better UX, shorter = lower costs
+                concurrency: {
+                  type: 'requests',
+                  soft_limit: 25,
+                  hard_limit: 50,
+                },
               },
             ],
             checks: {
@@ -564,6 +581,8 @@ class FlyProvisioner implements ComputeProvisioner {
                 grace_period: '10s',
               },
             },
+            // Start with small tier (shared CPUs) - scales up based on plan
+            // Free tier uses shared CPUs for cost efficiency
             guest: {
               cpu_kind: 'shared',
               cpus: 2,
@@ -714,7 +733,8 @@ class FlyProvisioner implements ComputeProvisioner {
         body: JSON.stringify({
           config: {
             guest: {
-              cpu_kind: tier.cpuCores <= 2 ? 'shared' : 'performance',
+              // Use tier-specific CPU type (shared for cost, performance for power)
+              cpu_kind: tier.cpuKind,
               cpus: tier.cpuCores,
               memory_mb: tier.memoryMb,
             },
@@ -1297,6 +1317,25 @@ export class WorkspaceProvisioner {
     // Auto-accept the creator's membership
     await db.workspaceMembers.acceptInvite(workspace.id, config.userId);
 
+    // Initialize stage tracking immediately
+    updateProvisioningStage(workspace.id, 'creating');
+
+    // Run provisioning in the background so frontend can poll for stages
+    this.runProvisioningAsync(workspace, config).catch((error) => {
+      console.error(`[provisioner] Background provisioning failed for ${workspace.id}:`, error);
+    });
+
+    // Return immediately with 'provisioning' status
+    return {
+      workspaceId: workspace.id,
+      status: 'provisioning',
+    };
+  }
+
+  /**
+   * Run the actual provisioning work asynchronously
+   */
+  private async runProvisioningAsync(workspace: Workspace, config: ProvisionConfig): Promise<void> {
     // Get credentials
     const credentials = new Map<string, string>();
     for (const provider of config.providers) {
@@ -1336,11 +1375,13 @@ export class WorkspaceProvisioner {
         publicUrl,
       });
 
-      return {
-        workspaceId: workspace.id,
-        status: 'running',
-        publicUrl,
-      };
+      // Schedule cleanup of provisioning progress after 30s (gives frontend time to see 'complete')
+      setTimeout(() => {
+        clearProvisioningProgress(workspace.id);
+        console.log(`[provisioner] Cleaned up provisioning progress for ${workspace.id.substring(0, 8)}`);
+      }, 30_000);
+
+      console.log(`[provisioner] Workspace ${workspace.id} provisioned successfully at ${publicUrl}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
@@ -1348,11 +1389,10 @@ export class WorkspaceProvisioner {
         errorMessage,
       });
 
-      return {
-        workspaceId: workspace.id,
-        status: 'error',
-        error: errorMessage,
-      };
+      // Clear provisioning progress on error
+      clearProvisioningProgress(workspace.id);
+
+      console.error(`[provisioner] Workspace ${workspace.id} provisioning failed:`, errorMessage);
     }
   }
 
@@ -1473,6 +1513,95 @@ export class WorkspaceProvisioner {
     // Fallback: determine from config or default to small
     const tierName = workspace.config.resourceTier || 'small';
     return RESOURCE_TIERS[tierName] || RESOURCE_TIERS.small;
+  }
+
+  /**
+   * Get recommended tier based on agent count
+   * Uses 1.5-2GB per agent as baseline for Claude Code
+   */
+  getRecommendedTier(agentCount: number): ResourceTier {
+    // Find the smallest tier that supports this agent count
+    const tiers = Object.values(RESOURCE_TIERS).sort((a, b) => a.maxAgents - b.maxAgents);
+    for (const tier of tiers) {
+      if (tier.maxAgents >= agentCount) {
+        return tier;
+      }
+    }
+    // If agent count exceeds all tiers, return the largest
+    return RESOURCE_TIERS.xlarge;
+  }
+
+  /**
+   * Auto-scale workspace based on current agent count
+   * Respects plan limits - free tier cannot scale, others have max tier limits
+   * Returns { scaled: boolean, reason?: string }
+   */
+  async autoScale(workspaceId: string, currentAgentCount: number): Promise<{
+    scaled: boolean;
+    reason?: string;
+    currentTier?: string;
+    targetTier?: string;
+  }> {
+    const workspace = await db.workspaces.findById(workspaceId);
+    if (!workspace) {
+      throw new Error('Workspace not found');
+    }
+
+    // Get user's plan
+    const user = await db.users.findById(workspace.userId);
+    const plan = (user?.plan as PlanType) || 'free';
+
+    // Check if plan allows auto-scaling
+    if (!canAutoScale(plan)) {
+      return {
+        scaled: false,
+        reason: 'Auto-scaling requires Pro plan or higher',
+      };
+    }
+
+    const currentTier = await this.getCurrentTier(workspaceId);
+    const recommendedTier = this.getRecommendedTier(currentAgentCount);
+
+    // Only scale UP, never down (to avoid disruption)
+    if (recommendedTier.memoryMb <= currentTier.memoryMb) {
+      return {
+        scaled: false,
+        currentTier: currentTier.name,
+      };
+    }
+
+    // Check if plan allows scaling to the recommended tier
+    if (!canScaleToTier(plan, recommendedTier.name as ResourceTierName)) {
+      // Find the max tier allowed for this plan
+      const maxTierName = getResourceTierForPlan(plan);
+      const maxTier = RESOURCE_TIERS[maxTierName];
+
+      if (maxTier.memoryMb <= currentTier.memoryMb) {
+        return {
+          scaled: false,
+          reason: `Already at max tier (${currentTier.name}) for ${plan} plan`,
+          currentTier: currentTier.name,
+        };
+      }
+
+      // Scale to max allowed tier instead
+      console.log(`[provisioner] Auto-scaling workspace ${workspaceId.substring(0, 8)} from ${currentTier.name} to ${maxTierName} (max for ${plan} plan)`);
+      await this.resize(workspaceId, maxTier);
+      return {
+        scaled: true,
+        currentTier: currentTier.name,
+        targetTier: maxTierName,
+        reason: `Scaled to max tier for ${plan} plan`,
+      };
+    }
+
+    console.log(`[provisioner] Auto-scaling workspace ${workspaceId.substring(0, 8)} from ${currentTier.name} to ${recommendedTier.name} (${currentAgentCount} agents)`);
+    await this.resize(workspaceId, recommendedTier);
+    return {
+      scaled: true,
+      currentTier: currentTier.name,
+      targetTier: recommendedTier.name,
+    };
   }
 }
 

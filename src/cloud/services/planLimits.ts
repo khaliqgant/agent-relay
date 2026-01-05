@@ -33,17 +33,17 @@ export interface PlanLimits {
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
   free: {
     maxWorkspaces: 1,
-    maxRepos: 3,
+    maxRepos: 2,
     maxConcurrentAgents: 2,
-    maxComputeHoursPerMonth: 10,
+    maxComputeHoursPerMonth: 5, // Limited free tier
     coordinatorsEnabled: false,
     sessionPersistence: false,
   },
   pro: {
     maxWorkspaces: 5,
-    maxRepos: 20,
-    maxConcurrentAgents: 10,
-    maxComputeHoursPerMonth: 100,
+    maxRepos: 10,
+    maxConcurrentAgents: 5,
+    maxComputeHoursPerMonth: 50,
     coordinatorsEnabled: true,
     sessionPersistence: true,
   },
@@ -402,4 +402,68 @@ export async function updateActiveAgentCount(
     value: count,
     recordedAt: new Date(),
   });
+}
+
+/**
+ * Resource tier name type
+ */
+export type ResourceTierName = 'small' | 'medium' | 'large' | 'xlarge';
+
+/**
+ * Get the default resource tier for a plan
+ * Maps plans to appropriate compute resources
+ */
+export function getResourceTierForPlan(plan: PlanType): ResourceTierName {
+  switch (plan) {
+    case 'free':
+      return 'small';     // 2GB, 2 CPUs - suitable for 2 agents
+    case 'pro':
+      return 'medium';    // 4GB, 4 CPUs - suitable for 5 agents
+    case 'team':
+      return 'large';     // 8GB, 4 CPUs - suitable for 10 agents
+    case 'enterprise':
+      return 'xlarge';    // 16GB, 8 CPUs - suitable for 20 agents
+    default:
+      return 'small';
+  }
+}
+
+/**
+ * Get the maximum resource tier a plan can scale to
+ * Prevents over-scaling beyond plan entitlements
+ */
+export function getMaxResourceTierForPlan(plan: PlanType): ResourceTierName {
+  switch (plan) {
+    case 'free':
+      return 'small';     // Free tier cannot scale up
+    case 'pro':
+      return 'medium';    // Pro can scale to medium
+    case 'team':
+      return 'large';     // Team can scale to large
+    case 'enterprise':
+      return 'xlarge';    // Enterprise can use any tier
+    default:
+      return 'small';
+  }
+}
+
+/**
+ * Check if user's plan allows auto-scaling
+ */
+export function canAutoScale(plan: PlanType): boolean {
+  // Only Pro and above can auto-scale
+  return plan !== 'free';
+}
+
+/**
+ * Check if auto-scale to a specific tier is allowed for a plan
+ */
+export function canScaleToTier(plan: PlanType, targetTier: ResourceTierName): boolean {
+  const tierOrder: ResourceTierName[] = ['small', 'medium', 'large', 'xlarge'];
+  const maxTier = getMaxResourceTierForPlan(plan);
+
+  const targetIndex = tierOrder.indexOf(targetTier);
+  const maxIndex = tierOrder.indexOf(maxTier);
+
+  return targetIndex <= maxIndex;
 }

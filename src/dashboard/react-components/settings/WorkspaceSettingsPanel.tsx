@@ -589,8 +589,8 @@ export function WorkspaceSettingsPanel({
 
     const result = await cloudApi.deleteWorkspace(workspace.id);
     if (result.success) {
-      // Redirect to workspace selection/onboarding page
-      window.location.href = '/app';
+      // Redirect to onboarding page with deleted reason
+      window.location.href = '/app/onboarding?reason=deleted';
     } else {
       setError(result.error);
     }

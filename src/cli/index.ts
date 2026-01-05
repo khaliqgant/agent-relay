@@ -1940,6 +1940,7 @@ program
   .action(async (args: string[]) => {
     const { spawn } = await import('node:child_process');
     const { getProjectPaths } = await import('../utils/project-namespace.js');
+    const { getPrimaryTrajectoriesDir, ensureTrajectoriesDir } = await import('../trajectory/config.js');
 
     const paths = getProjectPaths();
 
@@ -1965,6 +1966,11 @@ program
       process.exit(1);
     }
 
+    // Get trajectory storage path based on config (respects opt-in/opt-out)
+    // Uses TRAJECTORIES_DATA_DIR env var which trail CLI reads
+    const trajectoriesDir = getPrimaryTrajectoriesDir(paths.projectRoot);
+    ensureTrajectoriesDir(paths.projectRoot);
+
     // Spawn trail with the provided arguments
     const trailProc = spawn('trail', args, {
       cwd: paths.projectRoot,
@@ -1972,7 +1978,7 @@ program
       env: {
         ...process.env,
         TRAJECTORIES_PROJECT: paths.projectId,
-        TRAJECTORIES_DATA_DIR: paths.dataDir,
+        TRAJECTORIES_DATA_DIR: trajectoriesDir,
       },
     });
 

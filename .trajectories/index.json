@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-01-05T19:52:06.442Z",
+  "lastUpdated": "2026-01-05T20:14:01.627Z",
   "trajectories": {
     "traj_ozd98si6a7ns": {
       "title": "Fix thinking indicator showing on all messages",
@@ -284,9 +284,17 @@
     },
     "traj_22bhyulruouw": {
       "title": "Lead agent coordination - responsive nav fix and team assignments",
-      "status": "active",
+      "status": "completed",
       "startedAt": "2026-01-05T19:45:50.807Z",
-      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/active/traj_22bhyulruouw.json"
+      "completedAt": "2026-01-05T20:10:25.523Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_22bhyulruouw.json"
+    },
+    "traj_hhxte7w4gjjx": {
+      "title": "test",
+      "status": "abandoned",
+      "startedAt": "2026-01-05T20:14:01.563Z",
+      "completedAt": "2026-01-05T20:14:01.617Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_hhxte7w4gjjx.json"
     }
   }
 }

@@ -134,11 +134,14 @@ export function Header({
               </span>
             </div>
             {selectedAgent.status && (
-              <span className={`hidden sm:inline text-xs py-1 px-2.5 rounded-full font-medium ml-2 flex-shrink-0 ${
-                selectedAgent.status === 'online'
-                  ? 'bg-success/20 text-success'
-                  : 'bg-bg-tertiary text-text-muted'
-              }`}>
+              <span
+                className={`hidden sm:inline text-xs py-1 px-2.5 rounded-full font-medium ml-2 flex-shrink-0 truncate max-w-[80px] ${
+                  selectedAgent.status === 'online'
+                    ? 'bg-success/20 text-success'
+                    : 'bg-bg-tertiary text-text-muted'
+                }`}
+                title={selectedAgent.status}
+              >
                 {selectedAgent.status}
               </span>
             )}

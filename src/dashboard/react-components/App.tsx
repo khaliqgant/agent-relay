@@ -30,6 +30,7 @@ import { TypingIndicator } from './TypingIndicator';
 import { OnlineUsersIndicator } from './OnlineUsersIndicator';
 import { UserProfilePanel } from './UserProfilePanel';
 import { CoordinatorPanel } from './CoordinatorPanel';
+import { BillingResult } from './BillingResult';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAgents } from './hooks/useAgents';
 import { useMessages } from './hooks/useMessages';
@@ -844,6 +845,33 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSpawnClick, handleNewConversationClick]);
 
+  // Handle billing result routes (success/cancel after Stripe checkout)
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+
+  if (pathname === '/billing/success') {
+    return (
+      <BillingResult
+        type="success"
+        sessionId={searchParams.get('session_id') || undefined}
+        onClose={() => {
+          window.location.href = '/';
+        }}
+      />
+    );
+  }
+
+  if (pathname === '/billing/canceled') {
+    return (
+      <BillingResult
+        type="canceled"
+        onClose={() => {
+          window.location.href = '/';
+        }}
+      />
+    );
+  }
+
   return (
     <WorkspaceProvider wsUrl={wsUrl}>
     <div className="flex h-screen bg-bg-deep font-sans text-text-primary">
@@ -899,6 +927,12 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           onThreadSelect={setCurrentThread}
           onClose={() => setIsSidebarOpen(false)}
           onSettingsClick={handleSettingsClick}
+          onTrajectoryClick={() => setIsTrajectoryOpen(true)}
+          hasActiveTrajectory={trajectoryStatus?.active}
+          onFleetClick={() => setIsFleetViewActive(!isFleetViewActive)}
+          isFleetViewActive={isFleetViewActive}
+          onCoordinatorClick={handleCoordinatorClick}
+          hasMultipleProjects={mergedProjects.length > 1}
         />
       </div>
 

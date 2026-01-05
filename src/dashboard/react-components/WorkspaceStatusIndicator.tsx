@@ -158,7 +158,10 @@ export function WorkspaceStatusIndicator({
           title={statusMessage || config.label}
         >
           <span className={config.color}>{config.icon}</span>
-          <span className={`text-xs font-medium ${config.color}`}>
+          <span
+            className={`text-xs font-medium ${config.color} truncate max-w-[100px]`}
+            title={statusMessage || config.label}
+          >
             {config.label}
           </span>
           {config.pulseColor && (

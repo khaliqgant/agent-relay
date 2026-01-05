@@ -13,15 +13,15 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
   free: {
     id: 'free',
     name: 'Free',
-    description: 'For individuals exploring AI agent workflows',
+    description: 'Try AI agent workflows with limited access',
     priceMonthly: 0,
     priceYearly: 0,
     limits: {
-      maxWorkspaces: 2,
-      maxAgentsPerWorkspace: 3,
+      maxWorkspaces: 1,
+      maxAgentsPerWorkspace: 2,
       maxTeamMembers: 1,
       maxStorageGB: 1,
-      maxComputeHoursPerMonth: 10,
+      maxComputeHoursPerMonth: 5, // Limited to 5 hours/month
       customDomains: false,
       prioritySupport: false,
       sla: false,
@@ -30,10 +30,10 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       sessionPersistence: false,
     },
     features: [
-      'Up to 2 workspaces',
-      'Up to 3 agents per workspace',
-      '10 compute hours/month',
-      '1 GB storage',
+      '1 workspace',
+      'Up to 2 agents',
+      '5 compute hours/month',
+      'Shared CPU (may throttle)',
       'Community support',
     ],
   },
@@ -41,17 +41,17 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
   pro: {
     id: 'pro',
     name: 'Pro',
-    description: 'For professional developers and small teams',
-    priceMonthly: 2900, // $29/month
-    priceYearly: 29000, // $290/year (2 months free)
+    description: 'For professional developers building with AI agents',
+    priceMonthly: 4900, // $49/month
+    priceYearly: 47000, // $470/year (2 months free)
     stripePriceIdMonthly: process.env.STRIPE_PRO_MONTHLY_PRICE_ID,
     stripePriceIdYearly: process.env.STRIPE_PRO_YEARLY_PRICE_ID,
     limits: {
-      maxWorkspaces: 10,
-      maxAgentsPerWorkspace: 10,
-      maxTeamMembers: 5,
+      maxWorkspaces: 5,
+      maxAgentsPerWorkspace: 5,
+      maxTeamMembers: 3,
       maxStorageGB: 10,
-      maxComputeHoursPerMonth: 100,
+      maxComputeHoursPerMonth: 50,
       customDomains: true,
       prioritySupport: false,
       sla: false,
@@ -60,11 +60,11 @@ export const BILLING_PLANS: Record<SubscriptionTier, BillingPlan> = {
       sessionPersistence: true,
     },
     features: [
-      'Up to 10 workspaces',
-      'Up to 10 agents per workspace',
-      '100 compute hours/month',
+      'Up to 5 workspaces',
+      'Up to 5 agents per workspace',
+      '50 compute hours/month',
       '10 GB storage',
-      '5 team members',
+      '3 team members',
       'Custom domains',
       'Session persistence',
       'Email support',

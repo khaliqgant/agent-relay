@@ -47,6 +47,18 @@ export interface SidebarProps {
   onClose?: () => void;
   /** Handler for opening settings */
   onSettingsClick?: () => void;
+  /** Mobile nav: Trajectory viewer toggle */
+  onTrajectoryClick?: () => void;
+  /** Mobile nav: Whether there's an active trajectory */
+  hasActiveTrajectory?: boolean;
+  /** Mobile nav: Fleet view toggle */
+  onFleetClick?: () => void;
+  /** Mobile nav: Whether fleet view is active */
+  isFleetViewActive?: boolean;
+  /** Mobile nav: Coordinator toggle */
+  onCoordinatorClick?: () => void;
+  /** Mobile nav: Whether multiple projects are connected (shows coordinator) */
+  hasMultipleProjects?: boolean;
 }
 
 export function Sidebar({
@@ -71,6 +83,12 @@ export function Sidebar({
   onThreadSelect,
   onClose,
   onSettingsClick,
+  onTrajectoryClick,
+  hasActiveTrajectory,
+  onFleetClick,
+  isFleetViewActive,
+  onCoordinatorClick,
+  hasMultipleProjects,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<SidebarTab>(() => {
@@ -307,6 +325,68 @@ export function Sidebar({
         )}
       </div>
 
+      {/* Mobile Navigation - shows items hidden in header on mobile */}
+      <div className="md:hidden border-t border-border-subtle p-3">
+        <p className="text-xs text-text-muted font-medium mb-2 px-1">Quick Actions</p>
+        <div className="grid grid-cols-2 gap-2">
+          {onFleetClick && (
+            <button
+              className={`flex items-center gap-2 p-2.5 rounded-lg border text-sm transition-all duration-150 ${
+                isFleetViewActive
+                  ? 'bg-accent-cyan/20 border-accent-cyan text-accent-cyan'
+                  : 'bg-bg-tertiary border-border-subtle text-text-secondary hover:bg-bg-hover hover:text-text-primary'
+              }`}
+              onClick={() => {
+                onFleetClick();
+                onClose?.();
+              }}
+            >
+              <FleetIcon />
+              <span>Fleet</span>
+            </button>
+          )}
+          {onTrajectoryClick && (
+            <button
+              className={`flex items-center gap-2 p-2.5 rounded-lg border text-sm transition-all duration-150 relative ${
+                hasActiveTrajectory
+                  ? 'bg-accent-cyan/20 border-accent-cyan text-accent-cyan'
+                  : 'bg-bg-tertiary border-border-subtle text-text-secondary hover:bg-bg-hover hover:text-text-primary'
+              }`}
+              onClick={() => {
+                onTrajectoryClick();
+                onClose?.();
+              }}
+            >
+              <TrajectoryIcon />
+              <span>Trajectory</span>
+              {hasActiveTrajectory && (
+                <span className="absolute top-1 right-1 w-2 h-2 bg-accent-cyan rounded-full animate-pulse" />
+              )}
+            </button>
+          )}
+          {hasMultipleProjects && onCoordinatorClick && (
+            <button
+              className="flex items-center gap-2 p-2.5 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary text-sm transition-all duration-150 hover:bg-bg-hover hover:text-accent-purple"
+              onClick={() => {
+                onCoordinatorClick();
+                onClose?.();
+              }}
+            >
+              <CoordinatorIcon />
+              <span>Coordinator</span>
+            </button>
+          )}
+          <a
+            href="/metrics"
+            className="flex items-center gap-2 p-2.5 bg-bg-tertiary border border-border-subtle rounded-lg text-text-secondary text-sm transition-all duration-150 hover:bg-bg-hover hover:text-accent-orange no-underline"
+            onClick={() => onClose?.()}
+          >
+            <MetricsIcon />
+            <span>Metrics</span>
+          </a>
+        </div>
+      </div>
+
       {/* Footer Actions */}
       <div className="p-3 sm:p-4 border-t border-border-subtle space-y-2">
         <button
@@ -409,6 +489,51 @@ function UsersIcon() {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function FleetIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+    </svg>
+  );
+}
+
+function TrajectoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12h4l3 9 4-18 3 9h4" />
+    </svg>
+  );
+}
+
+function CoordinatorIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <circle cx="5" cy="5" r="2" />
+      <circle cx="19" cy="5" r="2" />
+      <circle cx="5" cy="19" r="2" />
+      <circle cx="19" cy="19" r="2" />
+      <line x1="9.5" y1="9.5" x2="6.5" y2="6.5" />
+      <line x1="14.5" y1="9.5" x2="17.5" y2="6.5" />
+      <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
+      <line x1="14.5" y1="14.5" x2="17.5" y2="17.5" />
+    </svg>
+  );
+}
+
+function MetricsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18" />
+      <path d="M18 17V9" />
+      <path d="M13 17V5" />
+      <path d="M8 17v-3" />
     </svg>
   );
 }

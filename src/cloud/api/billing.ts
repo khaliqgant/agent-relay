@@ -8,6 +8,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getBillingService, getAllPlans, getPlan, comparePlans } from '../billing/index.js';
 import type { SubscriptionTier } from '../billing/types.js';
 import { getConfig } from '../config.js';
+import { db } from '../db/index.js';
+import type Stripe from 'stripe';
 
 // Extend express session with user info
 declare module 'express-session' {
@@ -404,8 +406,15 @@ billingRouter.post(
     const billing = getBillingService();
 
     try {
-      // Get raw body
-      const rawBody = JSON.stringify(req.body);
+      // Use the preserved raw body from express.json verify callback
+      // This is critical for Stripe signature verification - JSON.stringify(req.body) won't work
+      const rawBody = (req as Request & { rawBody?: string }).rawBody;
+
+      if (!rawBody) {
+        console.error('Raw body not available for Stripe webhook verification');
+        res.status(400).json({ error: 'Raw body not available' });
+        return;
+      }
 
       // Verify and parse event
       const event = billing.verifyWebhookSignature(rawBody, sig as string);
@@ -423,18 +432,32 @@ billingRouter.post(
       // Handle specific events
       switch (billingEvent.type) {
         case 'subscription.created':
-        case 'subscription.updated':
-          // Update user's subscription in database
-          // This would integrate with your user/database layer
-          console.log('Subscription updated for user:', billingEvent.userId);
-          break;
+        case 'subscription.updated': {
+          // Extract subscription tier and update user's plan
+          if (billingEvent.userId) {
+            const subscription = billingEvent.data as unknown as Stripe.Subscription;
+            const tier = billing.getTierFromSubscription(subscription);
 
-        case 'subscription.canceled':
-          console.log('Subscription canceled for user:', billingEvent.userId);
+            // Update user's plan in database
+            await db.users.update(billingEvent.userId, { plan: tier });
+            console.log(`Updated user ${billingEvent.userId} plan to: ${tier}`);
+          } else {
+            console.warn('Subscription event received without userId:', billingEvent.id);
+          }
           break;
+        }
+
+        case 'subscription.canceled': {
+          // Reset user to free plan
+          if (billingEvent.userId) {
+            await db.users.update(billingEvent.userId, { plan: 'free' });
+            console.log(`User ${billingEvent.userId} subscription canceled, reset to free plan`);
+          }
+          break;
+        }
 
         case 'invoice.payment_failed':
-          // Notify user of failed payment
+          // Log payment failure (don't immediately downgrade - Stripe retries)
           console.log('Payment failed for user:', billingEvent.userId);
           break;
       }
