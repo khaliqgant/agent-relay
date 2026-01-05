@@ -107,7 +107,7 @@ export async function createServer(): Promise<CloudServer> {
         scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://connect.nango.dev"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://connect.nango.dev"],
         fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
-        imgSrc: ["'self'", "data:", "https:"],
+        imgSrc: ["'self'", "data:", "https:", "blob:"],
         connectSrc: ["'self'", "wss:", "ws:", "https:", "https://api.nango.dev", "https://connect.nango.dev"],
         frameSrc: ["'self'", "https://connect.nango.dev", "https://github.com"],
         childSrc: ["'self'", "https://connect.nango.dev", "blob:"],
