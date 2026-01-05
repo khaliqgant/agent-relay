@@ -17,6 +17,22 @@ import { requireAuth } from './auth.js';
 import { db } from '../db/index.js';
 import { vault } from '../vault/index.js';
 
+// Import for local use
+import {
+  CLI_AUTH_CONFIG,
+  runCLIAuthViaPTY,
+  stripAnsiCodes,
+  matchesSuccessPattern,
+  findMatchingPrompt,
+  validateProviderConfig,
+  validateAllProviderConfigs,
+  getSupportedProviders,
+  type CLIAuthConfig,
+  type PTYAuthResult,
+  type PTYAuthOptions,
+  type PromptHandler,
+} from './cli-pty-runner.js';
+
 // Re-export from shared module for backward compatibility
 export {
   CLI_AUTH_CONFIG,
@@ -31,7 +47,7 @@ export {
   type PTYAuthResult,
   type PTYAuthOptions,
   type PromptHandler,
-} from './cli-pty-runner.js';
+};
 
 export const onboardingRouter = Router();
 

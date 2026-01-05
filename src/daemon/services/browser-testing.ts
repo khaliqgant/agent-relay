@@ -12,7 +12,7 @@
  */
 
 import { spawn, execSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 export interface ScreenshotOptions {

@@ -237,7 +237,7 @@ _— ${getAppName()}_`
 /**
  * Build a prompt for handling a mention
  */
-function buildMentionPrompt(mention: CommentMention, repository: Repository): string {
+function buildMentionPrompt(mention: CommentMention, _repository: Repository): string {
   const agentDescription = isKnownAgent(mention.mentionedAgent)
     ? KNOWN_AGENTS[mention.mentionedAgent]
     : 'Custom agent';
@@ -388,7 +388,7 @@ _— ${getAppName()}_`
 /**
  * Build a prompt for an issue assignment
  */
-function buildIssuePrompt(assignment: IssueAssignment, repository: Repository): string {
+function buildIssuePrompt(assignment: IssueAssignment, _repository: Repository): string {
   const priorityNote = assignment.priority
     ? `\n**Priority:** ${assignment.priority.toUpperCase()}`
     : '';

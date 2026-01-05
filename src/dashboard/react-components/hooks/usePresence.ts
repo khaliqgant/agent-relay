@@ -283,8 +283,7 @@ export function usePresence(options: UsePresenceOptions = {}): UsePresenceReturn
       disconnect();
     };
     // Only re-run when autoConnect or currentUser identity changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoConnect, currentUser?.username]);
+  }, [autoConnect, currentUser?.username, connect, disconnect]);
 
   // Send leave on page unload
   useEffect(() => {

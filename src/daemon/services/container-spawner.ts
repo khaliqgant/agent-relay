@@ -11,7 +11,7 @@
  * - Language-specific toolchains
  */
 
-import { spawn, execSync, ExecSyncOptions } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { existsSync } from 'fs';
 
 export interface ContainerConfig {
