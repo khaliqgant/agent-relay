@@ -155,6 +155,42 @@
             "reasoning": "Claude has multi-step setup: dark mode -> auth method -> login URL. We detect prompts and send enter key to progress through them automatically."
           },
           "significance": "high"
+        },
+        {
+          "ts": 1767635905854,
+          "type": "decision",
+          "content": "Fixed cloud server body limit for screenshot uploads: Fixed cloud server body limit for screenshot uploads",
+          "raw": {
+            "question": "Fixed cloud server body limit for screenshot uploads",
+            "chosen": "Fixed cloud server body limit for screenshot uploads",
+            "alternatives": [],
+            "reasoning": "Default express.json limit of 100kb was too small for base64 encoded images"
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1767635932334,
+          "type": "decision",
+          "content": "Added GH_TOKEN env var for gh CLI compatibility: Added GH_TOKEN env var for gh CLI compatibility",
+          "raw": {
+            "question": "Added GH_TOKEN env var for gh CLI compatibility",
+            "chosen": "Added GH_TOKEN env var for gh CLI compatibility",
+            "alternatives": [],
+            "reasoning": "gh CLI uses GH_TOKEN not GITHUB_TOKEN; added to all provisioners (Fly.io, Railway, Docker)"
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1767635959214,
+          "type": "decision",
+          "content": "Fixed mobile usability issues in dashboard: Fixed mobile usability issues in dashboard",
+          "raw": {
+            "question": "Fixed mobile usability issues in dashboard",
+            "chosen": "Fixed mobile usability issues in dashboard",
+            "alternatives": [],
+            "reasoning": "Hamburger menu visibility, logs button always visible on mobile, responsive padding throughout"
+          },
+          "significance": "high"
         }
       ]
     }
