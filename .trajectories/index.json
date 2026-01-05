@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-01-05T20:14:01.627Z",
+  "lastUpdated": "2026-01-05T21:29:51.202Z",
   "trajectories": {
     "traj_ozd98si6a7ns": {
       "title": "Fix thinking indicator showing on all messages",
@@ -279,8 +279,22 @@
       "title": "Provider CLI auth flow for cloud workspaces",
       "status": "completed",
       "startedAt": "2026-01-04T00:05:43.304Z",
-      "completedAt": "2026-01-05T19:45:45.762Z",
+      "completedAt": "2026-01-05T21:10:34.744Z",
       "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_7ludwvz45veh.json"
+    },
+    "traj_t1yy8m7hbuxp": {
+      "title": "Implement GitHub repo permission API via Nango for dashboard access",
+      "status": "completed",
+      "startedAt": "2026-01-05T21:10:44.264Z",
+      "completedAt": "2026-01-05T21:13:52.530Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_t1yy8m7hbuxp.json"
+    },
+    "traj_g0fisy9h51mf": {
+      "title": "Lead agent coordination - GitHub repo access feature",
+      "status": "completed",
+      "startedAt": "2026-01-05T21:18:03.796Z",
+      "completedAt": "2026-01-05T21:29:51.191Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_g0fisy9h51mf.json"
     },
     "traj_22bhyulruouw": {
       "title": "Lead agent coordination - responsive nav fix and team assignments",

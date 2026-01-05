@@ -166,55 +166,53 @@ async function softHealthCheck(url: string): Promise<void> {
 }
 
 /**
- * Wait for machine to be in "started" state
+ * Wait for machine to be in "started" state using Fly.io's /wait endpoint
+ * This is more efficient than polling - the API blocks until the state is reached
+ * @see https://fly.io/docs/machines/api/machines-resource/#wait-for-a-machine-to-reach-a-specific-state
  */
 async function waitForMachineStarted(
   apiToken: string,
   appName: string,
   machineId: string,
-  maxWaitMs = 60_000
+  timeoutSeconds = 120
 ): Promise<void> {
-  const startTime = Date.now();
-  let lastState = 'unknown';
+  console.log(`[provisioner] Waiting for machine ${machineId} to start (timeout: ${timeoutSeconds}s)...`);
 
-  while (Date.now() - startTime < maxWaitMs) {
-    try {
-      const res = await fetch(
-        `https://api.machines.dev/v1/apps/${appName}/machines/${machineId}`,
-        {
-          headers: { Authorization: `Bearer ${apiToken}` },
-        }
-      );
-
-      if (res.ok) {
-        const machine = (await res.json()) as { state: string };
-        lastState = machine.state;
-        console.log(`[provisioner] Machine ${machineId} state: ${lastState}`);
-
-        if (lastState === 'started') {
-          return;
-        }
-
-        // If stopped/suspended, try to start it
-        if (lastState === 'stopped' || lastState === 'suspended') {
-          console.log(`[provisioner] Starting machine ${machineId}...`);
-          await fetch(
-            `https://api.machines.dev/v1/apps/${appName}/machines/${machineId}/start`,
-            {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${apiToken}` },
-            }
-          );
-        }
+  try {
+    // Use Fly.io's /wait endpoint - blocks until machine reaches target state
+    const res = await fetch(
+      `https://api.machines.dev/v1/apps/${appName}/machines/${machineId}/wait?state=started&timeout=${timeoutSeconds}`,
+      {
+        headers: { Authorization: `Bearer ${apiToken}` },
       }
-    } catch (error) {
-      console.warn(`[provisioner] Error checking machine state:`, error);
+    );
+
+    if (res.ok) {
+      console.log(`[provisioner] Machine ${machineId} is now started`);
+      return;
     }
 
-    await wait(3000);
-  }
+    // 408 = timeout, machine didn't reach state in time
+    if (res.status === 408) {
+      // Get current state for error message
+      const stateRes = await fetch(
+        `https://api.machines.dev/v1/apps/${appName}/machines/${machineId}`,
+        { headers: { Authorization: `Bearer ${apiToken}` } }
+      );
+      const machine = stateRes.ok ? (await stateRes.json()) as { state: string } : { state: 'unknown' };
+      throw new Error(`Machine ${machineId} did not start within ${timeoutSeconds}s (last state: ${machine.state})`);
+    }
 
-  throw new Error(`Machine ${machineId} did not start within ${maxWaitMs}ms (last state: ${lastState})`);
+    // Other error
+    const errorText = await res.text();
+    throw new Error(`Wait for machine failed: ${res.status} ${errorText}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('did not start')) {
+      throw error;
+    }
+    console.warn(`[provisioner] Error waiting for machine:`, error);
+    throw new Error(`Failed to wait for machine ${machineId}: ${(error as Error).message}`);
+  }
 }
 
 /**
@@ -1431,6 +1429,12 @@ export class WorkspaceProvisioner {
     const workspace = await db.workspaces.findById(workspaceId);
     if (!workspace) {
       throw new Error('Workspace not found');
+    }
+
+    // During early provisioning, computeId isn't set yet
+    // Return the database status instead of querying the provider
+    if (!workspace.computeId && workspace.status === 'provisioning') {
+      return 'provisioning';
     }
 
     const status = await this.provisioner.getStatus(workspace);

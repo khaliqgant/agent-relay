@@ -55,8 +55,13 @@ export function ProviderAuthFlow({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [codeInput, setCodeInput] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [cliCommand, setCliCommand] = useState<string | null>(null);
+  const [cliSessionId, setCliSessionId] = useState<string | null>(null);
+  const [showManualFallback, setShowManualFallback] = useState(false);
+  const [cliPollingActive, setCliPollingActive] = useState(false);
   const popupOpenedRef = useRef(false);
   const pollingRef = useRef(false);
+  const cliPollingRef = useRef(false);
 
   const backendProviderId = PROVIDER_ID_MAP[provider.id] || provider.id;
 
@@ -107,6 +112,94 @@ export function ProviderAuthFlow({
       onError(msg);
     }
   }, [backendProviderId, workspaceId, csrfToken, useDeviceFlow, onSuccess, onError]);
+
+  // Determine if this is the Codex flow
+  const isCodexFlow = provider.requiresUrlCopy || provider.id === 'codex' || backendProviderId === 'openai';
+
+  // Ref to hold the latest code submission handler (avoids stale closure in polling)
+  const handleCodeReceivedRef = useRef<((code: string) => Promise<void>) | null>(null);
+
+  // Poll for CLI auth completion (must be defined before fetchCliSession)
+  const startCliPolling = useCallback((cliAuthSessionId: string) => {
+    if (cliPollingRef.current) return;
+    cliPollingRef.current = true;
+    setCliPollingActive(true);
+
+    const maxAttempts = 120; // 10 minutes at 5s intervals
+    let attempts = 0;
+
+    const poll = async () => {
+      if (attempts >= maxAttempts || !cliPollingRef.current) {
+        cliPollingRef.current = false;
+        setCliPollingActive(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/auth/codex-helper/status/${cliAuthSessionId}`, {
+          credentials: 'include',
+        });
+
+        if (res.ok) {
+          const data = await res.json() as { ready: boolean; code?: string };
+
+          if (data.ready && data.code) {
+            cliPollingRef.current = false;
+            setCliPollingActive(false);
+            // Submit the code to complete auth
+            setCodeInput(data.code);
+            // Auto-submit the code using ref to avoid stale closure
+            if (handleCodeReceivedRef.current) {
+              handleCodeReceivedRef.current(data.code);
+            }
+            return;
+          }
+        }
+
+        attempts++;
+        setTimeout(poll, 5000);
+      } catch (err) {
+        console.error('CLI poll error:', err);
+        attempts++;
+        setTimeout(poll, 5000);
+      }
+    };
+
+    poll();
+  }, []);
+
+  // Fetch CLI session for Codex - provides a command the user can run locally
+  const fetchCliSession = useCallback(async () => {
+    if (!isCodexFlow) return;
+
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+
+      const res = await fetch('/api/auth/codex-helper/cli-session', {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+      });
+
+      if (res.ok) {
+        const data = await res.json() as { authSessionId: string; command: string };
+        setCliCommand(data.command);
+        setCliSessionId(data.authSessionId);
+        // Start polling for CLI completion
+        startCliPolling(data.authSessionId);
+      }
+    } catch (err) {
+      console.error('Failed to fetch CLI session:', err);
+    }
+  }, [isCodexFlow, csrfToken, startCliPolling]);
+
+  // Fetch CLI session when auth starts for Codex
+  useEffect(() => {
+    if (status === 'waiting' && isCodexFlow && !cliCommand) {
+      fetchCliSession();
+    }
+  }, [status, isCodexFlow, cliCommand, fetchCliSession]);
 
   // Open OAuth popup
   const openAuthPopup = useCallback((url: string) => {
@@ -276,6 +369,48 @@ export function ProviderAuthFlow({
     }
   }, [sessionId, codeInput, backendProviderId, csrfToken, handleComplete, onError]);
 
+  // Update the ref for CLI polling to use (avoids stale closure)
+  useEffect(() => {
+    handleCodeReceivedRef.current = async (code: string) => {
+      if (!sessionId) return;
+
+      setStatus('submitting');
+      setErrorMessage(null);
+
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+
+        const res = await fetch(`/api/onboarding/cli/${backendProviderId}/code/${sessionId}`, {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify({ code }),
+        });
+
+        const data = await res.json() as { success?: boolean; error?: string; needsRestart?: boolean };
+
+        if (!res.ok) {
+          if (data.needsRestart) {
+            setErrorMessage('The authentication session timed out. Please click "Try Again" to restart.');
+            setStatus('error');
+            return;
+          }
+          throw new Error(data.error || 'Failed to submit auth code');
+        }
+
+        if (data.success) {
+          await handleComplete();
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to submit auth code';
+        setErrorMessage(msg);
+        setStatus('error');
+        onError(msg);
+      }
+    };
+  }, [sessionId, backendProviderId, csrfToken, handleComplete, onError]);
+
   // Cancel auth flow
   const handleCancel = useCallback(async () => {
     pollingRef.current = false;
@@ -307,11 +442,12 @@ export function ProviderAuthFlow({
     // Cleanup on unmount
     return () => {
       pollingRef.current = false;
+      cliPollingRef.current = false;
+      setCliPollingActive(false);
     };
   }, [startAuth, status]);
 
-  // Determine which flow type to use based on provider
-  const isCodexFlow = provider.requiresUrlCopy || provider.id === 'codex' || backendProviderId === 'openai';
+  // Determine if this is Claude flow (isCodexFlow defined earlier)
   const isClaudeFlow = provider.id === 'anthropic' || backendProviderId === 'anthropic';
 
   return (
@@ -394,35 +530,93 @@ export function ProviderAuthFlow({
           </a>
 
           {isCodexFlow ? (
-            /* Codex: URL paste flow with warning about "site can't be reached" */
-            <div className="space-y-3">
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                <p className="text-xs text-amber-400">
-                  <strong>Expected behavior:</strong> After login, you&apos;ll see &quot;This site can&apos;t be reached&quot; - this is normal!
-                  Copy the full URL from your browser&apos;s address bar and paste it below.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Paste the localhost URL here (e.g., http://localhost:...)"
-                  value={codeInput}
-                  onChange={(e) => setCodeInput(e.target.value)}
-                  className="flex-1 px-4 py-3 bg-bg-tertiary border border-border-subtle rounded-xl text-white placeholder-text-muted focus:outline-none focus:border-accent-cyan transition-colors font-mono text-sm"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && codeInput.trim()) {
-                      handleSubmitCode();
-                    }
-                  }}
-                />
-                <button
-                  onClick={handleSubmitCode}
-                  disabled={!codeInput.trim()}
-                  className="px-6 py-3 bg-accent-cyan text-bg-deep font-semibold rounded-xl hover:bg-accent-cyan/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  Submit
-                </button>
-              </div>
+            /* Codex: CLI helper or manual URL paste */
+            <div className="space-y-4">
+              {/* Primary: CLI command */}
+              {cliCommand && !showManualFallback && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-accent-cyan/10 border border-accent-cyan/30 rounded-lg">
+                    <p className="text-sm text-accent-cyan mb-2">
+                      <strong>Step 1:</strong> Run this command in your terminal:
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 px-3 py-2 bg-bg-deep rounded-lg text-xs font-mono text-white overflow-x-auto">
+                        {cliCommand}
+                      </code>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(cliCommand);
+                        }}
+                        className="px-3 py-2 bg-bg-tertiary border border-border-subtle rounded-lg text-text-muted hover:text-white hover:border-accent-cyan/50 transition-colors text-xs"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <p className="text-sm text-accent-cyan mt-3">
+                      <strong>Step 2:</strong> Then click the button above to sign in with OpenAI
+                    </p>
+                    <p className="text-xs text-text-muted mt-2">
+                      The CLI will automatically capture the callback and complete authentication.
+                    </p>
+                    {cliPollingActive && (
+                      <div className="flex items-center gap-2 mt-3 text-xs text-accent-cyan">
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        <span>Waiting for CLI to capture callback...</span>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setShowManualFallback(true)}
+                    className="text-xs text-text-muted hover:text-white transition-colors"
+                  >
+                    Having trouble? Click here for manual method
+                  </button>
+                </div>
+              )}
+
+              {/* Fallback: Manual URL paste */}
+              {(showManualFallback || !cliCommand) && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                    <p className="text-xs text-amber-400">
+                      <strong>Manual method:</strong> After login, you&apos;ll see &quot;This site can&apos;t be reached&quot; - this is expected!
+                      Copy the full URL from your browser&apos;s address bar and paste it below.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Paste the localhost URL here (e.g., http://localhost:...)"
+                      value={codeInput}
+                      onChange={(e) => setCodeInput(e.target.value)}
+                      className="flex-1 px-4 py-3 bg-bg-tertiary border border-border-subtle rounded-xl text-white placeholder-text-muted focus:outline-none focus:border-accent-cyan transition-colors font-mono text-sm"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && codeInput.trim()) {
+                          handleSubmitCode();
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={handleSubmitCode}
+                      disabled={!codeInput.trim()}
+                      className="px-6 py-3 bg-accent-cyan text-bg-deep font-semibold rounded-xl hover:bg-accent-cyan/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      Submit
+                    </button>
+                  </div>
+                  {cliCommand && (
+                    <button
+                      onClick={() => setShowManualFallback(false)}
+                      className="text-xs text-accent-cyan hover:underline"
+                    >
+                      ← Back to CLI method
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ) : isClaudeFlow ? (
             /* Claude: Code paste flow */

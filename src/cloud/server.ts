@@ -44,6 +44,7 @@ import { webhooksRouter } from './api/webhooks.js';
 import { githubAppRouter } from './api/github-app.js';
 import { nangoAuthRouter } from './api/nango-auth.js';
 import { gitRouter } from './api/git.js';
+import { codexAuthHelperRouter } from './api/codex-auth-helper.js';
 import { db } from './db/index.js';
 
 /**
@@ -203,10 +204,11 @@ export async function createServer(): Promise<CloudServer> {
 
   // Lightweight CSRF protection using session token
   const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-  // Paths exempt from CSRF (webhooks from external services, workspace proxy)
+  // Paths exempt from CSRF (webhooks from external services, workspace proxy, local auth callbacks)
   const CSRF_EXEMPT_PATHS = [
     '/api/webhooks/',
     '/api/auth/nango/webhook',
+    '/api/auth/codex-helper/callback',
   ];
   // Additional pattern for workspace proxy routes (contains /proxy/)
   const isWorkspaceProxyRoute = (path: string) => /^\/api\/workspaces\/[^/]+\/proxy\//.test(path);
@@ -278,6 +280,7 @@ export async function createServer(): Promise<CloudServer> {
   app.use('/api/webhooks', webhooksRouter);
   app.use('/api/github-app', githubAppRouter);
   app.use('/api/auth/nango', nangoAuthRouter);
+  app.use('/api/auth/codex-helper', codexAuthHelperRouter);
   app.use('/api/git', gitRouter);
 
   // Test helper routes (only available in non-production)

@@ -2611,4 +2611,235 @@ program
     console.log(`Profiling ${agentName}... Press Ctrl+C to stop.`);
   });
 
+// ============================================================================
+// codex-auth - Local OAuth callback helper for Codex/OpenAI authentication
+// ============================================================================
+
+program
+  .command('codex-auth')
+  .description('Capture Codex OAuth callback locally (run this when connecting Codex in Agent Relay)')
+  .option('--token <token>', 'Auth session token from Agent Relay dashboard')
+  .option('--cloud-url <url>', 'Cloud API URL', process.env.AGENT_RELAY_CLOUD_URL || 'https://agent-relay.com')
+  .option('--port <port>', 'Callback port (default: 1455)', '1455')
+  .option('--timeout <seconds>', 'Timeout in seconds (default: 300)', '300')
+  .action(async (options: { token?: string; cloudUrl: string; port: string; timeout: string }) => {
+    const http = await import('node:http');
+    const { URL } = await import('node:url');
+
+    const CALLBACK_PORT = parseInt(options.port, 10);
+    const TIMEOUT_MS = parseInt(options.timeout, 10) * 1000;
+    const CLOUD_URL = options.cloudUrl.replace(/\/$/, '');
+
+    // Colors for terminal output
+    const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
+    const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
+    const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
+    const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
+
+    console.log('');
+    console.log(cyan('═══════════════════════════════════════════════════'));
+    console.log(cyan('       Codex Authentication Helper'));
+    console.log(cyan('═══════════════════════════════════════════════════'));
+    console.log('');
+
+    // Get or create auth session
+    let authSessionId = options.token;
+
+    if (!authSessionId) {
+      // No token provided - create a session via the API
+      console.log('Creating auth session...');
+      try {
+        const response = await fetch(`${CLOUD_URL}/api/auth/codex-helper/cli-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({})) as { error?: string };
+          console.log('');
+          console.log(red('Failed to create auth session.'));
+          console.log('');
+          if (response.status === 401) {
+            console.log('To use this command, run it with a token from the Agent Relay dashboard:');
+            console.log('');
+            console.log(cyan('  npx agent-relay codex-auth --token=<TOKEN>'));
+            console.log('');
+            console.log('Get the token from: Settings → Connect Codex → "Use CLI helper"');
+          } else {
+            console.log(`Error: ${error.error || response.statusText}`);
+          }
+          process.exit(1);
+        }
+
+        const data = await response.json() as { authSessionId: string };
+        authSessionId = data.authSessionId;
+      } catch (err) {
+        console.log(red('Failed to connect to Agent Relay Cloud.'));
+        console.log(`URL: ${CLOUD_URL}`);
+        console.log(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    }
+
+    console.log(`Session: ${authSessionId?.slice(0, 8)}...`);
+    console.log(`Listening on port: ${cyan(String(CALLBACK_PORT))}`);
+    console.log('');
+
+    // Success HTML page
+    const successHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Authentication Successful</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #0a0f1a; color: #e2e8f0;
+           display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+    .card { background: #1a1f2e; padding: 2rem; border-radius: 12px; text-align: center;
+            border: 1px solid rgba(0, 212, 255, 0.3); max-width: 400px; }
+    h1 { color: #00d4ff; margin-bottom: 1rem; }
+    p { color: #94a3b8; margin: 0.5rem 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>✓ Authentication Successful!</h1>
+    <p>Your Codex account is now connected.</p>
+    <p style="margin-top: 1rem;">You can close this window.</p>
+  </div>
+</body>
+</html>`;
+
+    // Create HTTP server to capture callback
+    let authCode: string | null = null;
+    let serverClosed = false;
+
+    const server = http.createServer(async (req, res) => {
+      const url = new URL(req.url || '/', `http://localhost:${CALLBACK_PORT}`);
+
+      if (url.pathname === '/auth/callback') {
+        const code = url.searchParams.get('code');
+        const error = url.searchParams.get('error');
+
+        if (error) {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end(`OAuth Error: ${error}`);
+          console.log(red(`OAuth error: ${error}`));
+          return;
+        }
+
+        if (code) {
+          authCode = code;
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(successHtml);
+          console.log('');
+          console.log(green('✓ Received OAuth callback!'));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('Missing authorization code');
+        }
+      } else if (url.pathname === '/favicon.ico') {
+        res.writeHead(404);
+        res.end();
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Waiting for OAuth callback on /auth/callback...');
+      }
+    });
+
+    // Handle server errors
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log(red(`Port ${CALLBACK_PORT} is already in use.`));
+        console.log('');
+        console.log('Another process may be using this port.');
+        console.log('Close it and try again, or specify a different port with --port');
+        process.exit(1);
+      }
+      throw err;
+    });
+
+    // Start listening
+    await new Promise<void>((resolve) => {
+      server.listen(CALLBACK_PORT, () => {
+        resolve();
+      });
+    });
+
+    console.log(green('Server ready!'));
+    console.log('');
+    console.log(yellow('Next steps:'));
+    console.log('  1. Go to the Agent Relay dashboard');
+    console.log('  2. Click "Open Codex Login Page" to start OAuth');
+    console.log('  3. Sign in with your OpenAI account');
+    console.log('  4. The callback will be captured automatically');
+    console.log('');
+    console.log(cyan(`Waiting for callback... (timeout: ${options.timeout}s)`));
+
+    // Wait for callback or timeout
+    const startTime = Date.now();
+    while (!authCode && !serverClosed && (Date.now() - startTime) < TIMEOUT_MS) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      if (elapsed > 0 && elapsed % 30 === 0) {
+        console.log(`  Still waiting... (${elapsed}s)`);
+      }
+    }
+
+    // Close server
+    server.close();
+    serverClosed = true;
+
+    if (!authCode) {
+      console.log('');
+      console.log(red('Timeout waiting for OAuth callback.'));
+      console.log('');
+      console.log('If you completed sign-in, the callback may have failed.');
+      console.log('Try copying the localhost URL from your browser and pasting');
+      console.log('it into the Agent Relay dashboard manually.');
+      process.exit(1);
+    }
+
+    // Send code to cloud API
+    console.log('Sending auth code to Agent Relay...');
+
+    try {
+      const response = await fetch(`${CLOUD_URL}/api/auth/codex-helper/callback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          authSessionId,
+          code: authCode,
+        }),
+      });
+
+      const data = await response.json() as { success?: boolean; error?: string };
+
+      if (response.ok && data.success) {
+        console.log('');
+        console.log(green('═══════════════════════════════════════════════════'));
+        console.log(green('          Authentication Complete!'));
+        console.log(green('═══════════════════════════════════════════════════'));
+        console.log('');
+        console.log('Your Codex account is now connected to Agent Relay.');
+        console.log('You can close this terminal and return to the dashboard.');
+        console.log('');
+      } else {
+        console.log('');
+        console.log(red('Failed to send auth code to Agent Relay.'));
+        console.log(`Error: ${data.error || 'Unknown error'}`);
+        console.log('');
+        console.log('You can try pasting this code manually in the dashboard:');
+        console.log(cyan(authCode));
+        process.exit(1);
+      }
+    } catch (err) {
+      console.log('');
+      console.log(red('Failed to connect to Agent Relay Cloud.'));
+      console.log(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      console.log('');
+      console.log('You can try pasting this code manually in the dashboard:');
+      console.log(cyan(authCode));
+      process.exit(1);
+    }
+  });
+
 program.parse();

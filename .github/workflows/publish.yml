@@ -1,38 +1,303 @@
-name: Publish
+name: Publish Package
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+      custom_version:
+        description: "Custom version (optional, overrides version type)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run (do not actually publish)"
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: "NPM dist-tag"
+        required: false
+        type: choice
+        options:
+          - latest
+          - next
+          - beta
+          - alpha
+        default: "latest"
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
-  publish:
+  validate:
+    name: Validate and Test
     runs-on: ubuntu-latest
+    env:
+      NPM_CONFIG_FUND: false
+    outputs:
+      version_strategy: ${{ steps.version.outputs.version_strategy }}
+      version_type: ${{ steps.version.outputs.version_type }}
+      custom_version: ${{ steps.version.outputs.custom_version }}
+
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Build
+        run: npm run build
+
       - name: Test
         run: npm test
+
+      - name: Determine version strategy
+        id: version
+        run: |
+          CUSTOM_VERSION="${{ github.event.inputs.custom_version }}"
+          VERSION_TYPE="${{ github.event.inputs.version }}"
+
+          if [ -n "$CUSTOM_VERSION" ]; then
+            echo "version_strategy=custom" >> $GITHUB_OUTPUT
+            echo "custom_version=$CUSTOM_VERSION" >> $GITHUB_OUTPUT
+            echo "Version strategy: custom ($CUSTOM_VERSION)"
+          else
+            echo "version_strategy=bump" >> $GITHUB_OUTPUT
+            echo "version_type=$VERSION_TYPE" >> $GITHUB_OUTPUT
+            echo "Version strategy: bump ($VERSION_TYPE)"
+          fi
+
+  version:
+    name: Version Package
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      NPM_CONFIG_FUND: false
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Version package
+        id: bump
+        run: |
+          VERSION_STRATEGY="${{ needs.validate.outputs.version_strategy }}"
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+
+          if [ "$VERSION_STRATEGY" = "custom" ]; then
+            TARGET_VERSION="${{ needs.validate.outputs.custom_version }}"
+            echo "Setting version to custom value: $TARGET_VERSION"
+            npm version "$TARGET_VERSION" --no-git-tag-version --allow-same-version
+          else
+            VERSION_TYPE="${{ needs.validate.outputs.version_type }}"
+            echo "Bumping version: $VERSION_TYPE"
+            npm version "$VERSION_TYPE" --no-git-tag-version --preid=beta
+          fi
+
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Update package-lock.json
+        run: npm install --package-lock-only
+
+      - name: Upload versioned files
+        uses: actions/upload-artifact@v4
+        with:
+          name: versioned-package
+          path: |
+            package.json
+            package-lock.json
+          retention-days: 1
+
+  publish:
+    name: Publish to NPM
+    needs: [validate, version]
+    runs-on: ubuntu-latest
+    env:
+      NPM_CONFIG_FUND: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Update npm to latest
+        run: npm install -g npm@latest
+
+      - name: Download versioned files
+        uses: actions/download-artifact@v4
+        with:
+          name: versioned-package
+          path: .
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
 
       - name: Preview package contents
         run: npm pack --dry-run
 
-      - name: Publish to npm
-        run: npm publish --provenance
+      - name: Dry run check
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          echo "Dry run - would publish:"
+          echo "  Version: ${{ needs.version.outputs.new_version }}"
+          echo "  Tag: ${{ github.event.inputs.tag }}"
+          npm publish --dry-run --access public --tag ${{ github.event.inputs.tag }}
+
+      - name: Publish to NPM (Trusted Publishing)
+        if: github.event.inputs.dry_run != 'true'
+        run: npm publish --access public --provenance --tag ${{ github.event.inputs.tag }}
+
+      - name: Report published
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          echo "Published agent-relay@${{ needs.version.outputs.new_version }}"
+          echo "NPM Tag: ${{ github.event.inputs.tag }}"
+
+  create-git-tag:
+    name: Create Git Tag and Release
+    needs: [validate, version, publish]
+    runs-on: ubuntu-latest
+    env:
+      NPM_CONFIG_FUND: false
+    if: github.event.inputs.dry_run != 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Download versioned files
+        uses: actions/download-artifact@v4
+        with:
+          name: versioned-package
+          path: .
+
+      - name: Commit version bump
+        run: |
+          NEW_VERSION="${{ needs.version.outputs.new_version }}"
+          TAG="${{ github.event.inputs.tag }}"
+
+          git add package.json package-lock.json
+
+          if git diff --staged --quiet; then
+            echo "No version changes to commit"
+          else
+            git commit -m "chore(release): v${NEW_VERSION}" \
+              -m "NPM Tag: ${TAG}"
+
+            git push origin HEAD:main
+            echo "Version changes committed and pushed"
+          fi
+
+      - name: Create and push tag
+        run: |
+          NEW_VERSION="${{ needs.version.outputs.new_version }}"
+          RELEASE_TAG="v${NEW_VERSION}"
+
+          git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+          git push origin "$RELEASE_TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.version.outputs.new_version }}
+          name: v${{ needs.version.outputs.new_version }}
+          body: |
+            ## agent-relay v${{ needs.version.outputs.new_version }}
+
+            ### NPM Tag
+            `${{ github.event.inputs.tag }}`
+
+            ### Installation
+
+            ```bash
+            # Install globally
+            npm install -g agent-relay@${{ needs.version.outputs.new_version }}
+
+            # Or install latest
+            npm install -g agent-relay@latest
+            ```
+          generate_release_notes: true
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  summary:
+    name: Publish Summary
+    needs: [validate, version, publish]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Summary
+        run: |
+          echo "## NPM Publish Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Package**: agent-relay" >> $GITHUB_STEP_SUMMARY
+          echo "**Version**: \`${{ needs.version.outputs.new_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version Strategy**: \`${{ needs.validate.outputs.version_strategy }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**NPM Tag**: \`${{ github.event.inputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry Run**: \`${{ github.event.inputs.dry_run }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "This was a dry run - no packages were actually published" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Package successfully published to NPM" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Install:" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo "npm install -g agent-relay@latest" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi

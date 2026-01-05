@@ -305,6 +305,163 @@ class NangoService {
   }
 
   /**
+   * Check if user has access to a specific GitHub repository.
+   * Uses the user's OAuth connection to query GitHub API.
+   * @param connectionId - User's Nango connection ID (github user OAuth)
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @returns Access details or null if no access
+   */
+  async checkUserRepoAccess(connectionId: string, owner: string, repo: string): Promise<{
+    hasAccess: boolean;
+    permission?: 'admin' | 'write' | 'read' | 'none';
+    repository?: {
+      id: number;
+      fullName: string;
+      isPrivate: boolean;
+      defaultBranch: string;
+    };
+  }> {
+    try {
+      const response = await this.client.get<{
+        id: number;
+        full_name: string;
+        private: boolean;
+        default_branch: string;
+        permissions?: {
+          admin: boolean;
+          push: boolean;
+          pull: boolean;
+        };
+      }>({
+        connectionId,
+        providerConfigKey: NANGO_INTEGRATIONS.GITHUB_USER,
+        endpoint: `/repos/${owner}/${repo}`,
+      }) as AxiosResponse<{
+        id: number;
+        full_name: string;
+        private: boolean;
+        default_branch: string;
+        permissions?: {
+          admin: boolean;
+          push: boolean;
+          pull: boolean;
+        };
+      }>;
+
+      const data = response.data;
+      let permission: 'admin' | 'write' | 'read' | 'none' = 'none';
+
+      if (data.permissions) {
+        if (data.permissions.admin) {
+          permission = 'admin';
+        } else if (data.permissions.push) {
+          permission = 'write';
+        } else if (data.permissions.pull) {
+          permission = 'read';
+        }
+      }
+
+      return {
+        hasAccess: true,
+        permission,
+        repository: {
+          id: data.id,
+          fullName: data.full_name,
+          isPrivate: data.private,
+          defaultBranch: data.default_branch,
+        },
+      };
+    } catch (err: unknown) {
+      // 404 = no access or repo doesn't exist
+      const error = err as { response?: { status?: number } };
+      if (error.response?.status === 404 || error.response?.status === 403) {
+        return { hasAccess: false };
+      }
+      console.error('[nango] checkUserRepoAccess error:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * List all repositories the user has access to via their OAuth connection.
+   * Uses the user's personal OAuth token (not the GitHub App).
+   * @param connectionId - User's Nango connection ID (github user OAuth)
+   * @param options - Pagination and filter options
+   * @returns List of accessible repositories
+   */
+  async listUserAccessibleRepos(connectionId: string, options?: {
+    page?: number;
+    perPage?: number;
+    type?: 'all' | 'owner' | 'public' | 'private' | 'member';
+    sort?: 'created' | 'updated' | 'pushed' | 'full_name';
+  }): Promise<{
+    repositories: Array<{
+      id: number;
+      fullName: string;
+      isPrivate: boolean;
+      defaultBranch: string;
+      permissions: {
+        admin: boolean;
+        push: boolean;
+        pull: boolean;
+      };
+    }>;
+    hasMore: boolean;
+  }> {
+    const page = options?.page ?? 1;
+    const perPage = options?.perPage ?? 100;
+    const type = options?.type ?? 'all';
+    const sort = options?.sort ?? 'updated';
+
+    const response = await this.client.get<Array<{
+      id: number;
+      full_name: string;
+      private: boolean;
+      default_branch: string;
+      permissions?: {
+        admin: boolean;
+        push: boolean;
+        pull: boolean;
+      };
+    }>>({
+      connectionId,
+      providerConfigKey: NANGO_INTEGRATIONS.GITHUB_USER,
+      endpoint: '/user/repos',
+      params: {
+        page: String(page),
+        per_page: String(perPage),
+        type,
+        sort,
+        direction: 'desc',
+      },
+    }) as AxiosResponse<Array<{
+      id: number;
+      full_name: string;
+      private: boolean;
+      default_branch: string;
+      permissions?: {
+        admin: boolean;
+        push: boolean;
+        pull: boolean;
+      };
+    }>>;
+
+    const repos = response.data || [];
+
+    return {
+      repositories: repos.map(r => ({
+        id: r.id,
+        fullName: r.full_name,
+        isPrivate: r.private,
+        defaultBranch: r.default_branch,
+        permissions: r.permissions || { admin: false, push: false, pull: false },
+      })),
+      hasMore: repos.length === perPage,
+    };
+  }
+
+  /**
    * Verify webhook signature sent by Nango.
    * Uses the new verifyIncomingWebhookRequest method.
    * @see https://nango.dev/docs/reference/sdks/node#verify-webhook-signature
