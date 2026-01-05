@@ -21,6 +21,9 @@ import type {
 // API base URL - relative in browser, can be configured for SSR
 const API_BASE = '';
 
+// Storage key for workspace ID persistence
+const WORKSPACE_ID_KEY = 'agentrelay_workspace_id';
+
 // Workspace ID for cloud mode proxying
 let activeWorkspaceId: string | null = null;
 
@@ -52,17 +55,51 @@ function captureCsrfToken(response: Response): void {
 }
 
 /**
- * Set the active workspace ID for API proxying in cloud mode
+ * Set the active workspace ID for API proxying in cloud mode.
+ * Also persists to localStorage so other pages can access it.
  */
 export function setActiveWorkspaceId(workspaceId: string | null): void {
   activeWorkspaceId = workspaceId;
+  // Persist to localStorage for cross-page access
+  if (typeof window !== 'undefined') {
+    if (workspaceId) {
+      localStorage.setItem(WORKSPACE_ID_KEY, workspaceId);
+    } else {
+      localStorage.removeItem(WORKSPACE_ID_KEY);
+    }
+  }
+}
+
+/**
+ * Get the active workspace ID
+ */
+export function getActiveWorkspaceId(): string | null {
+  return activeWorkspaceId;
+}
+
+/**
+ * Initialize workspace ID from localStorage if not already set.
+ * Call this on pages that need workspace context but aren't in the main app flow.
+ */
+export function initializeWorkspaceId(): string | null {
+  if (activeWorkspaceId) {
+    return activeWorkspaceId;
+  }
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem(WORKSPACE_ID_KEY);
+    if (stored) {
+      activeWorkspaceId = stored;
+      return stored;
+    }
+  }
+  return null;
 }
 
 /**
  * Get the API URL, accounting for cloud mode proxying
  * @param path - API path like '/api/spawn' or '/api/send'
  */
-function getApiUrl(path: string): string {
+export function getApiUrl(path: string): string {
   if (activeWorkspaceId) {
     // In cloud mode, proxy through the cloud server
     // Strip /api/ prefix since the proxy endpoint adds it back
