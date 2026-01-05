@@ -79,17 +79,33 @@ export const CLI_AUTH_CONFIG: Record<string, CLIAuthConfig> = {
         description: 'Dark mode prompt',
       },
       {
-        // Be more specific to avoid matching after URL is shown
-        pattern: /how\s*would\s*you\s*like\s*to\s*authenticate|choose.*auth.*method|select.*auth|subscription\s*or.*api\s*key/i,
-        response: '\r', // Press enter for first option (subscription)
+        // Login method selection - "Select login method:" with Claude account or Console options
+        pattern: /select\s*login\s*method|how\s*would\s*you\s*like\s*to\s*authenticate|choose.*auth.*method|select.*auth|subscription\s*or.*api\s*key/i,
+        response: '\r', // Press enter for first option (Claude account with subscription)
         delay: 100,
-        description: 'Auth method prompt',
+        description: 'Login method selection',
       },
       {
-        pattern: /trust\s*(this|the)\s*(directory|folder|workspace)/i,
-        response: 'y\r', // Yes to trust
-        delay: 100,
+        // Login success - press enter to continue
+        pattern: /login\s*successful|logged\s*in.*press\s*enter|press\s*enter\s*to\s*continue/i,
+        response: '\r',
+        delay: 200,
+        description: 'Login success prompt',
+      },
+      {
+        // Trust directory - matches "Do you trust the files in this folder?" and similar
+        pattern: /trust\s*(this|the)?\s*(files|directory|folder|workspace)|do\s*you\s*trust/i,
+        response: '\r', // Press enter for first option (Yes, proceed)
+        delay: 200,
         description: 'Trust directory prompt',
+      },
+      {
+        // Fallback: Any "press enter" or "enter to confirm/continue" prompt
+        // Keep this LAST so more specific handlers match first
+        pattern: /press\s*enter|enter\s*to\s*(confirm|continue|proceed)|hit\s*enter/i,
+        response: '\r',
+        delay: 300,
+        description: 'Generic enter prompt',
       },
     ],
     successPatterns: [/success/i, /authenticated/i, /logged\s*in/i, /you.*(?:are|now).*logged/i],

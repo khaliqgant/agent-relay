@@ -56,7 +56,7 @@
     "services:down": "docker compose -f docker-compose.dev.yml down",
     "services:logs": "docker compose -f docker-compose.dev.yml logs -f postgres redis",
     "cloud:setup": "./scripts/cloud-setup.sh",
-    "cloud:api": "node -r dotenv/config dist/cloud/index.js",
+    "cloud:api": "WORKSPACE_DEV_MOUNT=true node -r dotenv/config dist/cloud/index.js",
     "precloud": "./scripts/cloud-setup.sh --skip-data",
     "cloud": "concurrently -n api,daemon,dashboard -c cyan,blue,magenta \"npm run cloud:api\" \"npm run dev:daemon\" \"npm run dev:next\""
   },

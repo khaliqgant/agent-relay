@@ -55,7 +55,7 @@ describe('CLI Auth Config', () => {
         expect(prompt2!.description).toBe('Dark mode prompt');
       });
 
-      it('detects auth method prompt', () => {
+      it('detects login method prompt', () => {
         const respondedPrompts = new Set<string>();
 
         const prompt1 = findMatchingPrompt(
@@ -64,7 +64,7 @@ describe('CLI Auth Config', () => {
           respondedPrompts
         );
         expect(prompt1).toBeTruthy();
-        expect(prompt1!.description).toBe('Auth method prompt');
+        expect(prompt1!.description).toBe('Login method selection');
 
         const prompt2 = findMatchingPrompt(
           'How would you like to authenticate?',
@@ -72,20 +72,20 @@ describe('CLI Auth Config', () => {
           respondedPrompts
         );
         expect(prompt2).toBeTruthy();
-        expect(prompt2!.description).toBe('Auth method prompt');
+        expect(prompt2!.description).toBe('Login method selection');
       });
 
       it('detects trust directory prompt', () => {
         const respondedPrompts = new Set<string>();
 
         const prompt = findMatchingPrompt(
-          'Do you trust this directory?',
+          'Do you trust the files in this folder?',
           config.prompts,
           respondedPrompts
         );
         expect(prompt).toBeTruthy();
         expect(prompt!.description).toBe('Trust directory prompt');
-        expect(prompt!.response).toBe('y\r');
+        expect(prompt!.response).toBe('\r'); // Press enter to select first option (Yes, proceed)
       });
 
       it('does not respond to same prompt twice', () => {

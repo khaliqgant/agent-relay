@@ -2073,24 +2073,57 @@ export async function startDashboard(
    * Used when OAuth returns a code that must be pasted into the CLI
    */
   app.post('/auth/cli/:provider/code/:sessionId', async (req, res) => {
-    const { sessionId } = req.params;
+    const { provider, sessionId } = req.params;
     const { code } = req.body;
+
+    console.log('[cli-auth] Auth code submission received', { provider, sessionId, codeLength: code?.length });
 
     if (!code || typeof code !== 'string') {
       return res.status(400).json({ error: 'Auth code is required' });
     }
 
-    const result = await submitAuthCode(sessionId, code);
-    if (!result.success) {
-      // Use 400 for known errors (like PTY exited), 404 for session not found
-      const status = result.needsRestart ? 400 : 404;
-      return res.status(status).json({
-        error: result.error || 'Session not found or process not running',
-        needsRestart: result.needsRestart,
+    try {
+      const result = await submitAuthCode(sessionId, code);
+      console.log('[cli-auth] Auth code submission result', { provider, sessionId, result });
+
+      if (!result.success) {
+        // Use 400 for all errors since they can be retried
+        return res.status(400).json({
+          error: result.error || 'Session not found or process not running',
+          needsRestart: result.needsRestart ?? true,
+        });
+      }
+
+      // Wait a few seconds for CLI to process and write credentials
+      // The 1s delay in submitAuthCode + CLI processing time means credentials
+      // should be available within 3-5 seconds
+      let sessionStatus = 'waiting_auth';
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const session = getAuthSession(sessionId);
+        if (session?.status === 'success') {
+          sessionStatus = 'success';
+          console.log('[cli-auth] Credentials found after code submission', { provider, sessionId, attempt: i + 1 });
+          break;
+        }
+        if (session?.status === 'error') {
+          sessionStatus = 'error';
+          break;
+        }
+      }
+
+      res.json({
+        success: true,
+        message: 'Auth code submitted',
+        status: sessionStatus,
+      });
+    } catch (err) {
+      console.error('[cli-auth] Auth code submission error', { provider, sessionId, error: String(err) });
+      return res.status(500).json({
+        error: 'Internal error submitting auth code. Please try again.',
+        needsRestart: true,
       });
     }
-
-    res.json({ success: true, message: 'Auth code submitted' });
   });
 
   /**

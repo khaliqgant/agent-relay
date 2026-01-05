@@ -869,9 +869,17 @@ class DockerProvisioner implements ComputeProvisioner {
     const runningInDocker = process.env.RUNNING_IN_DOCKER === 'true';
     const networkArg = runningInDocker ? '--network agent-relay-dev' : '';
 
+    // In development, mount local dist folder for faster iteration
+    // Set WORKSPACE_DEV_MOUNT=true to enable
+    const devMount = process.env.WORKSPACE_DEV_MOUNT === 'true';
+    const volumeArgs = devMount ? `-v "${process.cwd()}/dist:/app/dist:ro"` : '';
+    if (devMount) {
+      console.log('[provisioner] Dev mode: mounting local dist/ folder into workspace container');
+    }
+
     try {
       execSync(
-        `docker run -d --user root --name ${containerName} ${networkArg} -p ${hostPort}:${WORKSPACE_PORT} -p ${sshHostPort}:${SSH_PORT} ${envArgs.join(' ')} ${WORKSPACE_IMAGE}`,
+        `docker run -d --user root --name ${containerName} ${networkArg} ${volumeArgs} -p ${hostPort}:${WORKSPACE_PORT} -p ${sshHostPort}:${SSH_PORT} ${envArgs.join(' ')} ${WORKSPACE_IMAGE}`,
         { stdio: 'pipe' }
       );
 

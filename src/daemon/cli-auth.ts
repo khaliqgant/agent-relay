@@ -95,6 +95,13 @@ export async function startCLIAuth(
   };
   sessions.set(sessionId, session);
 
+  logger.info('CLI auth session created', {
+    sessionId,
+    provider,
+    totalActiveSessions: sessions.size,
+    allSessionIds: Array.from(sessions.keys()),
+  });
+
   // Check if already authenticated (credentials exist)
   try {
     const existingCreds = await extractCredentials(provider, config);
@@ -147,7 +154,8 @@ export async function startCLIAuth(
         ...process.env,
         NO_COLOR: '1',
         TERM: 'xterm-256color',
-        BROWSER: 'echo',
+        // Don't set BROWSER - let CLI fail to open browser and fall back to manual paste mode
+        // Setting BROWSER: 'echo' caused CLI to think browser opened and wait for callback that never came
         DISPLAY: '',
       } as Record<string, string>,
     });
@@ -165,6 +173,24 @@ export async function startCLIAuth(
         session.error = 'Timeout waiting for auth completion (5 minutes). Please try again.';
       }
     }, config.waitTimeout + OAUTH_COMPLETION_TIMEOUT);
+
+    // Keep-alive: Some CLIs timeout if they don't receive stdin input
+    // Send a space+backspace every 20 seconds to simulate user presence
+    const keepAliveInterval = setInterval(() => {
+      if (session.status === 'waiting_auth' && session.process) {
+        try {
+          // Send space then backspace - appears as user typing but no net effect
+          session.process.write(' \b');
+          logger.debug('Keep-alive ping sent', {
+            sessionId,
+            status: session.status,
+            ageSeconds: Math.round((Date.now() - session.createdAt.getTime()) / 1000),
+          });
+        } catch {
+          // Process may have exited
+        }
+      }
+    }, 20000);
 
     proc.onData((data: string) => {
       session.output += data;
@@ -198,6 +224,18 @@ export async function startCLIAuth(
         resolveAuthUrl();
       }
 
+      // Log all output after auth URL is captured (for debugging)
+      if (session.authUrl) {
+        const trimmedData = stripAnsiCodes(data).trim();
+        if (trimmedData.length > 0) {
+          logger.info('PTY output after auth URL', {
+            provider,
+            sessionId,
+            output: trimmedData.substring(0, 500),
+          });
+        }
+      }
+
       // Check for success and try to extract credentials
       if (matchesSuccessPattern(data, config.successPatterns)) {
         session.status = 'success';
@@ -224,6 +262,10 @@ export async function startCLIAuth(
     proc.onExit(async ({ exitCode }) => {
       clearTimeout(timeout);
       clearTimeout(authUrlTimeout);
+      clearInterval(keepAliveInterval);
+
+      // Clear process reference so submitAuthCode knows PTY is gone
+      session.process = undefined;
 
       // Log full output for debugging PTY exit issues
       const cleanOutput = stripAnsiCodes(session.output);
@@ -292,17 +334,44 @@ export async function submitAuthCode(
   sessionId: string,
   code: string
 ): Promise<{ success: boolean; error?: string; needsRestart?: boolean }> {
+  // Log all active sessions for debugging
+  const activeSessionIds = Array.from(sessions.keys());
+  logger.info('submitAuthCode called', {
+    sessionId,
+    codeLength: code.length,
+    activeSessionCount: activeSessionIds.length,
+    activeSessionIds,
+  });
+
   const session = sessions.get(sessionId);
   if (!session) {
-    logger.warn('Auth code submission failed: session not found', { sessionId });
+    logger.warn('Auth code submission failed: session not found', {
+      sessionId,
+      activeSessionIds,
+      hint: 'Session may have been cleaned up or never created',
+    });
     return { success: false, error: 'Session not found or expired', needsRestart: true };
   }
+
+  logger.info('Session found for code submission', {
+    sessionId,
+    provider: session.provider,
+    status: session.status,
+    hasProcess: !!session.process,
+    hasAuthUrl: !!session.authUrl,
+    hasToken: !!session.token,
+    promptsHandled: session.promptsHandled,
+    createdAt: session.createdAt.toISOString(),
+    ageSeconds: Math.round((Date.now() - session.createdAt.getTime()) / 1000),
+  });
 
   if (!session.process) {
     logger.warn('Auth code submission failed: no PTY process', {
       sessionId,
       sessionStatus: session.status,
       provider: session.provider,
+      outputLength: session.output?.length || 0,
+      outputTail: session.output ? stripAnsiCodes(session.output).slice(-500) : 'no output',
     });
 
     // Try to extract credentials as a fallback - maybe auth completed in browser
@@ -333,9 +402,28 @@ export async function submitAuthCode(
   }
 
   try {
-    // Write the auth code followed by enter
-    session.process.write(code + '\r');
-    logger.info('Auth code submitted', { sessionId, codeLength: code.length });
+    // Clean the code - trim whitespace
+    const cleanCode = code.trim();
+
+    logger.info('Writing auth code to PTY', {
+      sessionId,
+      originalLength: code.length,
+      cleanLength: cleanCode.length,
+      codePreview: cleanCode.substring(0, 20) + '...',
+    });
+
+    // Write the auth code WITHOUT Enter first
+    // Claude CLI's Ink text input needs time to process the input
+    // before receiving Enter (tested: immediate Enter fails, delayed Enter works)
+    session.process.write(cleanCode);
+    logger.info('Auth code written, waiting before sending Enter...', { sessionId });
+
+    // Wait 1 second for CLI to process the typed input
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Now send Enter to submit
+    session.process.write('\r');
+    logger.info('Enter key sent', { sessionId });
 
     // Start polling for credentials after code submission
     // The CLI should write credentials shortly after receiving the code
@@ -347,7 +435,11 @@ export async function submitAuthCode(
     return { success: true };
   } catch (err) {
     logger.error('Failed to submit auth code', { sessionId, error: String(err) });
-    return { success: false, error: 'Failed to write to CLI process' };
+    return {
+      success: false,
+      error: 'Failed to write to CLI process. The process may have exited. Please try again.',
+      needsRestart: true,
+    };
   }
 }
 
