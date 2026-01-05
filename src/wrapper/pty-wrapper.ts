@@ -1144,7 +1144,7 @@ export class PtyWrapper extends EventEmitter {
     if (this.config.dashboardPort) {
       // Use dashboard API for releasing
       try {
-        const response = await fetch(`http://localhost:${this.config.dashboardPort}/api/spawned/${name}`, {
+        const response = await fetch(`http://localhost:${this.config.dashboardPort}/api/spawned/${encodeURIComponent(name)}`, {
           method: 'DELETE',
         });
         const result = await response.json() as { success: boolean; error?: string };
