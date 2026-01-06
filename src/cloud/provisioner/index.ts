@@ -1636,6 +1636,38 @@ export class WorkspaceProvisioner {
     // Auto-accept the creator's membership
     await db.workspaceMembers.acceptInvite(workspace.id, config.userId);
 
+    // Link repositories to this workspace
+    // This enables auto-access for users with GitHub access to these repos
+    for (const repoFullName of config.repositories) {
+      try {
+        // Find the user's repo record (may not exist if user didn't import it first)
+        const userRepos = await db.repositories.findByUserId(config.userId);
+        const repoRecord = userRepos.find(
+          r => r.githubFullName.toLowerCase() === repoFullName.toLowerCase()
+        );
+        if (repoRecord) {
+          await db.repositories.assignToWorkspace(repoRecord.id, workspace.id);
+          console.log(`[provisioner] Linked repo ${repoFullName} to workspace ${workspace.id.substring(0, 8)}`);
+        } else {
+          // Create a placeholder repo record if it doesn't exist
+          // This ensures the repo is tracked for workspace access checks
+          console.log(`[provisioner] Creating repo record for ${repoFullName}`);
+          const newRepo = await db.repositories.upsert({
+            userId: config.userId,
+            githubFullName: repoFullName,
+            githubId: 0, // Will be updated when actually synced
+            defaultBranch: 'main',
+            isPrivate: true, // Assume private, will be updated
+            workspaceId: workspace.id,
+          });
+          console.log(`[provisioner] Created and linked repo ${repoFullName} (id: ${newRepo.id.substring(0, 8)})`);
+        }
+      } catch (err) {
+        console.warn(`[provisioner] Failed to link repo ${repoFullName}:`, err);
+        // Continue with other repos
+      }
+    }
+
     // Initialize stage tracking immediately
     updateProvisioningStage(workspace.id, 'creating');
 
