@@ -205,7 +205,8 @@ describe('MultiProjectClient Integration', () => {
       // Send to 'lead' - should resolve to Alice
       bridgeClient.sendToProject('project-a', 'lead', 'Hello Lead!');
 
-      await new Promise(r => setTimeout(r, 100));
+      // Wait for message delivery (longer timeout for macOS)
+      await new Promise(r => setTimeout(r, 300));
 
       expect(receivedMessages).toContain('Hello Lead!');
     });
