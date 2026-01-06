@@ -33,3 +33,9 @@ export {
   type UseWorkspaceStatusReturn,
   type WorkspaceStatus,
 } from './useWorkspaceStatus';
+export {
+  useWorkspaceRepos,
+  type UseWorkspaceReposOptions,
+  type UseWorkspaceReposReturn,
+  type WorkspaceRepo,
+} from './useWorkspaceRepos';

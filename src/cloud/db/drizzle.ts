@@ -378,6 +378,7 @@ export interface WorkspaceQueries {
   findByCustomDomain(domain: string): Promise<schema.Workspace | null>;
   findAll(): Promise<schema.Workspace[]>;
   create(data: schema.NewWorkspace): Promise<schema.Workspace>;
+  update(id: string, data: Partial<Pick<schema.Workspace, 'name' | 'config'>>): Promise<void>;
   updateStatus(
     id: string,
     status: string,
@@ -431,6 +432,14 @@ export const workspaceQueries: WorkspaceQueries = {
     const db = getDb();
     const result = await db.insert(schema.workspaces).values(data).returning();
     return result[0];
+  },
+
+  async update(id: string, data: Partial<Pick<schema.Workspace, 'name' | 'config'>>): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.workspaces)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(schema.workspaces.id, id));
   },
 
   async updateStatus(
@@ -967,7 +976,7 @@ export interface RepositoryQueries {
   findByWorkspaceId(workspaceId: string): Promise<schema.Repository[]>;
   findByProjectGroupId(projectGroupId: string): Promise<schema.Repository[]>;
   upsert(data: schema.NewRepository): Promise<schema.Repository>;
-  assignToWorkspace(repoId: string, workspaceId: string): Promise<void>;
+  assignToWorkspace(repoId: string, workspaceId: string | null): Promise<void>;
   assignToGroup(repoId: string, projectGroupId: string | null): Promise<void>;
   updateProjectAgent(id: string, config: schema.ProjectAgentConfig): Promise<void>;
   updateSyncStatus(id: string, status: string, lastSyncedAt?: Date): Promise<void>;
@@ -1043,7 +1052,7 @@ export const repositoryQueries: RepositoryQueries = {
     return result[0];
   },
 
-  async assignToWorkspace(repoId: string, workspaceId: string): Promise<void> {
+  async assignToWorkspace(repoId: string, workspaceId: string | null): Promise<void> {
     const db = getDb();
     await db
       .update(schema.repositories)
