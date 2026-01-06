@@ -501,6 +501,52 @@ export async function startDashboard(
   // Track log subscriptions: agentName -> Set of WebSocket clients
   const logSubscriptions = new Map<string, Set<WebSocket>>();
 
+  // Track alive status for ping/pong keepalive on main dashboard connections
+  // This prevents TCP/proxy timeouts from killing idle workspace connections
+  const mainClientAlive = new WeakMap<WebSocket, boolean>();
+
+  // Track alive status for ping/pong keepalive on bridge connections
+  const bridgeClientAlive = new WeakMap<WebSocket, boolean>();
+
+  // Ping interval for main dashboard WebSocket connections (30 seconds)
+  // Aligns with heartbeat timeout (5s heartbeat * 6 multiplier = 30s)
+  const MAIN_PING_INTERVAL_MS = 30000;
+  const mainPingInterval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (mainClientAlive.get(ws) === false) {
+        // Client didn't respond to last ping - close gracefully
+        console.log('[dashboard] Main WebSocket client unresponsive, closing gracefully');
+        ws.close(1000, 'unresponsive');
+        return;
+      }
+      // Mark as not alive until we get a pong
+      mainClientAlive.set(ws, false);
+      ws.ping();
+    });
+  }, MAIN_PING_INTERVAL_MS);
+
+  // Ping interval for bridge WebSocket connections (30 seconds)
+  const BRIDGE_PING_INTERVAL_MS = 30000;
+  const bridgePingInterval = setInterval(() => {
+    wssBridge.clients.forEach((ws) => {
+      if (bridgeClientAlive.get(ws) === false) {
+        console.log('[dashboard] Bridge WebSocket client unresponsive, closing gracefully');
+        ws.close(1000, 'unresponsive');
+        return;
+      }
+      bridgeClientAlive.set(ws, false);
+      ws.ping();
+    });
+  }, BRIDGE_PING_INTERVAL_MS);
+
+  // Clean up ping intervals on server close
+  wss.on('close', () => {
+    clearInterval(mainPingInterval);
+  });
+  wssBridge.on('close', () => {
+    clearInterval(bridgePingInterval);
+  });
+
   // Track online users for presence with multi-tab support
   // username -> { connections: Set<WebSocket>, userInfo }
   interface UserPresenceInfo {
@@ -1578,6 +1624,14 @@ export async function startDashboard(
   wss.on('connection', async (ws, req) => {
     console.log('[dashboard] WebSocket client connected from:', req.socket.remoteAddress);
 
+    // Mark client as alive initially for ping/pong keepalive
+    mainClientAlive.set(ws, true);
+
+    // Handle pong responses (keep connection alive)
+    ws.on('pong', () => {
+      mainClientAlive.set(ws, true);
+    });
+
     // Mark as initializing to prevent broadcastData from sending before we do
     initializingClients.add(ws);
 
@@ -1617,6 +1671,14 @@ export async function startDashboard(
   // Handle bridge WebSocket connections
   wssBridge.on('connection', async (ws) => {
     console.log('[dashboard] Bridge WebSocket client connected');
+
+    // Mark client as alive initially for ping/pong keepalive
+    bridgeClientAlive.set(ws, true);
+
+    // Handle pong responses (keep connection alive)
+    ws.on('pong', () => {
+      bridgeClientAlive.set(ws, true);
+    });
 
     try {
       const data = await getBridgeData();

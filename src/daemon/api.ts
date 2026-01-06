@@ -55,6 +55,10 @@ export class DaemonApi extends EventEmitter {
   private allowedOrigins: Set<string>;
   private allowAllOrigins: boolean;
 
+  // Track alive status for ping/pong keepalive
+  private clientAlive = new WeakMap<WS, boolean>();
+  private pingInterval?: NodeJS.Timeout;
+
   constructor(config: ApiDaemonConfig) {
     super();
     this.config = config;
@@ -127,6 +131,19 @@ export class DaemonApi extends EventEmitter {
       this.wss = new WebSocketServer({ server: this.server });
       this.wss.on('connection', (ws, req) => this.handleWebSocketConnection(ws, req));
 
+      // Setup ping/pong keepalive (30 second interval)
+      this.pingInterval = setInterval(() => {
+        this.wss?.clients.forEach((ws) => {
+          if (this.clientAlive.get(ws) === false) {
+            logger.info('WebSocket client unresponsive, closing');
+            ws.terminate();
+            return;
+          }
+          this.clientAlive.set(ws, false);
+          ws.ping();
+        });
+      }, 30000);
+
       this.server.listen(this.config.port, this.config.host, () => {
         logger.info('Daemon API started', { port: this.config.port, host: this.config.host });
         resolve();
@@ -138,6 +155,12 @@ export class DaemonApi extends EventEmitter {
    * Stop the API server
    */
   async stop(): Promise<void> {
+    // Clear ping interval
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = undefined;
+    }
+
     // Close all WebSocket connections
     if (this.wss) {
       for (const ws of this.wss.clients) {
@@ -575,6 +598,14 @@ export class DaemonApi extends EventEmitter {
    */
   private handleWebSocketConnection(ws: WS, req: http.IncomingMessage): void {
     logger.info('WebSocket client connected', { url: req.url });
+
+    // Mark client as alive for ping/pong keepalive
+    this.clientAlive.set(ws, true);
+
+    // Handle pong responses
+    ws.on('pong', () => {
+      this.clientAlive.set(ws, true);
+    });
 
     // Create session
     const session: UserSession = {
