@@ -199,8 +199,28 @@ export async function startCLIAuth(
 
     proc.onData((data: string) => {
       session.output += data;
+      const cleanText = stripAnsiCodes(data);
 
-      // Handle prompts
+      // Check for error patterns FIRST - if error detected, don't auto-respond to prompts
+      // This prevents us from auto-responding to "Press Enter to retry" in error messages
+      const matchedError = findMatchingError(data, config.errorPatterns);
+      if (matchedError && session.status !== 'error') {
+        logger.warn('Auth error detected', {
+          provider,
+          sessionId,
+          errorMessage: matchedError.message,
+          recoverable: matchedError.recoverable,
+        });
+        session.status = 'error';
+        session.error = matchedError.message;
+        session.errorHint = matchedError.hint;
+        session.recoverable = matchedError.recoverable;
+        // Don't respond to any prompts in this chunk - let the error be reported
+        // The frontend will show the error and let user decide to retry
+        return;
+      }
+
+      // Handle prompts (only if no error was detected in this chunk)
       const matchingPrompt = findMatchingPrompt(data, config.prompts, respondedPrompts);
       if (matchingPrompt) {
         respondedPrompts.add(matchingPrompt.description);
@@ -218,7 +238,6 @@ export async function startCLIAuth(
       }
 
       // Extract auth URL
-      const cleanText = stripAnsiCodes(data);
       const match = cleanText.match(config.urlPattern);
       if (match && match[1] && !session.authUrl) {
         session.authUrl = match[1];
@@ -231,7 +250,7 @@ export async function startCLIAuth(
 
       // Log all output after auth URL is captured (for debugging)
       if (session.authUrl) {
-        const trimmedData = stripAnsiCodes(data).trim();
+        const trimmedData = cleanText.trim();
         if (trimmedData.length > 0) {
           logger.info('PTY output after auth URL', {
             provider,
@@ -239,23 +258,6 @@ export async function startCLIAuth(
             output: trimmedData.substring(0, 500),
           });
         }
-      }
-
-      // Check for error patterns BEFORE checking success (error may appear first)
-      const matchedError = findMatchingError(data, config.errorPatterns);
-      if (matchedError && session.status !== 'error') {
-        logger.warn('Auth error detected', {
-          provider,
-          sessionId,
-          errorMessage: matchedError.message,
-          recoverable: matchedError.recoverable,
-        });
-        session.status = 'error';
-        session.error = matchedError.message;
-        session.errorHint = matchedError.hint;
-        session.recoverable = matchedError.recoverable;
-        // Don't exit yet - let the CLI handle retries if it wants to
-        // The error info will be returned when status is polled
       }
 
       // Check for success and try to extract credentials
