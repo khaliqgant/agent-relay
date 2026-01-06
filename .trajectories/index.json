@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-01-06T16:24:50.254Z",
+  "lastUpdated": "2026-01-06T18:13:35.727Z",
   "trajectories": {
     "traj_ozd98si6a7ns": {
       "title": "Fix thinking indicator showing on all messages",
@@ -358,6 +358,12 @@
       "startedAt": "2026-01-06T16:24:13.901Z",
       "completedAt": "2026-01-06T16:24:50.235Z",
       "path": "/home/user/relay/.trajectories/completed/2026-01/traj_78ffm31jn3uk.json"
+    },
+    "traj_ub8csuv3lcv4": {
+      "title": "Fix WebSocket disconnections for workspace instances",
+      "status": "active",
+      "startedAt": "2026-01-06T18:13:23.603Z",
+      "path": "/home/user/relay/.trajectories/active/traj_ub8csuv3lcv4.json"
     }
   }
 }
