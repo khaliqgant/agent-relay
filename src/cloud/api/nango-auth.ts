@@ -185,29 +185,19 @@ nangoAuthRouter.get('/repo-status/:connectionId', requireAuth, async (req: Reque
  * Handle Nango webhooks for auth and sync events
  */
 nangoAuthRouter.post('/webhook', async (req: Request, res: Response) => {
-  // Debug: Log all incoming headers to diagnose signature issues
-  console.log('[nango-webhook] Incoming headers:', JSON.stringify(req.headers, null, 2));
-
-  // Use the preserved raw body from express.json verify callback
   const rawBody = (req as Request & { rawBody?: string }).rawBody || JSON.stringify(req.body);
 
-  // Verify signature if present
+  // Verify webhook signature if present
   const hasSignature = req.headers['x-nango-signature'] || req.headers['x-nango-hmac-sha256'];
-
   if (hasSignature) {
     if (!nangoService.verifyWebhookSignature(rawBody, req.headers as Record<string, string | string[] | undefined>)) {
       console.error('[nango-webhook] Invalid signature');
       return res.status(401).json({ error: 'Invalid signature' });
     }
-    console.log('[nango-webhook] Signature verified');
-  } else {
-    // Nango doesn't always send signatures - log warning but allow
-    // TODO: Enable webhook signing in Nango dashboard for production security
-    console.warn('[nango-webhook] No signature header - consider enabling webhook signing in Nango');
   }
 
   const payload = req.body;
-  console.log(`[nango-webhook] Received ${payload.type} event`, JSON.stringify(payload, null, 2));
+  console.log(`[nango-webhook] Received ${payload.type} event`);
 
   try {
     switch (payload.type) {

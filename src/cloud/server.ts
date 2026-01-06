@@ -267,27 +267,33 @@ export async function createServer(): Promise<CloudServer> {
   });
 
   // API routes
-  app.use('/api/auth', authRouter);
+  //
+  // IMPORTANT: Route order matters! Routes with non-session auth (webhooks, API keys, tokens)
+  // must be mounted BEFORE teamsRouter, which catches all /api/* with requireAuth.
+  //
+
+  // --- Routes with alternative auth (must be before teamsRouter) ---
+  app.use('/api/auth', authRouter);                    // Login endpoints (public)
+  app.use('/api/auth/nango', nangoAuthRouter);         // Nango webhook (signature verification)
+  app.use('/api/auth/codex-helper', codexAuthHelperRouter);
+  app.use('/api/git', gitRouter);                      // Workspace token auth
+  app.use('/api/webhooks', webhooksRouter);            // GitHub webhooks (signature verification)
+  app.use('/api/monitoring', monitoringRouter);        // Daemon API key auth endpoints
+  app.use('/api/daemons', daemonsRouter);              // Daemon API key auth endpoints
+
+  // --- Routes with session auth ---
   app.use('/api/providers', providersRouter);
   app.use('/api/workspaces', workspacesRouter);
   app.use('/api/repos', reposRouter);
   app.use('/api/onboarding', onboardingRouter);
-  // Git router must be mounted before teamsRouter (which is at /api)
-  // to prevent teamsRouter's requireAuth from intercepting git token requests
-  app.use('/api/git', gitRouter);
-  // Teams router handles /workspaces/:id/members and /invites routes
-  // Must be mounted at /api since routes include full paths
-  // WARNING: This catches ALL /api/* requests not matched above, so mount specific routers first!
-  app.use('/api', teamsRouter);
   app.use('/api/billing', billingRouter);
   app.use('/api/usage', usageRouter);
   app.use('/api/project-groups', coordinatorsRouter);
-  app.use('/api/daemons', daemonsRouter);
-  app.use('/api/monitoring', monitoringRouter);
-  app.use('/api/webhooks', webhooksRouter);
   app.use('/api/github-app', githubAppRouter);
-  app.use('/api/auth/nango', nangoAuthRouter);
-  app.use('/api/auth/codex-helper', codexAuthHelperRouter);
+
+  // Teams router - MUST BE LAST among /api routes
+  // Handles /workspaces/:id/members and /invites with requireAuth on all routes
+  app.use('/api', teamsRouter);
 
   // Test helper routes (only available in non-production)
   if (process.env.NODE_ENV !== 'production') {
