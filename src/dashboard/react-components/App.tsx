@@ -241,9 +241,9 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
 
   // Workspace repos for multi-repo workspaces
   const { repos: workspaceRepos, refetch: refetchWorkspaceRepos } = useWorkspaceRepos({
-    workspaceId: activeWorkspaceId,
+    workspaceId: effectiveActiveWorkspaceId ?? undefined,
     apiBaseUrl: '/api',
-    enabled: isCloudMode && !!activeWorkspaceId,
+    enabled: isCloudMode && !!effectiveActiveWorkspaceId,
   });
 
   // Coordinator panel state
@@ -376,56 +376,32 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   // Check if fleet view is available
   const isFleetAvailable = Boolean(data?.fleet?.servers?.length) || workspaces.length > 0;
 
-  // Convert workspaces/repos to projects for unified navigation
+  // Convert workspaces to projects for unified navigation
   useEffect(() => {
     if (workspaces.length > 0) {
-      // If we have repos for the active workspace, show each repo as a project folder
-      if (workspaceRepos.length > 1 && activeWorkspaceId) {
-        const projectList: Project[] = workspaceRepos.map((repo) => ({
-          id: repo.id,
-          path: repo.githubFullName,
-          name: repo.githubFullName.split('/').pop() || repo.githubFullName,
-          agents: orchestratorAgents
-            .filter((a) => a.workspaceId === activeWorkspaceId)
-            .map((a) => ({
-              name: a.name,
-              status: a.status === 'running' ? 'online' : 'offline',
-              isSpawned: true,
-              cli: a.provider,
-            })) as Agent[],
-          lead: undefined,
-        }));
-        setProjects(projectList);
-        // Set first repo as current if none selected
-        if (!currentProject || !projectList.find(p => p.id === currentProject)) {
-          setCurrentProject(projectList[0]?.id);
-        }
-      } else {
-        // Single repo or no repos fetched yet - show workspace as single project
-        const projectList: Project[] = workspaces.map((workspace) => ({
-          id: workspace.id,
-          path: workspace.path,
-          name: workspace.name,
-          agents: orchestratorAgents
-            .filter((a) => a.workspaceId === workspace.id)
-            .map((a) => ({
-              name: a.name,
-              status: a.status === 'running' ? 'online' : 'offline',
-              isSpawned: true,
-              cli: a.provider,
-            })) as Agent[],
-          lead: undefined,
-        }));
-        setProjects(projectList);
-        setCurrentProject(activeWorkspaceId);
-      }
+      // Convert workspaces to projects
+      const projectList: Project[] = workspaces.map((workspace) => ({
+        id: workspace.id,
+        path: workspace.path,
+        name: workspace.name,
+        agents: orchestratorAgents
+          .filter((a) => a.workspaceId === workspace.id)
+          .map((a) => ({
+            name: a.name,
+            status: a.status === 'running' ? 'online' : 'offline',
+            isSpawned: true,
+            cli: a.provider,
+          })) as Agent[],
+        lead: undefined,
+      }));
+      setProjects(projectList);
+      setCurrentProject(activeWorkspaceId);
     }
-  }, [workspaces, orchestratorAgents, activeWorkspaceId, workspaceRepos, currentProject]);
+  }, [workspaces, orchestratorAgents, activeWorkspaceId]);
 
-  // Fetch bridge/project data for multi-project mode (local only)
+  // Fetch bridge/project data for multi-project mode
   useEffect(() => {
-    // Skip in cloud mode or if using orchestrator
-    if (isCloudMode || workspaces.length > 0) return;
+    if (workspaces.length > 0) return; // Skip if using orchestrator
 
     const fetchProjects = async () => {
       const result = await api.getBridgeData();
@@ -471,7 +447,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     // Poll for updates
     const interval = setInterval(fetchProjects, 5000);
     return () => clearInterval(interval);
-  }, [isCloudMode, workspaces.length, currentProject]);
+  }, [workspaces.length, currentProject]);
 
   // Bridge-level agents (like Architect) that should be shown separately
   const BRIDGE_AGENT_NAMES = ['architect'];
@@ -1159,30 +1135,6 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         isAdding={isAddingWorkspace}
         error={addWorkspaceError}
       />
-
-      {/* Workspace Settings Panel */}
-      {effectiveActiveWorkspaceId && (
-        <WorkspaceSettingsPanel
-          isOpen={isWorkspaceSettingsPanelOpen}
-          onClose={() => setIsWorkspaceSettingsPanelOpen(false)}
-          workspaceId={effectiveActiveWorkspaceId}
-          workspaceName={effectiveWorkspaces.find(w => w.id === effectiveActiveWorkspaceId)?.name || 'Workspace'}
-          isOwner={true}
-          apiBaseUrl="/api"
-          onWorkspaceUpdated={() => {
-            // Refetch cloud workspaces if in cloud mode
-            if (isCloudMode) {
-              cloudApi.getWorkspaceSummary().then(result => {
-                if (result.success && result.data.workspaces) {
-                  setCloudWorkspaces(result.data.workspaces);
-                }
-              });
-            }
-            // Refetch workspace repos
-            refetchWorkspaceRepos();
-          }}
-        />
-      )}
 
       {/* Conversation History */}
       <ConversationHistory
