@@ -19,7 +19,7 @@ import { nangoService } from '../services/nango.js';
 
 interface CachedAccess {
   hasAccess: boolean;
-  accessType: 'owner' | 'member' | 'contributor';
+  accessType: 'owner' | 'member' | 'contributor' | 'none';
   permission?: 'admin' | 'write' | 'read';
   cachedAt: number;
 }

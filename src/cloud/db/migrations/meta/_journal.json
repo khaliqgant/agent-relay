@@ -57,6 +57,13 @@
       "when": 1736208001000,
       "tag": "0008_stripe_customer_id",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1736208002000,
+      "tag": "0009_ci_mentions_monitoring",
+      "breakpoints": true
     }
   ]
 }
