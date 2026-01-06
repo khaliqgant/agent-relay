@@ -16,7 +16,7 @@ import type { WebSocket } from 'ws';
 export interface IRelayClient {
   connect(): Promise<void>;
   disconnect(): void;
-  get state(): string;
+  state: string;
   sendMessage(
     to: string,
     body: string,
@@ -24,7 +24,8 @@ export interface IRelayClient {
     data?: unknown,
     thread?: string
   ): boolean;
-  onMessage(handler: (from: string, body: string, envelope: unknown) => void): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onMessage?: (from: string, payload: any, messageId: string, meta?: any, originalTo?: string) => void;
 }
 
 /**
@@ -106,9 +107,12 @@ export class UserBridge {
     await relayClient.connect();
 
     // Set up message handler to forward messages to WebSocket
-    relayClient.onMessage((from, body, envelope) => {
-      this.handleIncomingMessage(username, from, body, envelope);
-    });
+    relayClient.onMessage = (from, payload, _messageId, _meta, _originalTo) => {
+      const body = typeof payload === 'object' && payload !== null && 'body' in payload
+        ? (payload as { body: string }).body
+        : String(payload);
+      this.handleIncomingMessage(username, from, body, payload);
+    };
 
     // Create session
     const session: UserSession = {

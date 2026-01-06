@@ -51,7 +51,8 @@ class MockRelayClient {
   public agentName: string;
   public entityType?: string;
   public sentMessages: Array<{ to: string; body: string; kind: string; thread?: string }> = [];
-  private messageHandler?: (from: string, body: string, envelope: unknown) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  public onMessage?: (from: string, payload: any, messageId: string, meta?: any, originalTo?: string) => void;
 
   constructor(options: { socketPath: string; agentName: string; entityType?: string }) {
     this.agentName = options.agentName;
@@ -81,13 +82,9 @@ class MockRelayClient {
     return true;
   }
 
-  onMessage(handler: (from: string, body: string, envelope: unknown) => void): void {
-    this.messageHandler = handler;
-  }
-
   // Test helper to simulate receiving a message
   simulateIncomingMessage(from: string, body: string, envelope: unknown): void {
-    this.messageHandler?.(from, body, envelope);
+    this.onMessage?.(from, envelope, 'test-msg-id', undefined, undefined);
   }
 
   clearSent(): void {
