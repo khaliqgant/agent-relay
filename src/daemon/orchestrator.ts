@@ -70,6 +70,10 @@ export class Orchestrator extends EventEmitter {
   });
   private workspacesFile: string;
 
+  // Track alive status for ping/pong keepalive
+  private clientAlive = new WeakMap<WebSocket, boolean>();
+  private pingInterval?: NodeJS.Timeout;
+
   constructor(config: Partial<OrchestratorConfig> = {}) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -112,6 +116,19 @@ export class Orchestrator extends EventEmitter {
     this.wss = new WebSocketServer({ server: this.server });
     this.wss.on('connection', (ws, req) => this.handleWebSocket(ws, req));
 
+    // Setup ping/pong keepalive (30 second interval)
+    this.pingInterval = setInterval(() => {
+      this.wss?.clients.forEach((ws) => {
+        if (this.clientAlive.get(ws) === false) {
+          logger.info('WebSocket client unresponsive, closing');
+          ws.terminate();
+          return;
+        }
+        this.clientAlive.set(ws, false);
+        ws.ping();
+      });
+    }, 30000);
+
     return new Promise((resolve) => {
       this.server!.listen(this.config.port, this.config.host, () => {
         logger.info('Orchestrator started', {
@@ -127,6 +144,12 @@ export class Orchestrator extends EventEmitter {
    */
   async stop(): Promise<void> {
     logger.info('Stopping orchestrator');
+
+    // Clear ping interval
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = undefined;
+    }
 
     // Stop all workspace daemons
     for (const [id] of this.workspaces) {
@@ -605,6 +628,14 @@ export class Orchestrator extends EventEmitter {
    */
   private handleWebSocket(ws: WebSocket, _req: http.IncomingMessage): void {
     logger.info('WebSocket client connected');
+
+    // Mark client as alive for ping/pong keepalive
+    this.clientAlive.set(ws, true);
+
+    // Handle pong responses
+    ws.on('pong', () => {
+      this.clientAlive.set(ws, true);
+    });
 
     const session: UserSession = {
       userId: 'anonymous',
