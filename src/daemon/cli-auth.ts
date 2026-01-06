@@ -179,23 +179,9 @@ export async function startCLIAuth(
       }
     }, config.waitTimeout + OAUTH_COMPLETION_TIMEOUT);
 
-    // Keep-alive: Some CLIs timeout if they don't receive stdin input
-    // Send a space+backspace every 20 seconds to simulate user presence
-    const keepAliveInterval = setInterval(() => {
-      if (session.status === 'waiting_auth' && session.process) {
-        try {
-          // Send space then backspace - appears as user typing but no net effect
-          session.process.write(' \b');
-          logger.debug('Keep-alive ping sent', {
-            sessionId,
-            status: session.status,
-            ageSeconds: Math.round((Date.now() - session.createdAt.getTime()) / 1000),
-          });
-        } catch {
-          // Process may have exited
-        }
-      }
-    }, 20000);
+    // Note: Removed keep-alive mechanism that sent ' \b' every 20 seconds
+    // It was interfering with OAuth code paste, causing "invalid code" errors
+    // CLIs like Claude don't actually need stdin keep-alive during auth wait
 
     proc.onData((data: string) => {
       session.output += data;
@@ -292,7 +278,6 @@ export async function startCLIAuth(
     proc.onExit(async ({ exitCode }) => {
       clearTimeout(timeout);
       clearTimeout(authUrlTimeout);
-      clearInterval(keepAliveInterval);
 
       // Clear process reference so submitAuthCode knows PTY is gone
       session.process = undefined;
