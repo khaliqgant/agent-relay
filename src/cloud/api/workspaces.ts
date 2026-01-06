@@ -440,22 +440,14 @@ workspacesRouter.get('/accessible', async (req: Request, res: Response) => {
     if (user.nangoConnectionId) {
       // Get all repos user has access to via GitHub
       try {
+        console.log(`[workspaces/accessible] Checking GitHub repo access for user ${userId.substring(0, 8)} with nangoConnectionId ${user.nangoConnectionId.substring(0, 8)}...`);
+
         const reposResult = await nangoService.listUserAccessibleRepos(user.nangoConnectionId, {
           perPage: 100,
           type: 'all',
         });
 
-        // Find workspaces that contain these repos
-        const _accessibleRepoNames = new Set(reposResult.repositories.map((r) => r.fullName));
-
-        // Get all repos in the system
-        const _allRepos = await db.repositories.findByUserId(userId); // Will need to expand this
-
-        // Actually, we need a different approach - get all workspaces with their repos
-        // and check if user has access to any of them
-
-        // For now, get all workspaces (this is expensive but works for MVP)
-        // In production, we'd want a more efficient query
+        console.log(`[workspaces/accessible] User has access to ${reposResult.repositories.length} GitHub repos`);
 
         // Get workspaces that aren't owned or membered
         const knownWorkspaceIds = new Set([
@@ -463,19 +455,20 @@ workspacesRouter.get('/accessible', async (req: Request, res: Response) => {
           ...memberWorkspaceIds,
         ]);
 
-        // Query for workspaces with repos the user can access
-        // This requires checking each workspace's repos against user's accessible repos
-        // For efficiency, we'll limit this to workspaces with repos that match
-
         // Get all repo full names from user's accessible repos
         for (const repo of reposResult.repositories) {
-          // Find repos in our DB that match this full name
+          // Find repos in our DB that match this full name (case-insensitive)
           const dbRepos = await db.repositories.findByGithubFullName(repo.fullName);
+
+          if (dbRepos.length > 0) {
+            console.log(`[workspaces/accessible] Found ${dbRepos.length} DB records for repo ${repo.fullName}`);
+          }
 
           for (const dbRepo of dbRepos) {
             if (dbRepo.workspaceId && !knownWorkspaceIds.has(dbRepo.workspaceId)) {
               const ws = await db.workspaces.findById(dbRepo.workspaceId);
               if (ws) {
+                console.log(`[workspaces/accessible] Granting contributor access to workspace ${ws.id.substring(0, 8)} via repo ${repo.fullName}`);
                 // Determine permission level
                 const permission = repo.permissions.admin
                   ? 'admin'
@@ -486,21 +479,29 @@ workspacesRouter.get('/accessible', async (req: Request, res: Response) => {
                 contributorWorkspaces.push({ ...ws, accessPermission: permission });
                 knownWorkspaceIds.add(ws.id);
               }
+            } else if (!dbRepo.workspaceId) {
+              console.log(`[workspaces/accessible] Repo ${repo.fullName} found in DB but has no workspaceId`);
             }
           }
         }
+
+        console.log(`[workspaces/accessible] Found ${contributorWorkspaces.length} contributor workspaces`);
       } catch (err) {
         console.warn('[workspaces/accessible] Failed to check GitHub repo access:', err);
         // Continue without contributor workspaces
       }
+    } else {
+      console.log(`[workspaces/accessible] User ${userId.substring(0, 8)} has no nangoConnectionId - skipping GitHub repo access check`);
     }
 
-    // Format response
+    // Format response - include all fields the dashboard expects
     const formatWorkspace = (ws: Workspace, accessType: string, permission?: string) => ({
       id: ws.id,
       name: ws.name,
       status: ws.status,
       publicUrl: ws.publicUrl,
+      providers: ws.config?.providers,
+      repositories: ws.config?.repositories,
       accessType,
       permission: permission || (accessType === 'owner' ? 'admin' : 'read'),
       createdAt: ws.createdAt,

@@ -46,6 +46,7 @@ import { githubAppRouter } from './api/github-app.js';
 import { nangoAuthRouter } from './api/nango-auth.js';
 import { gitRouter } from './api/git.js';
 import { codexAuthHelperRouter } from './api/codex-auth-helper.js';
+import { adminRouter } from './api/admin.js';
 import { db } from './db/index.js';
 
 /**
@@ -280,6 +281,7 @@ export async function createServer(): Promise<CloudServer> {
   app.use('/api/webhooks', webhooksRouter);            // GitHub webhooks (signature verification)
   app.use('/api/monitoring', monitoringRouter);        // Daemon API key auth endpoints
   app.use('/api/daemons', daemonsRouter);              // Daemon API key auth endpoints
+  app.use('/api/admin', adminRouter);                  // Admin API secret auth
 
   // --- Routes with session auth ---
   app.use('/api/providers', providersRouter);

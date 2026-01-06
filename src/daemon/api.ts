@@ -357,6 +357,8 @@ export class DaemonApi extends EventEmitter {
           status: session.status,
           authUrl: session.authUrl,
           error: session.error,
+          errorHint: session.errorHint,
+          recoverable: session.recoverable,
           promptsHandled: session.promptsHandled,
         },
       };

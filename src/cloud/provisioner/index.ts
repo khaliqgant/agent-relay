@@ -363,6 +363,19 @@ interface ComputeProvisioner {
 
   // Get current resource tier
   getCurrentTier?(workspace: Workspace): Promise<ResourceTier>;
+
+  // Update machine image (Fly.io only)
+  updateMachineImage?(workspace: Workspace, newImage: string): Promise<void>;
+
+  // Check for active agents (Fly.io only)
+  checkActiveAgents?(workspace: Workspace): Promise<{
+    hasActiveAgents: boolean;
+    agentCount: number;
+    agents: Array<{ name: string; status: string }>;
+  }>;
+
+  // Get machine state (Fly.io only)
+  getMachineState?(workspace: Workspace): Promise<'started' | 'stopped' | 'suspended' | 'unknown'>;
 }
 
 /**
@@ -970,6 +983,155 @@ class FlyProvisioner implements ComputeProvisioner {
     if (memoryMb >= 2048) return RESOURCE_TIERS.large;
     if (memoryMb >= 1024) return RESOURCE_TIERS.medium;
     return RESOURCE_TIERS.small;
+  }
+
+  /**
+   * Update machine image without restarting
+   * Note: The machine needs to be restarted later to use the new image
+   */
+  async updateMachineImage(workspace: Workspace, newImage: string): Promise<void> {
+    if (!workspace.computeId) return;
+
+    const appName = `ar-${workspace.id.substring(0, 8)}`;
+
+    // Get current machine config first
+    const getResponse = await fetchWithRetry(
+      `https://api.machines.dev/v1/apps/${appName}/machines/${workspace.computeId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
+      }
+    );
+
+    if (!getResponse.ok) {
+      throw new Error(`Failed to get machine config: ${await getResponse.text()}`);
+    }
+
+    const machine = await getResponse.json() as {
+      config: Record<string, unknown>;
+    };
+
+    // Update the image in the config
+    const updatedConfig = {
+      ...machine.config,
+      image: newImage,
+      // Include registry auth if configured
+      ...(this.registryAuth && {
+        image_registry_auth: {
+          registry: 'ghcr.io',
+          username: this.registryAuth.username,
+          password: this.registryAuth.password,
+        },
+      }),
+    };
+
+    // Update machine with new image config (skip_launch keeps it in current state)
+    const updateResponse = await fetchWithRetry(
+      `https://api.machines.dev/v1/apps/${appName}/machines/${workspace.computeId}?skip_launch=true`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ config: updatedConfig }),
+      }
+    );
+
+    if (!updateResponse.ok) {
+      throw new Error(`Failed to update machine image: ${await updateResponse.text()}`);
+    }
+
+    console.log(`[fly] Updated machine image for workspace ${workspace.id.substring(0, 8)} to ${newImage}`);
+  }
+
+  /**
+   * Check if workspace has active agents by querying the daemon
+   */
+  async checkActiveAgents(workspace: Workspace): Promise<{
+    hasActiveAgents: boolean;
+    agentCount: number;
+    agents: Array<{ name: string; status: string }>;
+  }> {
+    if (!workspace.publicUrl) {
+      return { hasActiveAgents: false, agentCount: 0, agents: [] };
+    }
+
+    try {
+      // Use internal Fly network URL if available (more reliable)
+      const appName = `ar-${workspace.id.substring(0, 8)}`;
+      const isOnFly = !!process.env.FLY_APP_NAME;
+      const baseUrl = isOnFly
+        ? `http://${appName}.internal:3888`
+        : workspace.publicUrl;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+
+      const response = await fetch(`${baseUrl}/api/agents`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        console.warn(`[fly] Failed to check agents for ${workspace.id.substring(0, 8)}: ${response.status}`);
+        return { hasActiveAgents: false, agentCount: 0, agents: [] };
+      }
+
+      const data = await response.json() as {
+        agents: Array<{ name: string; status: string; activityState?: string }>;
+      };
+
+      const agents = data.agents || [];
+      // Consider agents with 'active' or 'idle' activity state as active
+      // 'disconnected' agents are not active
+      const activeAgents = agents.filter(a =>
+        a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle'
+      );
+
+      return {
+        hasActiveAgents: activeAgents.length > 0,
+        agentCount: activeAgents.length,
+        agents: agents.map(a => ({ name: a.name, status: a.status || a.activityState || 'unknown' })),
+      };
+    } catch (error) {
+      // Workspace might be stopped or unreachable - treat as no active agents
+      console.warn(`[fly] Could not reach workspace ${workspace.id.substring(0, 8)} to check agents:`, (error as Error).message);
+      return { hasActiveAgents: false, agentCount: 0, agents: [] };
+    }
+  }
+
+  /**
+   * Get the current machine state
+   */
+  async getMachineState(workspace: Workspace): Promise<'started' | 'stopped' | 'suspended' | 'unknown'> {
+    if (!workspace.computeId) return 'unknown';
+
+    const appName = `ar-${workspace.id.substring(0, 8)}`;
+
+    try {
+      const response = await fetchWithRetry(
+        `https://api.machines.dev/v1/apps/${appName}/machines/${workspace.computeId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.apiToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) return 'unknown';
+
+      const machine = await response.json() as { state: string };
+      return machine.state as 'started' | 'stopped' | 'suspended' | 'unknown';
+    } catch {
+      return 'unknown';
+    }
   }
 }
 
@@ -1855,6 +2017,247 @@ export class WorkspaceProvisioner {
     const flyProvisioner = this.provisioner as FlyProvisioner;
     const volume = await flyProvisioner.getVolume(appName);
     return volume?.id || null;
+  }
+
+  // ============================================================================
+  // Graceful Image Update
+  // ============================================================================
+
+  /**
+   * Result of a graceful update attempt
+   */
+  static readonly UpdateResult = {
+    UPDATED: 'updated',
+    UPDATED_PENDING_RESTART: 'updated_pending_restart',
+    SKIPPED_ACTIVE_AGENTS: 'skipped_active_agents',
+    SKIPPED_NOT_RUNNING: 'skipped_not_running',
+    NOT_SUPPORTED: 'not_supported',
+    ERROR: 'error',
+  } as const;
+
+  /**
+   * Gracefully update a single workspace's image
+   *
+   * Behavior:
+   * - If workspace is stopped: Update config, will use new image on next wake
+   * - If workspace is running with no agents: Update config and restart
+   * - If workspace is running with active agents: Skip (or force if specified)
+   *
+   * @param workspaceId - Workspace to update
+   * @param newImage - New Docker image to use
+   * @param options - Update options
+   * @returns Update result with details
+   */
+  async gracefulUpdateImage(
+    workspaceId: string,
+    newImage: string,
+    options: {
+      force?: boolean;  // Force update even with active agents
+      skipRestart?: boolean;  // Update config but don't restart running machines
+    } = {}
+  ): Promise<{
+    result: string;
+    workspaceId: string;
+    machineState?: string;
+    agentCount?: number;
+    agents?: Array<{ name: string; status: string }>;
+    error?: string;
+  }> {
+    const workspace = await db.workspaces.findById(workspaceId);
+    if (!workspace) {
+      return {
+        result: WorkspaceProvisioner.UpdateResult.ERROR,
+        workspaceId,
+        error: 'Workspace not found',
+      };
+    }
+
+    // Only Fly.io supports graceful updates
+    if (!(this.provisioner instanceof FlyProvisioner)) {
+      return {
+        result: WorkspaceProvisioner.UpdateResult.NOT_SUPPORTED,
+        workspaceId,
+        error: 'Graceful updates only supported on Fly.io',
+      };
+    }
+
+    const flyProvisioner = this.provisioner as FlyProvisioner;
+
+    try {
+      // Check machine state
+      const machineState = await flyProvisioner.getMachineState(workspace);
+
+      if (machineState === 'stopped' || machineState === 'suspended') {
+        // Machine is not running - safe to update, will apply on next wake
+        await flyProvisioner.updateMachineImage(workspace, newImage);
+        console.log(`[provisioner] Updated stopped workspace ${workspaceId.substring(0, 8)} to ${newImage}`);
+        return {
+          result: WorkspaceProvisioner.UpdateResult.UPDATED_PENDING_RESTART,
+          workspaceId,
+          machineState,
+        };
+      }
+
+      if (machineState === 'started') {
+        // Machine is running - check for active agents
+        const agentCheck = await flyProvisioner.checkActiveAgents(workspace);
+
+        if (agentCheck.hasActiveAgents && !options.force) {
+          // Has active agents and not forcing - skip
+          console.log(`[provisioner] Skipped workspace ${workspaceId.substring(0, 8)}: ${agentCheck.agentCount} active agents`);
+          return {
+            result: WorkspaceProvisioner.UpdateResult.SKIPPED_ACTIVE_AGENTS,
+            workspaceId,
+            machineState,
+            agentCount: agentCheck.agentCount,
+            agents: agentCheck.agents,
+          };
+        }
+
+        // Update the image config
+        await flyProvisioner.updateMachineImage(workspace, newImage);
+
+        if (options.skipRestart) {
+          // Config updated but not restarting - will apply on next restart/auto-stop-wake
+          console.log(`[provisioner] Updated workspace ${workspaceId.substring(0, 8)} config (restart skipped)`);
+          return {
+            result: WorkspaceProvisioner.UpdateResult.UPDATED_PENDING_RESTART,
+            workspaceId,
+            machineState,
+            agentCount: agentCheck.agentCount,
+            agents: agentCheck.agents,
+          };
+        }
+
+        // Restart to apply new image
+        await flyProvisioner.restart(workspace);
+        console.log(`[provisioner] Updated and restarted workspace ${workspaceId.substring(0, 8)}`);
+        return {
+          result: WorkspaceProvisioner.UpdateResult.UPDATED,
+          workspaceId,
+          machineState,
+          agentCount: agentCheck.agentCount,
+        };
+      }
+
+      // Unknown state
+      return {
+        result: WorkspaceProvisioner.UpdateResult.SKIPPED_NOT_RUNNING,
+        workspaceId,
+        machineState,
+      };
+    } catch (error) {
+      console.error(`[provisioner] Error updating workspace ${workspaceId.substring(0, 8)}:`, error);
+      return {
+        result: WorkspaceProvisioner.UpdateResult.ERROR,
+        workspaceId,
+        error: (error as Error).message,
+      };
+    }
+  }
+
+  /**
+   * Gracefully update all workspaces to a new image
+   *
+   * Processes workspaces in batches, respecting active agents unless forced.
+   * Returns detailed results for each workspace.
+   *
+   * @param newImage - New Docker image to use
+   * @param options - Update options
+   * @returns Summary and per-workspace results
+   */
+  async gracefulUpdateAllImages(
+    newImage: string,
+    options: {
+      force?: boolean;  // Force update even with active agents
+      skipRestart?: boolean;  // Update config but don't restart
+      batchSize?: number;  // Number of concurrent updates (default: 5)
+      userIds?: string[];  // Only update workspaces for these users
+      workspaceIds?: string[];  // Only update specific workspaces
+    } = {}
+  ): Promise<{
+    summary: {
+      total: number;
+      updated: number;
+      pendingRestart: number;
+      skippedActiveAgents: number;
+      skippedNotRunning: number;
+      errors: number;
+    };
+    results: Array<{
+      result: string;
+      workspaceId: string;
+      machineState?: string;
+      agentCount?: number;
+      error?: string;
+    }>;
+  }> {
+    // Get all workspaces to update
+    let workspaces: Workspace[];
+
+    if (options.workspaceIds?.length) {
+      // Specific workspaces
+      workspaces = (await Promise.all(
+        options.workspaceIds.map(id => db.workspaces.findById(id))
+      )).filter((w): w is Workspace => w !== null);
+    } else if (options.userIds?.length) {
+      // Workspaces for specific users
+      const allWorkspaces = await Promise.all(
+        options.userIds.map(userId => db.workspaces.findByUserId(userId))
+      );
+      workspaces = allWorkspaces.flat();
+    } else {
+      // All workspaces - need to query by status to get running ones
+      // For now, we'll get all workspaces from the provisioning provider
+      workspaces = await db.workspaces.findAll();
+    }
+
+    // Filter to only Fly.io workspaces
+    workspaces = workspaces.filter(w => w.computeProvider === 'fly' && w.computeId);
+
+    console.log(`[provisioner] Starting graceful update of ${workspaces.length} workspaces to ${newImage}`);
+
+    const batchSize = options.batchSize ?? 5;
+    const results: Array<{
+      result: string;
+      workspaceId: string;
+      machineState?: string;
+      agentCount?: number;
+      error?: string;
+    }> = [];
+
+    // Process in batches
+    for (let i = 0; i < workspaces.length; i += batchSize) {
+      const batch = workspaces.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(workspace =>
+          this.gracefulUpdateImage(workspace.id, newImage, {
+            force: options.force,
+            skipRestart: options.skipRestart,
+          })
+        )
+      );
+      results.push(...batchResults);
+
+      // Small delay between batches to avoid overwhelming Fly API
+      if (i + batchSize < workspaces.length) {
+        await wait(1000);
+      }
+    }
+
+    // Compute summary
+    const summary = {
+      total: results.length,
+      updated: results.filter(r => r.result === WorkspaceProvisioner.UpdateResult.UPDATED).length,
+      pendingRestart: results.filter(r => r.result === WorkspaceProvisioner.UpdateResult.UPDATED_PENDING_RESTART).length,
+      skippedActiveAgents: results.filter(r => r.result === WorkspaceProvisioner.UpdateResult.SKIPPED_ACTIVE_AGENTS).length,
+      skippedNotRunning: results.filter(r => r.result === WorkspaceProvisioner.UpdateResult.SKIPPED_NOT_RUNNING).length,
+      errors: results.filter(r => r.result === WorkspaceProvisioner.UpdateResult.ERROR).length,
+    };
+
+    console.log(`[provisioner] Graceful update complete:`, summary);
+
+    return { summary, results };
   }
 }
 

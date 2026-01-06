@@ -75,6 +75,10 @@ interface CLIAuthSession {
   refreshToken?: string;
   tokenExpiresAt?: Date;
   error?: string;
+  /** User-friendly hint for resolving errors */
+  errorHint?: string;
+  /** Whether the error can be resolved by retrying */
+  recoverable?: boolean;
   createdAt: Date;
   output: string; // Accumulated output for debugging
   // Workspace delegation fields (set when auth runs in workspace daemon)
@@ -263,11 +267,15 @@ onboardingRouter.get('/cli/:provider/status/:sessionId', async (req: Request, re
           status?: string;
           authUrl?: string;
           error?: string;
+          errorHint?: string;
+          recoverable?: boolean;
         };
         // Update local session with workspace status
         session.status = (workspaceStatus.status as CLIAuthSession['status']) || session.status;
         session.authUrl = workspaceStatus.authUrl || session.authUrl;
         session.error = workspaceStatus.error;
+        session.errorHint = workspaceStatus.errorHint;
+        session.recoverable = workspaceStatus.recoverable;
       }
     } catch (err) {
       console.error('[onboarding] Failed to poll workspace status:', err);
@@ -278,6 +286,8 @@ onboardingRouter.get('/cli/:provider/status/:sessionId', async (req: Request, re
     status: session.status,
     authUrl: session.authUrl,
     error: session.error,
+    errorHint: session.errorHint,
+    recoverable: session.recoverable,
   });
 });
 

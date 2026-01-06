@@ -135,7 +135,8 @@ export default function DashboardPage() {
         }
 
         const [workspacesRes, reposRes] = await Promise.all([
-          fetch('/api/workspaces', { credentials: 'include' }),
+          // Use /accessible to include workspaces user can access via GitHub repo permissions
+          fetch('/api/workspaces/accessible', { credentials: 'include' }),
           fetch('/api/github-app/repos', { credentials: 'include' }),
         ]);
 

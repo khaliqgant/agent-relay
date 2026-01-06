@@ -21,6 +21,20 @@ export interface PromptHandler {
 }
 
 /**
+ * Error pattern configuration for detecting auth failures
+ */
+export interface ErrorPattern {
+  /** Pattern to detect in CLI output */
+  pattern: RegExp;
+  /** User-friendly error message */
+  message: string;
+  /** Whether this error is recoverable by retrying */
+  recoverable: boolean;
+  /** Optional hint for the user */
+  hint?: string;
+}
+
+/**
  * CLI auth configuration for each provider
  */
 export interface CLIAuthConfig {
@@ -40,6 +54,8 @@ export interface CLIAuthConfig {
   prompts: PromptHandler[];
   /** Success indicators in output */
   successPatterns: RegExp[];
+  /** Error patterns to detect auth failures */
+  errorPatterns?: ErrorPattern[];
   /** How long to wait for URL to appear (ms) */
   waitTimeout: number;
   /** Whether this provider supports device flow */
@@ -121,6 +137,38 @@ export const CLI_AUTH_CONFIG: Record<string, CLIAuthConfig> = {
       },
     ],
     successPatterns: [/success/i, /authenticated/i, /logged\s*in/i, /you.*(?:are|now).*logged/i],
+    errorPatterns: [
+      {
+        pattern: /oauth\s*error.*(?:status\s*code\s*)?400/i,
+        message: 'Authentication failed - the authorization code was invalid or expired',
+        recoverable: true,
+        hint: 'This usually happens if the login took too long or the code was already used. Please try again and complete the browser login within a few minutes.',
+      },
+      {
+        pattern: /oauth\s*error.*(?:status\s*code\s*)?401/i,
+        message: 'Authentication failed - unauthorized',
+        recoverable: true,
+        hint: 'Please try logging in again.',
+      },
+      {
+        pattern: /oauth\s*error.*(?:status\s*code\s*)?403/i,
+        message: 'Authentication failed - access denied',
+        recoverable: true,
+        hint: 'Your account may not have access to Claude Code. Please check your Anthropic subscription.',
+      },
+      {
+        pattern: /network\s*error|ENOTFOUND|ECONNREFUSED|timeout/i,
+        message: 'Network error during authentication',
+        recoverable: true,
+        hint: 'Please check your internet connection and try again.',
+      },
+      {
+        pattern: /invalid\s*(?:code|token)|code\s*(?:expired|invalid)/i,
+        message: 'The authorization code was invalid or has expired',
+        recoverable: true,
+        hint: 'OAuth codes expire quickly. Please try again and complete the browser login promptly.',
+      },
+    ],
   },
   openai: {
     command: 'codex',
@@ -203,10 +251,18 @@ export const CLI_AUTH_CONFIG: Record<string, CLIAuthConfig> = {
 /**
  * Strip ANSI escape codes from text
  */
+/* eslint-disable no-control-regex */
 export function stripAnsiCodes(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  // Handle various ANSI escape sequences:
+  // - CSI sequences: ESC [ params letter (params can include ?, >, =, etc.)
+  // - OSC sequences: ESC ] ... BEL/ST
+  // - Simple escapes: ESC letter
+  return text
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '') // CSI sequences including private modes (?2026h, etc.)
+    .replace(/\x1b\][^\x07]*\x07/g, '')     // OSC sequences (title, etc.)
+    .replace(/\x1b[a-zA-Z]/g, '');          // Simple escape sequences
 }
+/* eslint-enable no-control-regex */
 
 /**
  * Check if text matches any success pattern
@@ -229,6 +285,23 @@ export function findMatchingPrompt(
     if (respondedPrompts.has(prompt.description)) continue;
     if (prompt.pattern.test(cleanText)) {
       return prompt;
+    }
+  }
+  return null;
+}
+
+/**
+ * Check if text matches any error pattern and return the matched error
+ */
+export function findMatchingError(
+  text: string,
+  errorPatterns?: ErrorPattern[]
+): ErrorPattern | null {
+  if (!errorPatterns || errorPatterns.length === 0) return null;
+  const cleanText = stripAnsiCodes(text);
+  for (const error of errorPatterns) {
+    if (error.pattern.test(cleanText)) {
+      return error;
     }
   }
   return null;

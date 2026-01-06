@@ -376,6 +376,7 @@ export interface WorkspaceQueries {
   findById(id: string): Promise<schema.Workspace | null>;
   findByUserId(userId: string): Promise<schema.Workspace[]>;
   findByCustomDomain(domain: string): Promise<schema.Workspace | null>;
+  findAll(): Promise<schema.Workspace[]>;
   create(data: schema.NewWorkspace): Promise<schema.Workspace>;
   updateStatus(
     id: string,
@@ -416,6 +417,14 @@ export const workspaceQueries: WorkspaceQueries = {
       .from(schema.workspaces)
       .where(eq(schema.workspaces.customDomain, domain));
     return result[0] ?? null;
+  },
+
+  async findAll(): Promise<schema.Workspace[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.workspaces)
+      .orderBy(desc(schema.workspaces.createdAt));
   },
 
   async create(data: schema.NewWorkspace): Promise<schema.Workspace> {
@@ -983,10 +992,11 @@ export const repositoryQueries: RepositoryQueries = {
 
   async findByGithubFullName(fullName: string): Promise<schema.Repository[]> {
     const db = getDb();
+    // Use case-insensitive match since GitHub repo names are case-insensitive
     return db
       .select()
       .from(schema.repositories)
-      .where(eq(schema.repositories.githubFullName, fullName));
+      .where(sql`LOWER(${schema.repositories.githubFullName}) = LOWER(${fullName})`);
   },
 
   async findByUserId(userId: string): Promise<schema.Repository[]> {

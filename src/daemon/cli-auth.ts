@@ -15,6 +15,7 @@ import {
   stripAnsiCodes,
   matchesSuccessPattern,
   findMatchingPrompt,
+  findMatchingError,
   getSupportedProviders,
   type CLIAuthConfig,
   type PromptHandler,
@@ -38,6 +39,10 @@ interface AuthSession {
   refreshToken?: string;
   tokenExpiresAt?: Date;
   error?: string;
+  /** User-friendly hint for resolving the error */
+  errorHint?: string;
+  /** Whether the error can be resolved by retrying */
+  recoverable?: boolean;
   output: string;
   promptsHandled: string[];
   createdAt: Date;
@@ -234,6 +239,23 @@ export async function startCLIAuth(
             output: trimmedData.substring(0, 500),
           });
         }
+      }
+
+      // Check for error patterns BEFORE checking success (error may appear first)
+      const matchedError = findMatchingError(data, config.errorPatterns);
+      if (matchedError && session.status !== 'error') {
+        logger.warn('Auth error detected', {
+          provider,
+          sessionId,
+          errorMessage: matchedError.message,
+          recoverable: matchedError.recoverable,
+        });
+        session.status = 'error';
+        session.error = matchedError.message;
+        session.errorHint = matchedError.hint;
+        session.recoverable = matchedError.recoverable;
+        // Don't exit yet - let the CLI handle retries if it wants to
+        // The error info will be returned when status is polled
       }
 
       // Check for success and try to extract credentials
