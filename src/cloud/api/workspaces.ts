@@ -1354,8 +1354,9 @@ workspacesRouter.all('/:id/proxy/{*proxyPath}', async (req: Request, res: Respon
     (req as any)._proxyTargetUrl = targetUrl;
 
     // Add timeout to prevent hanging requests
+    // 45s timeout to accommodate Fly.io machine cold starts (can take 20-30s)
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const timeout = setTimeout(() => controller.abort(), 45000);
 
     const fetchOptions: RequestInit = {
       method: req.method,
@@ -1395,7 +1396,7 @@ workspacesRouter.all('/:id/proxy/{*proxyPath}', async (req: Request, res: Respon
     if (error instanceof Error && error.name === 'AbortError') {
       res.status(504).json({
         error: 'Workspace request timed out',
-        details: 'The workspace did not respond within 15 seconds',
+        details: 'The workspace did not respond within 45 seconds',
         targetUrl: targetUrl,
       });
       return;
