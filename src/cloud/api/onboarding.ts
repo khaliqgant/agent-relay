@@ -15,7 +15,6 @@ import type { IPty } from 'node-pty';
 import * as crypto from 'crypto';
 import { requireAuth } from './auth.js';
 import { db } from '../db/index.js';
-import { vault } from '../vault/index.js';
 
 // Import for local use
 import {
@@ -414,13 +413,11 @@ onboardingRouter.post('/cli/:provider/complete/:sessionId', async (req: Request,
       });
     }
 
-    // Store in vault with refresh token and expiry
-    await vault.storeCredential({
+    // Mark provider as connected (tokens are not stored centrally - CLI tools
+    // authenticate directly on workspace instances)
+    await db.credentials.upsert({
       userId,
       provider,
-      accessToken,
-      refreshToken,
-      tokenExpiresAt,
       scopes: getProviderScopes(provider),
     });
 
@@ -568,11 +565,11 @@ onboardingRouter.post('/token/:provider', async (req: Request, res: Response) =>
       return res.status(400).json({ error: 'Invalid token' });
     }
 
-    // Store in vault
-    await vault.storeCredential({
+    // Mark provider as connected (tokens are not stored centrally - CLI tools
+    // authenticate directly on workspace instances)
+    await db.credentials.upsert({
       userId,
       provider,
-      accessToken: token,
       scopes: getProviderScopes(provider),
       providerAccountEmail: email,
     });
@@ -580,10 +577,11 @@ onboardingRouter.post('/token/:provider', async (req: Request, res: Response) =>
     res.json({
       success: true,
       message: `${provider} connected successfully`,
+      note: 'Token validated. Configure this on your workspace for usage.',
     });
   } catch (error) {
-    console.error(`Error storing token for ${provider}:`, error);
-    res.status(500).json({ error: 'Failed to store token' });
+    console.error(`Error storing provider connection for ${provider}:`, error);
+    res.status(500).json({ error: 'Failed to store provider connection' });
   }
 });
 

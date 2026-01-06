@@ -1136,6 +1136,30 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         error={addWorkspaceError}
       />
 
+      {/* Workspace Settings Panel */}
+      {effectiveActiveWorkspaceId && (
+        <WorkspaceSettingsPanel
+          isOpen={isWorkspaceSettingsPanelOpen}
+          onClose={() => setIsWorkspaceSettingsPanelOpen(false)}
+          workspaceId={effectiveActiveWorkspaceId}
+          workspaceName={effectiveWorkspaces.find(w => w.id === effectiveActiveWorkspaceId)?.name || 'Workspace'}
+          isOwner={true}
+          apiBaseUrl="/api"
+          onWorkspaceUpdated={() => {
+            // Refetch cloud workspaces if in cloud mode
+            if (isCloudMode) {
+              cloudApi.getWorkspaceSummary().then(result => {
+                if (result.success && result.data.workspaces) {
+                  setCloudWorkspaces(result.data.workspaces);
+                }
+              });
+            }
+            // Refetch workspace repos
+            refetchWorkspaceRepos();
+          }}
+        />
+      )}
+
       {/* Conversation History */}
       <ConversationHistory
         isOpen={isHistoryOpen}

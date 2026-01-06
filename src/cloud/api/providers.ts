@@ -10,7 +10,6 @@ import { createClient } from 'redis';
 import { requireAuth } from './auth.js';
 import { getConfig } from '../config.js';
 import { db } from '../db/index.js';
-import { vault } from '../vault/index.js';
 
 export const providersRouter = Router();
 
@@ -334,12 +333,11 @@ providersRouter.post('/:provider/verify', async (req: Request, res: Response) =>
   // In production, we'd verify by making a test API call with the credentials
 
   try {
-    // For now, mark as connected (in production, verify credentials exist)
-    // This would be called after the user's workspace detects valid credentials
+    // Mark as connected (tokens are not stored centrally - CLI tools
+    // authenticate directly on workspace instances)
     await db.credentials.upsert({
       userId,
       provider,
-      accessToken: 'cli-authenticated', // Placeholder - real token from CLI
       scopes: [], // CLI auth doesn't use scopes
       providerAccountEmail: req.body.email, // User can optionally provide
     });
@@ -347,7 +345,7 @@ providersRouter.post('/:provider/verify', async (req: Request, res: Response) =>
     res.json({
       success: true,
       message: `${providerConfig.displayName} connected via CLI`,
-      note: 'Credentials will be synced when workspace starts',
+      note: 'CLI credentials remain on your local machine',
     });
   } catch (error) {
     console.error(`Error verifying ${provider} auth:`, error);
@@ -403,18 +401,19 @@ providersRouter.post('/:provider/api-key', async (req: Request, res: Response) =
       return res.status(400).json({ error: 'Invalid API key' });
     }
 
-    // Store the API key - use scopes from device flow providers, empty for CLI providers
+    // Mark provider as connected (tokens are not stored centrally - CLI tools
+    // authenticate directly on workspace instances)
     const scopes = isDeviceFlowProvider(providerConfig) ? providerConfig.scopes : [];
-    await vault.storeCredential({
+    await db.credentials.upsert({
       userId,
       provider,
-      accessToken: apiKey,
       scopes,
     });
 
     res.json({
       success: true,
       message: `${providerConfig.displayName} connected`,
+      note: 'API key validated. Configure this key on your workspace for usage.',
     });
   } catch (error) {
     console.error(`Error connecting ${provider} with API key:`, error);
@@ -592,7 +591,9 @@ async function pollForToken(flowId: string, provider: ProviderType, clientId: st
 }
 
 /**
- * Store tokens after successful device flow
+ * Mark provider as connected after successful device flow
+ * Note: Tokens are not stored centrally - CLI tools authenticate directly
+ * on workspace instances. We only record the connection status and user info.
  */
 async function storeProviderTokens(
   userId: string,
@@ -623,15 +624,10 @@ async function storeProviderTokens(
     }
   }
 
-  // Encrypt and store
-  await vault.storeCredential({
+  // Mark provider as connected (without storing tokens)
+  await db.credentials.upsert({
     userId,
     provider,
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-    tokenExpiresAt: tokens.expiresIn
-      ? new Date(Date.now() + tokens.expiresIn * 1000)
-      : undefined,
     scopes: tokens.scope?.split(' '),
     providerAccountId: userInfo.id,
     providerAccountEmail: userInfo.email,

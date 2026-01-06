@@ -10,7 +10,6 @@ export { createServer } from './server.js';
 export { getConfig, loadConfig, CloudConfig } from './config.js';
 
 // Services
-export { CredentialVault } from './vault/index.js';
 export { WorkspaceProvisioner, ProvisionConfig, Workspace, WorkspaceStatus } from './provisioner/index.js';
 
 // Scaling infrastructure

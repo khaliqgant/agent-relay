@@ -64,6 +64,13 @@
       "when": 1736208002000,
       "tag": "0009_ci_mentions_monitoring",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1736208003000,
+      "tag": "0010_remove_credential_tokens",
+      "breakpoints": true
     }
   ]
 }

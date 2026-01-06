@@ -13,7 +13,6 @@ import { Router, Request, Response } from 'express';
 import { randomBytes, createHash } from 'crypto';
 import { requireAuth } from './auth.js';
 import { db } from '../db/index.js';
-import { vault } from '../vault/index.js';
 
 export const daemonsRouter = Router();
 
@@ -235,24 +234,29 @@ daemonsRouter.post('/heartbeat', requireDaemonAuth as any, async (req: Request, 
 
 /**
  * GET /api/daemons/credentials
- * Get credentials for the daemon's user (syncs cloud credentials to local)
+ * Get credentials for the daemon's user
+ *
+ * Note: Tokens are no longer stored centrally. CLI tools authenticate directly
+ * on workspace/local instances. This endpoint returns connected provider info only.
  */
 daemonsRouter.get('/credentials', requireDaemonAuth as any, async (req: Request, res: Response) => {
   const daemon = (req as any).daemon;
 
   try {
-    // Get all decrypted credentials for the user via vault
-    const credentialsMap = await vault.getUserCredentials(daemon.userId);
+    // Get connected providers for this user (no tokens stored centrally)
+    const credentials = await db.credentials.findByUserId(daemon.userId);
 
-    // Convert Map to array format for API response
-    const credentials = Array.from(credentialsMap.entries()).map(([provider, cred]) => ({
-      provider,
-      accessToken: cred.accessToken,
-      tokenType: 'bearer',
-      expiresAt: cred.tokenExpiresAt,
+    // Return provider info without tokens
+    const providers = credentials.map((cred) => ({
+      provider: cred.provider,
+      providerAccountEmail: cred.providerAccountEmail,
+      connectedAt: cred.createdAt,
     }));
 
-    res.json({ credentials });
+    res.json({
+      providers,
+      note: 'Tokens are authenticated locally on workspace instances via CLI.',
+    });
   } catch (error) {
     console.error('Error fetching credentials:', error);
     res.status(500).json({ error: 'Failed to fetch credentials' });

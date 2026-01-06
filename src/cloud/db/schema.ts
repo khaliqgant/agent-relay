@@ -89,16 +89,15 @@ export const githubInstallationsRelations = relations(githubInstallations, ({ on
 }));
 
 // ============================================================================
-// Credentials (provider tokens)
+// Credentials (connected provider registry - no token storage)
+// Note: Tokens are not stored centrally. CLI tools authenticate directly
+// on workspace instances. This table tracks which providers a user has connected.
 // ============================================================================
 
 export const credentials = pgTable('credentials', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   provider: varchar('provider', { length: 50 }).notNull(),
-  accessToken: text('access_token').notNull(),
-  refreshToken: text('refresh_token'),
-  tokenExpiresAt: timestamp('token_expires_at'),
   scopes: text('scopes').array(),
   providerAccountId: varchar('provider_account_id', { length: 255 }),
   providerAccountEmail: varchar('provider_account_email', { length: 255 }),
