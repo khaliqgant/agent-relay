@@ -376,28 +376,51 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   // Check if fleet view is available
   const isFleetAvailable = Boolean(data?.fleet?.servers?.length) || workspaces.length > 0;
 
-  // Convert workspaces to projects for unified navigation
+  // Convert workspaces/repos to projects for unified navigation
   useEffect(() => {
     if (workspaces.length > 0) {
-      // Convert workspaces to projects
-      const projectList: Project[] = workspaces.map((workspace) => ({
-        id: workspace.id,
-        path: workspace.path,
-        name: workspace.name,
-        agents: orchestratorAgents
-          .filter((a) => a.workspaceId === workspace.id)
-          .map((a) => ({
-            name: a.name,
-            status: a.status === 'running' ? 'online' : 'offline',
-            isSpawned: true,
-            cli: a.provider,
-          })) as Agent[],
-        lead: undefined,
-      }));
-      setProjects(projectList);
-      setCurrentProject(activeWorkspaceId);
+      // If we have repos for the active workspace, show each repo as a project folder
+      if (workspaceRepos.length > 1 && effectiveActiveWorkspaceId) {
+        const projectList: Project[] = workspaceRepos.map((repo) => ({
+          id: repo.id,
+          path: repo.githubFullName,
+          name: repo.githubFullName.split('/').pop() || repo.githubFullName,
+          agents: orchestratorAgents
+            .filter((a) => a.workspaceId === effectiveActiveWorkspaceId)
+            .map((a) => ({
+              name: a.name,
+              status: a.status === 'running' ? 'online' : 'offline',
+              isSpawned: true,
+              cli: a.provider,
+            })) as Agent[],
+          lead: undefined,
+        }));
+        setProjects(projectList);
+        // Set first repo as current if none selected
+        if (!currentProject || !projectList.find(p => p.id === currentProject)) {
+          setCurrentProject(projectList[0]?.id);
+        }
+      } else {
+        // Single repo or no repos fetched yet - show workspace as single project
+        const projectList: Project[] = workspaces.map((workspace) => ({
+          id: workspace.id,
+          path: workspace.path,
+          name: workspace.name,
+          agents: orchestratorAgents
+            .filter((a) => a.workspaceId === workspace.id)
+            .map((a) => ({
+              name: a.name,
+              status: a.status === 'running' ? 'online' : 'offline',
+              isSpawned: true,
+              cli: a.provider,
+            })) as Agent[],
+          lead: undefined,
+        }));
+        setProjects(projectList);
+        setCurrentProject(activeWorkspaceId);
+      }
     }
-  }, [workspaces, orchestratorAgents, activeWorkspaceId]);
+  }, [workspaces, orchestratorAgents, activeWorkspaceId, workspaceRepos, effectiveActiveWorkspaceId, currentProject]);
 
   // Fetch bridge/project data for multi-project mode
   useEffect(() => {
