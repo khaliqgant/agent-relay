@@ -143,6 +143,9 @@ export function WorkspaceSettingsPanel({
   // Device flow preference for providers that support it
   const [useDeviceFlow, setUseDeviceFlow] = useState<Record<string, boolean>>({});
 
+  // Repo sync state
+  const [syncingRepoId, setSyncingRepoId] = useState<string | null>(null);
+
   // Custom domain form
   const [customDomain, setCustomDomain] = useState('');
   const [domainLoading, setDomainLoading] = useState(false);
@@ -291,6 +294,27 @@ export function WorkspaceSettingsPanel({
     } else {
       setError(result.error);
     }
+  }, [workspace, workspaceId]);
+
+  // Sync repository to workspace (clone/pull)
+  const handleSyncRepo = useCallback(async (repoId: string) => {
+    if (!workspace) return;
+
+    setSyncingRepoId(repoId);
+    setError(null);
+
+    const result = await cloudApi.syncRepo(repoId);
+    if (result.success) {
+      // Refresh workspace to get updated sync status
+      const wsResult = await cloudApi.getWorkspaceDetails(workspaceId);
+      if (wsResult.success) {
+        setWorkspace(wsResult.data);
+      }
+    } else {
+      setError(result.error);
+    }
+
+    setSyncingRepoId(null);
   }, [workspace, workspaceId]);
 
   // Set custom domain
@@ -762,7 +786,27 @@ export function WorkspaceSettingsPanel({
                         </p>
                       </div>
                     </div>
-                    <StatusBadge status={repo.syncStatus} />
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => handleSyncRepo(repo.id)}
+                        disabled={syncingRepoId === repo.id || workspace.status !== 'running'}
+                        className="px-3 py-1.5 bg-accent-cyan/10 border border-accent-cyan/30 text-accent-cyan rounded-lg text-xs font-semibold hover:bg-accent-cyan/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                        title={workspace.status !== 'running' ? 'Workspace must be running to sync' : 'Sync repository'}
+                      >
+                        {syncingRepoId === repo.id ? (
+                          <>
+                            <SyncIcon spinning />
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            <SyncIcon />
+                            Sync
+                          </>
+                        )}
+                      </button>
+                      <StatusBadge status={repo.syncStatus} />
+                    </div>
                   </div>
                 ))
               ) : (
@@ -1203,6 +1247,27 @@ function InfoIcon() {
       <circle cx="12" cy="12" r="10" />
       <line x1="12" y1="16" x2="12" y2="12" />
       <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+  );
+}
+
+function SyncIcon({ spinning = false }: { spinning?: boolean } = {}) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={spinning ? 'animate-spin' : ''}
+    >
+      <path d="M23 4v6h-6" />
+      <path d="M1 20v-6h6" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+      <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
     </svg>
   );
 }

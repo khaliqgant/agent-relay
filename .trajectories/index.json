@@ -373,6 +373,13 @@
       "completedAt": "2026-01-06T18:16:51.462Z",
       "path": "/home/user/relay/.trajectories/completed/2026-01/traj_ub8csuv3lcv4.json"
     },
+    "traj_fqduidx3xbtp": {
+      "title": "Implement dynamic repo management for workspaces",
+      "status": "completed",
+      "startedAt": "2026-01-07T05:44:47.138Z",
+      "completedAt": "2026-01-07T06:07:35.433Z",
+      "path": "/home/user/relay/.trajectories/completed/2026-01/traj_fqduidx3xbtp.json"
+    },
     "traj_multi_server_arch": {
       "title": "Multi-server architecture document",
       "status": "completed",
