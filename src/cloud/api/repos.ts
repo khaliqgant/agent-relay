@@ -413,144 +413,6 @@ reposRouter.get('/search', async (req: Request, res: Response) => {
 });
 
 // ============================================================================
-// WILDCARD ROUTES BELOW - All specific routes must be defined ABOVE this line
-// ============================================================================
-
-/**
- * GET /api/repos/:id
- * Get repository details
- */
-reposRouter.get('/:id', async (req: Request, res: Response) => {
-  const userId = req.session.userId!;
-  const { id } = req.params;
-
-  try {
-    const repositories = await db.repositories.findByUserId(userId);
-    const repo = repositories.find((r) => r.id === id);
-
-    if (!repo) {
-      return res.status(404).json({ error: 'Repository not found' });
-    }
-
-    res.json({
-      id: repo.id,
-      fullName: repo.githubFullName,
-      defaultBranch: repo.defaultBranch,
-      isPrivate: repo.isPrivate,
-      syncStatus: repo.syncStatus,
-      lastSyncedAt: repo.lastSyncedAt,
-      workspaceId: repo.workspaceId,
-      createdAt: repo.createdAt,
-    });
-  } catch (error) {
-    console.error('Error getting repo:', error);
-    res.status(500).json({ error: 'Failed to get repository' });
-  }
-});
-
-/**
- * POST /api/repos/:id/sync
- * Trigger repository sync (clone/pull to workspace)
- *
- * Calls the workspace's /repos/sync API endpoint to clone or update the repo.
- * This enables dynamic repo management without workspace restart.
- */
-reposRouter.post('/:id/sync', async (req: Request, res: Response) => {
-  const userId = req.session.userId!;
-  const { id } = req.params;
-
-  try {
-    const repositories = await db.repositories.findByUserId(userId);
-    const repo = repositories.find((r) => r.id === id);
-
-    if (!repo) {
-      return res.status(404).json({ error: 'Repository not found' });
-    }
-
-    if (!repo.workspaceId) {
-      return res.status(400).json({ error: 'Repository not assigned to a workspace' });
-    }
-
-    // Get the workspace to find its public URL
-    const workspace = await db.workspaces.findById(repo.workspaceId);
-    if (!workspace) {
-      return res.status(404).json({ error: 'Workspace not found' });
-    }
-
-    if (workspace.status !== 'running') {
-      return res.status(400).json({
-        error: 'Workspace is not running',
-        workspaceStatus: workspace.status,
-      });
-    }
-
-    if (!workspace.publicUrl) {
-      return res.status(400).json({ error: 'Workspace has no public URL' });
-    }
-
-    // Update sync status
-    await db.repositories.updateSyncStatus(id, 'syncing');
-
-    // Call the workspace's repo sync API
-    const result = await callWorkspaceApi(
-      workspace.publicUrl,
-      workspace.id,
-      'POST',
-      '/repos/sync',
-      { repo: repo.githubFullName }
-    );
-
-    if (result.ok) {
-      // Update sync status to synced
-      await db.repositories.updateSyncStatus(id, 'synced', new Date());
-
-      res.json({
-        message: 'Repository synced successfully',
-        syncStatus: 'synced',
-        result: result.data,
-      });
-    } else {
-      // Update sync status to error
-      await db.repositories.updateSyncStatus(id, 'error');
-
-      console.error('Workspace sync failed:', result.error);
-      res.status(502).json({
-        error: 'Failed to sync repository to workspace',
-        details: result.error,
-        syncStatus: 'error',
-      });
-    }
-  } catch (error) {
-    console.error('Error syncing repo:', error);
-    res.status(500).json({ error: 'Failed to sync repository' });
-  }
-});
-
-/**
- * DELETE /api/repos/:id
- * Remove a repository
- */
-reposRouter.delete('/:id', async (req: Request, res: Response) => {
-  const userId = req.session.userId!;
-  const { id } = req.params;
-
-  try {
-    const repositories = await db.repositories.findByUserId(userId);
-    const repo = repositories.find((r) => r.id === id);
-
-    if (!repo) {
-      return res.status(404).json({ error: 'Repository not found' });
-    }
-
-    await db.repositories.delete(id);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting repo:', error);
-    res.status(500).json({ error: 'Failed to delete repository' });
-  }
-});
-
-// ============================================================================
 // Nango-based GitHub Permission APIs (for dashboard access control)
 // ============================================================================
 
@@ -706,5 +568,143 @@ reposRouter.post('/check-access-bulk', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error checking bulk repo access:', error);
     res.status(500).json({ error: 'Failed to check repository access' });
+  }
+});
+
+// ============================================================================
+// WILDCARD ROUTES BELOW - All specific routes must be defined ABOVE this line
+// ============================================================================
+
+/**
+ * GET /api/repos/:id
+ * Get repository details
+ */
+reposRouter.get('/:id', async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { id } = req.params;
+
+  try {
+    const repositories = await db.repositories.findByUserId(userId);
+    const repo = repositories.find((r) => r.id === id);
+
+    if (!repo) {
+      return res.status(404).json({ error: 'Repository not found' });
+    }
+
+    res.json({
+      id: repo.id,
+      fullName: repo.githubFullName,
+      defaultBranch: repo.defaultBranch,
+      isPrivate: repo.isPrivate,
+      syncStatus: repo.syncStatus,
+      lastSyncedAt: repo.lastSyncedAt,
+      workspaceId: repo.workspaceId,
+      createdAt: repo.createdAt,
+    });
+  } catch (error) {
+    console.error('Error getting repo:', error);
+    res.status(500).json({ error: 'Failed to get repository' });
+  }
+});
+
+/**
+ * POST /api/repos/:id/sync
+ * Trigger repository sync (clone/pull to workspace)
+ *
+ * Calls the workspace's /repos/sync API endpoint to clone or update the repo.
+ * This enables dynamic repo management without workspace restart.
+ */
+reposRouter.post('/:id/sync', async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { id } = req.params;
+
+  try {
+    const repositories = await db.repositories.findByUserId(userId);
+    const repo = repositories.find((r) => r.id === id);
+
+    if (!repo) {
+      return res.status(404).json({ error: 'Repository not found' });
+    }
+
+    if (!repo.workspaceId) {
+      return res.status(400).json({ error: 'Repository not assigned to a workspace' });
+    }
+
+    // Get the workspace to find its public URL
+    const workspace = await db.workspaces.findById(repo.workspaceId);
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    if (workspace.status !== 'running') {
+      return res.status(400).json({
+        error: 'Workspace is not running',
+        workspaceStatus: workspace.status,
+      });
+    }
+
+    if (!workspace.publicUrl) {
+      return res.status(400).json({ error: 'Workspace has no public URL' });
+    }
+
+    // Update sync status
+    await db.repositories.updateSyncStatus(id, 'syncing');
+
+    // Call the workspace's repo sync API
+    const result = await callWorkspaceApi(
+      workspace.publicUrl,
+      workspace.id,
+      'POST',
+      '/repos/sync',
+      { repo: repo.githubFullName }
+    );
+
+    if (result.ok) {
+      // Update sync status to synced
+      await db.repositories.updateSyncStatus(id, 'synced', new Date());
+
+      res.json({
+        message: 'Repository synced successfully',
+        syncStatus: 'synced',
+        result: result.data,
+      });
+    } else {
+      // Update sync status to error
+      await db.repositories.updateSyncStatus(id, 'error');
+
+      console.error('Workspace sync failed:', result.error);
+      res.status(502).json({
+        error: 'Failed to sync repository to workspace',
+        details: result.error,
+        syncStatus: 'error',
+      });
+    }
+  } catch (error) {
+    console.error('Error syncing repo:', error);
+    res.status(500).json({ error: 'Failed to sync repository' });
+  }
+});
+
+/**
+ * DELETE /api/repos/:id
+ * Remove a repository
+ */
+reposRouter.delete('/:id', async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { id } = req.params;
+
+  try {
+    const repositories = await db.repositories.findByUserId(userId);
+    const repo = repositories.find((r) => r.id === id);
+
+    if (!repo) {
+      return res.status(404).json({ error: 'Repository not found' });
+    }
+
+    await db.repositories.delete(id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting repo:', error);
+    res.status(500).json({ error: 'Failed to delete repository' });
   }
 });
