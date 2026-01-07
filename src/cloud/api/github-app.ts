@@ -32,24 +32,61 @@ githubAppRouter.get('/status', (_req: Request, res: Response) => {
 
 /**
  * GET /api/github-app/repos
- * List repositories the user has connected via Nango
+ * List repositories the user has access to
+ *
+ * First tries database (populated by GitHub App OAuth).
+ * If empty, queries GitHub directly via user OAuth connection.
  */
 githubAppRouter.get('/repos', async (req: Request, res: Response) => {
   const userId = req.session.userId!;
 
   try {
-    const repos = await db.repositories.findByUserId(userId);
+    // Try database first (from GitHub App OAuth flow)
+    const dbRepos = await db.repositories.findByUserId(userId);
+
+    if (dbRepos.length > 0) {
+      // Return repos from database
+      return res.json({
+        repositories: dbRepos.map((r) => ({
+          id: r.id,
+          fullName: r.githubFullName,
+          isPrivate: r.isPrivate,
+          defaultBranch: r.defaultBranch,
+          syncStatus: r.syncStatus,
+          hasNangoConnection: !!r.nangoConnectionId,
+          lastSyncedAt: r.lastSyncedAt,
+        })),
+        source: 'database',
+      });
+    }
+
+    // Database empty - query GitHub directly via user OAuth
+    const user = await db.users.findById(userId);
+    if (!user?.nangoConnectionId) {
+      return res.json({
+        repositories: [],
+        source: 'none',
+        hint: 'User not connected to GitHub',
+      });
+    }
+
+    console.log(`[github-app/repos] Database empty, querying GitHub for user ${user.githubUsername}`);
+    const { repositories } = await nangoService.listUserAccessibleRepos(user.nangoConnectionId, {
+      perPage: 100,
+      type: 'all',
+    });
 
     res.json({
-      repositories: repos.map((r) => ({
-        id: r.id,
-        fullName: r.githubFullName,
+      repositories: repositories.map((r) => ({
+        id: null, // No database ID yet
+        fullName: r.fullName,
         isPrivate: r.isPrivate,
         defaultBranch: r.defaultBranch,
-        syncStatus: r.syncStatus,
-        hasNangoConnection: !!r.nangoConnectionId,
-        lastSyncedAt: r.lastSyncedAt,
+        syncStatus: 'live', // Queried from GitHub, not cached
+        hasNangoConnection: true,
+        lastSyncedAt: null,
       })),
+      source: 'github-api',
     });
   } catch (error) {
     console.error('Error listing repos:', error);
