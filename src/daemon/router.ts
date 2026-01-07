@@ -515,7 +515,8 @@ export class Router {
     to: string,
     envelope: SendEnvelope
   ): boolean {
-    const target = this.agents.get(to);
+    const target = this.agents.get(to) ?? this.users.get(to);
+    const isUserTarget = target?.entityType === 'user';
 
     // If agent not found locally, check if it's on a remote machine
     if (!target) {
@@ -535,8 +536,10 @@ export class Router {
     if (sent) {
       this.trackDelivery(target, deliver);
       this.registry?.recordReceive(to);
-      // Mark recipient as processing
-      this.setProcessing(to, deliver.id);
+      // Only mark AI agents as processing; humans don't need processing indicators
+      if (!isUserTarget) {
+        this.setProcessing(to, deliver.id);
+      }
     }
     return sent;
   }

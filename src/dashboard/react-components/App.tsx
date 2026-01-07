@@ -270,12 +270,36 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const lastSeenMessageCountRef = useRef<number>(0);
   const sidebarClosedRef = useRef<boolean>(true); // Track if sidebar is currently closed
+  const [dmSeenAt, setDmSeenAt] = useState<Map<string, number>>(new Map());
 
   // Close sidebar when selecting an agent or project on mobile
   const closeSidebarOnMobile = useCallback(() => {
     if (window.innerWidth <= 768) {
       setIsSidebarOpen(false);
     }
+  }, []);
+
+  // Merge AI agents with human users from the daemon so the sidebar and notifications include both
+  const combinedAgents = useMemo(() => {
+    const merged = [...(data?.agents ?? []), ...(data?.users ?? [])];
+    const byName = new Map<string, Agent>();
+
+    for (const agent of merged) {
+      const key = agent.name.toLowerCase();
+      const existing = byName.get(key);
+      byName.set(key, existing ? { ...existing, ...agent } : agent);
+    }
+
+    return Array.from(byName.values());
+  }, [data?.agents, data?.users]);
+
+  // Mark a DM conversation as seen (used for unread badges)
+  const markDmSeen = useCallback((username: string) => {
+    setDmSeenAt((prev) => {
+      const next = new Map(prev);
+      next.set(username.toLowerCase(), Date.now());
+      return next;
+    });
   }, []);
 
   // Agent state management
@@ -290,7 +314,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     onlineCount,
     needsAttentionCount,
   } = useAgents({
-    agents: data?.agents ?? [],
+    agents: combinedAgents,
   });
 
   // Message state management
@@ -339,6 +363,41 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
 
     return Array.from(seenUsers.values());
   }, [data?.messages, agents, currentUser]);
+
+  // Unread counts for human conversations (DMs)
+  const humanUnreadCounts = useMemo(() => {
+    if (!currentUser) return {};
+
+    const counts: Record<string, number> = {};
+    const humanNameSet = new Set(
+      combinedAgents.filter((a) => a.isHuman).map((a) => a.name.toLowerCase())
+    );
+
+    for (const msg of data?.messages ?? []) {
+      const sender = msg.from;
+      const recipient = msg.to;
+      if (!sender || !recipient) continue;
+
+      const isToCurrentUser = recipient === currentUser.displayName;
+      const senderIsHuman = humanNameSet.has(sender.toLowerCase());
+      if (!isToCurrentUser || !senderIsHuman) continue;
+
+      const seenAt = dmSeenAt.get(sender.toLowerCase()) ?? 0;
+      const ts = new Date(msg.timestamp).getTime();
+      if (ts > seenAt) {
+        counts[sender] = (counts[sender] || 0) + 1;
+      }
+    }
+
+    return counts;
+  }, [combinedAgents, currentUser, data?.messages, dmSeenAt]);
+
+  // When DM modal opens, mark that conversation as seen for unread tracking
+  useEffect(() => {
+    if (dmUser?.username) {
+      markDmSeen(dmUser.username);
+    }
+  }, [dmUser?.username, markDmSeen]);
 
   // Track unread messages when sidebar is closed on mobile
   useEffect(() => {
@@ -623,6 +682,18 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   const handleCoordinatorClick = useCallback(() => {
     setIsCoordinatorOpen(true);
   }, []);
+
+  // Open a DM with a human user from the sidebar
+  const handleHumanSelect = useCallback((human: Agent) => {
+    setDmUser({
+      username: human.name,
+      avatarUrl: human.avatarUrl,
+      connectedAt: new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
+    });
+    markDmSeen(human.name);
+    closeSidebarOnMobile();
+  }, [closeSidebarOnMobile, markDmSeen]);
 
   // Handle send from new conversation modal - select the channel after sending
   const handleNewConversationSend = useCallback(async (to: string, content: string): Promise<boolean> => {
@@ -954,6 +1025,8 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           agents={localAgentsForSidebar}
           bridgeAgents={bridgeAgents}
           projects={mergedProjects}
+          currentUserName={currentUser?.displayName}
+          humanUnreadCounts={humanUnreadCounts}
           currentProject={currentProject}
           selectedAgent={selectedAgent?.name}
           viewMode={viewMode}
@@ -964,6 +1037,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           currentThread={currentThread}
           totalUnreadThreadCount={totalUnreadThreadCount}
           onAgentSelect={handleAgentSelect}
+          onHumanSelect={handleHumanSelect}
           onProjectSelect={handleProjectSelect}
           onViewModeChange={setViewMode}
           onSpawnClick={handleSpawnClick}
@@ -1061,7 +1135,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
                 currentThread={currentThread}
                 onThreadClick={(messageId) => setCurrentThread(messageId)}
                 highlightedMessageId={currentThread ?? undefined}
-                agents={data?.agents}
+                agents={combinedAgents}
                 currentUser={currentUser}
               />
             )}

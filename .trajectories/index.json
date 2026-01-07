@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-01-07T14:11:00.071Z",
+  "lastUpdated": "2026-01-07T14:19:04.152Z",
   "trajectories": {
     "traj_ozd98si6a7ns": {
       "title": "Fix thinking indicator showing on all messages",
@@ -449,6 +449,20 @@
       "startedAt": "2026-01-07T14:03:47.655Z",
       "completedAt": "2026-01-07T14:11:00.042Z",
       "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_94gnp3k30goq.json"
+    },
+    "traj_03zupyv1s7b9": {
+      "title": "Fix intra-workspace messaging delivery and sidebar/notification visibility",
+      "status": "completed",
+      "startedAt": "2026-01-07T14:15:50.956Z",
+      "completedAt": "2026-01-07T14:16:39.455Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_03zupyv1s7b9.json"
+    },
+    "traj_hf81ey93uz6t": {
+      "title": "Add sidebar section break between agents and human users",
+      "status": "completed",
+      "startedAt": "2026-01-07T14:18:40.736Z",
+      "completedAt": "2026-01-07T14:19:04.139Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_hf81ey93uz6t.json"
     }
   }
 }
