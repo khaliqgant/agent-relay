@@ -109,29 +109,62 @@ export function DirectMessageModal({
 
   // De-duplicate messages (some human sends can arrive multiple times from different sources)
   const uniqueDmMessages = useMemo(() => {
-    const seenIds = new Set<string>();
-    const seenFingerprints = new Map<string, number>(); // fingerprint -> first timestamp
-    const WINDOW_MS = 30_000; // collapse near-duplicate copies within 30s
+    // Two-stage dedupe:
+    // 1) Exact id match (keeps latest, prefer non-sending)
+    // 2) Fuzzy: normalized body + sorted participant pair + 5s bucket
+    const normalizeBody = (content?: string) => (content ?? '').trim().replace(/\s+/g, ' ');
+    const rank = (msg: Message) => (msg.status === 'sending' ? 1 : 0); // prefer non-sending
+    const choose = (current: Message, incoming: Message) => {
+      const currentRank = rank(current);
+      const incomingRank = rank(incoming);
+      const currentTs = new Date(current.timestamp).getTime();
+      const incomingTs = new Date(incoming.timestamp).getTime();
+      if (incomingRank < currentRank) return incoming;
+      if (incomingRank > currentRank) return current;
+      return incomingTs >= currentTs ? incoming : current;
+    };
 
-    return dmMessages.filter((msg) => {
-      const ts = new Date(msg.timestamp).getTime();
+    // Sort by timestamp so replacements pick the latest naturally
+    const sorted = [...dmMessages].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
 
-      // Prefer id-based de-dupe
+    const byId = new Map<string, Message>();
+    const byFuzzy = new Map<string, Message>();
+
+    for (const msg of sorted) {
       if (msg.id) {
-        if (seenIds.has(msg.id)) return false;
-        seenIds.add(msg.id);
+        const existing = byId.get(msg.id);
+        byId.set(msg.id, existing ? choose(existing, msg) : msg);
+        continue;
       }
 
-      const fingerprint = `${msg.from?.toLowerCase() ?? ''}::${msg.to?.toLowerCase() ?? ''}::${msg.thread ?? ''}::${msg.content}`;
-      const firstSeen = seenFingerprints.get(fingerprint);
-      if (firstSeen !== undefined && Math.abs(ts - firstSeen) < WINDOW_MS) {
-        return false;
-      }
-      if (firstSeen === undefined) {
-        seenFingerprints.set(fingerprint, ts);
-      }
-      return true;
-    });
+      // For group conversations, deduplicate by sender + content + time only
+      // This prevents the same message sent to multiple recipients from appearing as duplicates
+      const sender = msg.from?.toLowerCase() ?? '';
+      const bucket = Math.floor(new Date(msg.timestamp).getTime() / 5000); // 5s bucket
+      const key = `${sender}|${bucket}|${normalizeBody(msg.content)}`;
+      const existing = byFuzzy.get(key);
+      byFuzzy.set(key, existing ? choose(existing, msg) : msg);
+    }
+
+    // Merge both dedup strategies
+    const merged = [...byId.values(), ...byFuzzy.values()];
+
+    // Final pass: deduplicate by sender + content + time across ALL messages
+    // This catches cases where messages have different IDs but same content
+    const finalDedup = new Map<string, Message>();
+    for (const msg of merged) {
+      const sender = msg.from?.toLowerCase() ?? '';
+      const bucket = Math.floor(new Date(msg.timestamp).getTime() / 5000);
+      const key = `${sender}|${bucket}|${normalizeBody(msg.content)}`;
+      const existing = finalDedup.get(key);
+      finalDedup.set(key, existing ? choose(existing, msg) : msg);
+    }
+
+    return Array.from(finalDedup.values()).sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
   }, [dmMessages]);
 
   // Determine current recipient (just the user, since handleSend sends to each participant)
