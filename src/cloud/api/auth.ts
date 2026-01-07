@@ -126,6 +126,14 @@ authRouter.get('/session', async (req: Request, res: Response) => {
       });
     }
 
+    // Get connected providers
+    const credentials = await db.credentials.findByUserId(user.id);
+    const connectedProviders = credentials.map((c) => ({
+      provider: c.provider,
+      email: c.providerAccountEmail,
+      connectedAt: c.createdAt,
+    }));
+
     res.json({
       authenticated: true,
       user: {
@@ -135,6 +143,7 @@ authRouter.get('/session', async (req: Request, res: Response) => {
         avatarUrl: user.avatarUrl,
         plan: user.plan,
       },
+      connectedProviders,
     });
   } catch (error) {
     console.error('Session check error:', error);

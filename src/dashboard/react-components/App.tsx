@@ -599,6 +599,12 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     setIsFullSettingsOpen(true);
   }, []);
 
+  // Handle billing click - opens full settings page with billing tab
+  const handleBillingClick = useCallback(() => {
+    setSettingsInitialTab('billing');
+    setIsFullSettingsOpen(true);
+  }, []);
+
   // Handle history click
   const handleHistoryClick = useCallback(() => {
     setIsHistoryOpen(true);
@@ -995,7 +1001,7 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           hasUnreadNotifications={hasUnreadMessages}
         />
         {/* Usage banner for free tier users */}
-        <UsageBanner onUpgradeClick={handleSettingsClick} />
+        <UsageBanner onUpgradeClick={handleBillingClick} />
         </div>
         {/* Spacer for fixed header on mobile - matches header height (52px) */}
         <div className="h-[52px] flex-shrink-0 md:hidden" />

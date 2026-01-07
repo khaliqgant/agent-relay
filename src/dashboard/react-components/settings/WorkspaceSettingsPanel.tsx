@@ -168,9 +168,10 @@ export function WorkspaceSettingsPanel({
       setIsLoading(true);
       setError(null);
 
-      const [wsResult, reposResult] = await Promise.all([
+      const [wsResult, reposResult, userResult] = await Promise.all([
         cloudApi.getWorkspaceDetails(workspaceId),
         cloudApi.getRepos(),
+        cloudApi.getMe(),
       ]);
 
       if (wsResult.success) {
@@ -178,29 +179,30 @@ export function WorkspaceSettingsPanel({
         if (wsResult.data.customDomain) {
           setCustomDomain(wsResult.data.customDomain);
         }
-        // Mark connected providers
-        // Map backend IDs to frontend IDs for consistency
-        const BACKEND_TO_FRONTEND_MAP: Record<string, string> = {
-          openai: 'codex', // Backend stores 'openai', frontend uses 'codex'
-        };
-        const connected: Record<string, boolean> = {};
-        wsResult.data.config.providers.forEach((p) => {
-          connected[p] = true;
-          // Also mark the frontend ID as connected if there's a mapping
-          const frontendId = BACKEND_TO_FRONTEND_MAP[p];
-          if (frontendId) {
-            connected[frontendId] = true;
-          }
-        });
-        setProviderStatus(connected);
-        // Note: Device flow auto-enable removed. SSH tunnel approach handles localhost
-        // callback forwarding for cloud workspaces, so standard OAuth flow works everywhere.
       } else {
         setError(wsResult.error);
       }
 
       if (reposResult.success) {
         setAvailableRepos(reposResult.data.repositories);
+      }
+
+      // Mark connected providers from user credentials (not workspace config)
+      if (userResult.success) {
+        // Map backend IDs to frontend IDs for consistency
+        const BACKEND_TO_FRONTEND_MAP: Record<string, string> = {
+          openai: 'codex', // Backend stores 'openai', frontend uses 'codex'
+        };
+        const connected: Record<string, boolean> = {};
+        userResult.data.connectedProviders.forEach((p) => {
+          connected[p.provider] = true;
+          // Also mark the frontend ID as connected if there's a mapping
+          const frontendId = BACKEND_TO_FRONTEND_MAP[p.provider];
+          if (frontendId) {
+            connected[frontendId] = true;
+          }
+        });
+        setProviderStatus(connected);
       }
 
       setIsLoading(false);
