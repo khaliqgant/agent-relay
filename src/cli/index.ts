@@ -1649,7 +1649,7 @@ cloudCommand
   .command('link')
   .description('Link this machine to your Agent Relay Cloud account')
   .option('--name <name>', 'Name for this machine')
-  .option('--cloud-url <url>', 'Cloud API URL', process.env.AGENT_RELAY_CLOUD_URL || 'https://api.agent-relay.com')
+  .option('--cloud-url <url>', 'Cloud API URL', process.env.AGENT_RELAY_CLOUD_URL || 'https://agent-relay.com')
   .action(async (options) => {
     const os = await import('node:os');
     const crypto = await import('node:crypto');

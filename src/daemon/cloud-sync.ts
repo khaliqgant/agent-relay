@@ -57,7 +57,7 @@ export class CloudSyncService extends EventEmitter {
 
     this.config = {
       apiKey: config.apiKey || process.env.AGENT_RELAY_API_KEY,
-      cloudUrl: config.cloudUrl || process.env.AGENT_RELAY_CLOUD_URL || 'https://api.agent-relay.com',
+      cloudUrl: config.cloudUrl || process.env.AGENT_RELAY_CLOUD_URL || 'https://agent-relay.com',
       heartbeatInterval: config.heartbeatInterval || 30000, // 30 seconds
       enabled: config.enabled ?? true,
     };
