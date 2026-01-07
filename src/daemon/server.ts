@@ -29,7 +29,7 @@ export interface DaemonConfig extends ConnectionConfig {
   teamDir?: string;
   /** Enable cloud sync for cross-machine agent communication */
   cloudSync?: boolean;
-  /** Cloud API URL (defaults to https://api.agent-relay.com) */
+  /** Cloud API URL (defaults to https://agent-relay.com) */
   cloudUrl?: string;
 }
 
