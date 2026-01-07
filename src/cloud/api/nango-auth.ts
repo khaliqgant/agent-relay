@@ -333,25 +333,33 @@ async function handleForwardWebhook(payload: {
   type: 'forward';
   connectionId: string;
   providerConfigKey: string;
-  payload: {
-    headers: Record<string, string>;
-    body: {
-      action?: string;
-      installation?: {
-        id: number;
-        account: { login: string; id: number; type: string };
-        permissions: Record<string, string>;
-        events: string[];
-      };
-      repositories?: Array<{ id: number; full_name: string; private: boolean }>;
-      repositories_added?: Array<{ id: number; full_name: string; private: boolean }>;
-      repositories_removed?: Array<{ id: number; full_name: string }>;
-      sender?: { id: number; login: string };
-    };
+  payload?: {
+    headers?: Record<string, string>;
+    body?: unknown;
   };
 }): Promise<void> {
+  // Log the full payload structure for debugging
+  console.log('[nango-webhook] Forward event payload:', JSON.stringify(payload, null, 2));
+
+  if (!payload.payload || !payload.payload.headers) {
+    console.error('[nango-webhook] Forward event missing payload or headers');
+    return;
+  }
+
   const githubEvent = payload.payload.headers['x-github-event'];
-  const githubBody = payload.payload.body;
+  const githubBody = payload.payload.body as {
+    action?: string;
+    installation?: {
+      id: number;
+      account: { login: string; id: number; type: string };
+      permissions: Record<string, string>;
+      events: string[];
+    };
+    repositories?: Array<{ id: number; full_name: string; private: boolean }>;
+    repositories_added?: Array<{ id: number; full_name: string; private: boolean }>;
+    repositories_removed?: Array<{ id: number; full_name: string }>;
+    sender?: { id: number; login: string };
+  };
 
   console.log(`[nango-webhook] Forward event: ${githubEvent} from ${payload.providerConfigKey}`);
 
