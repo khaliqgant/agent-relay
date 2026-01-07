@@ -431,8 +431,17 @@ async function handleInstallationForward(
           });
 
           // Check if repo is part of an existing workspace
+          // Look for ANY user's record of this repo that has a workspaceId
           if (syncedRepo.workspaceId) {
             workspacesToJoin.add(syncedRepo.workspaceId);
+          } else {
+            // Check if other users have this repo linked to a workspace
+            const allRepoRecords = await db.repositories.findByGithubFullName(repo.full_name);
+            for (const otherRecord of allRepoRecords) {
+              if (otherRecord.workspaceId && otherRecord.userId !== user.id) {
+                workspacesToJoin.add(otherRecord.workspaceId);
+              }
+            }
           }
         }
 
@@ -509,8 +518,17 @@ async function handleInstallationRepositoriesForward(
       });
 
       // Check if repo is part of an existing workspace
+      // Look for ANY user's record of this repo that has a workspaceId
       if (syncedRepo.workspaceId) {
         workspacesToJoin.add(syncedRepo.workspaceId);
+      } else {
+        // Check if other users have this repo linked to a workspace
+        const allRepoRecords = await db.repositories.findByGithubFullName(repo.full_name);
+        for (const otherRecord of allRepoRecords) {
+          if (otherRecord.workspaceId && otherRecord.userId !== user.id) {
+            workspacesToJoin.add(otherRecord.workspaceId);
+          }
+        }
       }
     }
 
@@ -629,9 +647,17 @@ async function handleRepoAuthWebhook(
       });
 
       // Check if this repo is part of an existing workspace
-      // If so, automatically add the user as a member
+      // Look for ANY user's record of this repo that has a workspaceId
       if (syncedRepo.workspaceId) {
         workspacesToJoin.add(syncedRepo.workspaceId);
+      } else {
+        // Check if other users have this repo linked to a workspace
+        const allRepoRecords = await db.repositories.findByGithubFullName(repo.full_name);
+        for (const otherRecord of allRepoRecords) {
+          if (otherRecord.workspaceId && otherRecord.userId !== user.id) {
+            workspacesToJoin.add(otherRecord.workspaceId);
+          }
+        }
       }
     }
 
