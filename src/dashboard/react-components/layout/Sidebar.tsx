@@ -23,6 +23,10 @@ export interface SidebarProps {
   /** Bridge-level agents like Architect that span multiple projects */
   bridgeAgents?: Agent[];
   projects?: Project[];
+  /** Current signed-in human (to hide from Human Users list) */
+  currentUserName?: string;
+  /** Unread DM counts keyed by human username */
+  humanUnreadCounts?: Record<string, number>;
   currentProject?: string;
   selectedAgent?: string;
   viewMode: 'local' | 'fleet';
@@ -37,6 +41,8 @@ export interface SidebarProps {
   /** Total unread thread count for notification badge */
   totalUnreadThreadCount?: number;
   onAgentSelect?: (agent: Agent, project?: Project) => void;
+  /** Handler when a human user is selected (opens DM) */
+  onHumanSelect?: (human: Agent) => void;
   onProjectSelect?: (project: Project) => void;
   onViewModeChange?: (mode: 'local' | 'fleet') => void;
   onSpawnClick?: () => void;
@@ -65,6 +71,8 @@ export function Sidebar({
   agents,
   bridgeAgents = [],
   projects = [],
+  currentUserName,
+  humanUnreadCounts = {},
   currentProject,
   selectedAgent,
   viewMode,
@@ -75,6 +83,7 @@ export function Sidebar({
   currentThread,
   totalUnreadThreadCount = 0,
   onAgentSelect,
+  onHumanSelect,
   onProjectSelect,
   onViewModeChange,
   onSpawnClick,
@@ -130,7 +139,12 @@ export function Sidebar({
 
   // Separate AI agents from human team members
   const aiAgents = agents.filter(a => !a.isHuman);
-  const humanMembers = agents.filter(a => a.isHuman);
+  const humanMembers = agents.filter(
+    a => a.isHuman && (!currentUserName || a.name.toLowerCase() !== currentUserName.toLowerCase())
+  );
+  const filteredHumanMembers = humanMembers.filter(
+    (m) => !searchQuery || m.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   // Determine if we should show unified project view
   const hasProjects = projects.length > 0;
@@ -259,12 +273,10 @@ export function Sidebar({
         {activeTab === 'team' && humanMembers.length > 0 ? (
           /* Team Members List */
           <div className="flex flex-col gap-1 py-2">
-            {humanMembers
-              .filter(m => !searchQuery || m.name.toLowerCase().includes(searchQuery.toLowerCase()))
-              .map((member) => (
-                <button
+            {filteredHumanMembers.map((member) => (
+              <button
                   key={member.name}
-                  onClick={() => onAgentSelect?.(member)}
+                  onClick={() => onHumanSelect ? onHumanSelect(member) : onAgentSelect?.(member)}
                   className={`
                     flex items-center gap-3 p-3 rounded-lg border transition-all duration-150 text-left w-full
                     ${selectedAgent === member.name
@@ -283,14 +295,19 @@ export function Sidebar({
                       {member.name.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-text-primary truncate">{member.name}</p>
-                    <p className="text-xs text-text-muted truncate">{member.role || 'Team Member'}</p>
-                  </div>
-                  <div className={`w-2 h-2 rounded-full ${member.status === 'online' ? 'bg-success' : 'bg-text-dim'}`} />
-                </button>
-              ))}
-            {humanMembers.filter(m => !searchQuery || m.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text-primary truncate">{member.name}</p>
+                      <p className="text-xs text-text-muted truncate">{member.role || 'Team Member'}</p>
+                    </div>
+                    {humanUnreadCounts[member.name] > 0 && (
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-accent-cyan/20 text-accent-cyan">
+                        {humanUnreadCounts[member.name]}
+                      </span>
+                    )}
+                    <div className={`w-2 h-2 rounded-full ${member.status === 'online' ? 'bg-success' : 'bg-text-dim'}`} />
+                  </button>
+                ))}
+            {filteredHumanMembers.length === 0 && (
               <div className="flex flex-col items-center justify-center py-10 px-5 text-text-muted text-center">
                 <SearchIcon />
                 <p className="mt-3">No team members match "{searchQuery}"</p>
@@ -322,6 +339,59 @@ export function Sidebar({
             compact={true}
             showGroupStats={true}
           />
+        )}
+
+        {/* Optional human section when viewing agents/projects */}
+        {activeTab === 'agents' && humanMembers.length > 0 && (
+          <div className="mt-4 mb-2 pt-3 border-t border-border-subtle">
+            <div className="flex items-center justify-between px-1 pb-2">
+              <p className="text-xs uppercase tracking-wide text-text-muted font-semibold m-0">Direct messages</p>
+              <span className="text-[11px] text-text-muted">{filteredHumanMembers.length} member{filteredHumanMembers.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              {filteredHumanMembers.length > 0 ? (
+                filteredHumanMembers.map((member) => (
+                  <button
+                    key={member.name}
+                    onClick={() => onHumanSelect ? onHumanSelect(member) : onAgentSelect?.(member)}
+                    className={`
+                      flex items-center gap-3 p-2.5 rounded-lg border transition-all duration-150 text-left w-full
+                      ${selectedAgent === member.name
+                        ? 'bg-accent-cyan/10 border-accent-cyan/30'
+                        : 'bg-bg-tertiary border-border-subtle hover:border-accent-cyan/30 hover:bg-bg-hover'}
+                    `}
+                  >
+                    {member.avatarUrl ? (
+                      <img
+                        src={member.avatarUrl}
+                        alt={member.name}
+                        className="w-8 h-8 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-medium text-xs">
+                        {member.name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text-primary truncate">{member.name}</p>
+                      <p className="text-[11px] text-text-muted truncate">{member.role || 'Team Member'}</p>
+                    </div>
+                    {humanUnreadCounts[member.name] > 0 && (
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-accent-cyan/20 text-accent-cyan">
+                        {humanUnreadCounts[member.name]}
+                      </span>
+                    )}
+                    <div className={`w-2 h-2 rounded-full ${member.status === 'online' ? 'bg-success' : 'bg-text-dim'}`} />
+                  </button>
+                ))
+              ) : (
+                <div className="flex flex-col items-center justify-center py-6 px-3 text-text-muted text-center">
+                  <SearchIcon />
+                  <p className="mt-2 text-xs">No team members match "{searchQuery}"</p>
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

@@ -15,6 +15,7 @@ import type { Envelope, SendPayload, DeliverEnvelope, AckPayload } from '../prot
 class MockConnection implements Pick<Connection, 'id' | 'agentName' | 'sessionId' | 'send' | 'getNextSeq' | 'close'> {
   id: string;
   agentName: string | undefined;
+  entityType?: 'agent' | 'user';
   sessionId: string;
   sentEnvelopes: Envelope[] = [];
   private sequences: Map<string, number> = new Map();
@@ -22,10 +23,16 @@ class MockConnection implements Pick<Connection, 'id' | 'agentName' | 'sessionId
   closeMock = vi.fn();
   private sendReturnValue = true;
 
-  constructor(id: string, agentName?: string, sessionId = 'session-1') {
+  constructor(
+    id: string,
+    agentName?: string,
+    sessionId = 'session-1',
+    entityType: 'agent' | 'user' = 'agent'
+  ) {
     this.id = id;
     this.agentName = agentName;
     this.sessionId = sessionId;
+    this.entityType = entityType;
   }
 
   send(envelope: Envelope): boolean {
@@ -385,6 +392,24 @@ describe('Router', () => {
       expect(sent.from).toBe('agent1');
       expect(sent.to).toBe('agent2');
       expect(sent.payload.body).toBe('test message');
+    });
+
+    it('routes direct messages between human users', () => {
+      const sender = new MockConnection('conn-user-1', 'alice', 'session-a', 'user');
+      const recipient = new MockConnection('conn-user-2', 'bob', 'session-b', 'user');
+
+      router.register(sender);
+      router.register(recipient);
+
+      const envelope = createSendEnvelope('alice', 'bob');
+      router.route(sender, envelope);
+
+      const delivered = recipient.sentEnvelopes[0] as DeliverEnvelope;
+      expect(delivered.type).toBe('DELIVER');
+      expect(delivered.from).toBe('alice');
+      expect(delivered.to).toBe('bob');
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatchObject({ from: 'alice', to: 'bob', body: 'test message' });
     });
 
     it('should not route message if sender has no agent name', () => {

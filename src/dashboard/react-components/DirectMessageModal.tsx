@@ -4,7 +4,7 @@
  * Modal for direct messaging with users and inviting agents to group conversations.
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import type { UserPresence } from './hooks/usePresence';
 import type { Agent, Message } from '../types';
 import type { HumanUser } from './MentionAutocomplete';
@@ -44,36 +44,79 @@ export function DirectMessageModal({
   sendError,
   currentUser,
 }: DirectMessageModalProps) {
-  const [showInviteAgents, setShowInviteAgents] = useState(false);
+  const [showInviteAgents, setShowInviteAgents] = useState(true);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
+  const [agentSearch, setAgentSearch] = useState('');
+
+  // Determine the current user's name for filtering; fall back to inferring from messages
+  const selfName = useMemo(() => {
+    if (currentUser?.displayName) return currentUser.displayName;
+    if (!user) return null;
+
+    // Infer from any message that involves the target user
+    for (const msg of messages) {
+      if (msg.to === user.username && msg.from !== user.username) return msg.from;
+      if (msg.from === user.username && msg.to && msg.to !== user.username) return msg.to;
+    }
+    return null;
+  }, [currentUser?.displayName, messages, user]);
+
+  // Agents already participating in this conversation (seen in history)
+  const derivedAgentParticipants = useMemo(() => {
+    const agentNames = new Set(agents.map((a) => a.name));
+    const participants = new Set<string>();
+
+    for (const msg of messages) {
+      if (agentNames.has(msg.from)) participants.add(msg.from);
+      if (agentNames.has(msg.to)) participants.add(msg.to);
+    }
+
+    // Remove humans in this conversation
+    if (user) participants.delete(user.username);
+    if (currentUser) participants.delete(currentUser.displayName);
+
+    return Array.from(participants);
+  }, [agents, messages, user, currentUser]);
+
+  // Keep selected agents in sync with conversation history (adds, never removes)
+  useEffect(() => {
+    setSelectedAgents((prev) => {
+      const merged = new Set([...prev, ...derivedAgentParticipants]);
+      return Array.from(merged);
+    });
+  }, [derivedAgentParticipants]);
+
+  // Full participant set for filtering (includes derived + selected)
+  const participantAgents = useMemo(
+    () => Array.from(new Set([...selectedAgents, ...derivedAgentParticipants])),
+    [selectedAgents, derivedAgentParticipants]
+  );
 
   // Filter messages for this DM conversation
   const dmMessages = useMemo(() => {
-    if (!user || !currentUser) return [];
+    if (!user) return [];
 
-    // For 1:1 DMs, show only direct messages between current user and target user
-    if (selectedAgents.length === 0) {
-      return messages.filter((msg) => {
-        const isDirectToUser = msg.to === user.username && msg.from === currentUser.displayName;
-        const isDirectFromUser = msg.from === user.username && msg.to === currentUser.displayName;
-        return isDirectToUser || isDirectFromUser;
-      });
-    }
-
-    // For group conversations, show messages where:
-    // - Current user sent to the target user or any selected agent
-    // - Target user sent to current user
-    // - Any selected agent sent to current user or target user
-    const participants = [currentUser.displayName, user.username, ...selectedAgents];
+    const participants = new Set<string>();
+    participants.add(user.username);
+    if (selfName) participants.add(selfName);
+    participantAgents.forEach((a) => participants.add(a));
 
     return messages.filter((msg) => {
-      const fromParticipant = participants.includes(msg.from);
-      const toParticipant = participants.includes(msg.to);
-
-      // Include if both sender and recipient are in this conversation
-      return fromParticipant && toParticipant;
+      if (!msg.from || !msg.to) return false;
+      return participants.has(msg.from) && participants.has(msg.to);
     });
-  }, [messages, user, currentUser, selectedAgents]);
+  }, [messages, participantAgents, selfName, user]);
+
+  // De-duplicate messages (some human sends can arrive twice from different sources)
+  const uniqueDmMessages = useMemo(() => {
+    const seen = new Set<string>();
+    return dmMessages.filter((msg) => {
+      const key = msg.id || `${msg.from?.toLowerCase()}::${msg.to?.toLowerCase()}::${msg.thread ?? ''}::${msg.content}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [dmMessages]);
 
   // Determine current recipient (just the user, since handleSend sends to each participant)
   const recipient = useMemo(() => {
@@ -87,6 +130,15 @@ export function DirectMessageModal({
         : [...prev, agentName]
     );
   }, []);
+
+  const filteredAgents = useMemo(() => {
+    const query = agentSearch.trim().toLowerCase();
+    return agents.filter((agent) => {
+      if (participantAgents.includes(agent.name)) return true;
+      if (!query) return true;
+      return agent.name.toLowerCase().includes(query);
+    });
+  }, [agents, agentSearch, participantAgents]);
 
   const handleSend = useCallback(async (to: string, content: string) => {
     // If agents are selected, notify each of them
@@ -185,12 +237,21 @@ export function DirectMessageModal({
 
         {/* Agent Selection Panel */}
         {showInviteAgents && (
-          <div className="border-b border-border-subtle bg-bg-secondary p-3">
-            <p className="text-xs text-text-muted mb-2">
-              Select agents to join this conversation:
-            </p>
+          <div className="border-b border-border-subtle bg-bg-secondary p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-text-muted m-0 flex-1">
+                Invite agents to this conversation
+              </p>
+              <input
+                type="text"
+                value={agentSearch}
+                onChange={(e) => setAgentSearch(e.target.value)}
+                placeholder="Search agents..."
+                className="text-xs px-2 py-1 bg-bg-tertiary border border-border-subtle rounded-md text-text-primary flex-1"
+              />
+            </div>
             <div className="flex flex-wrap gap-2">
-              {agents.map((agent) => (
+              {filteredAgents.map((agent) => (
                 <button
                   key={agent.name}
                   onClick={() => handleToggleAgent(agent.name)}
@@ -199,12 +260,13 @@ export function DirectMessageModal({
                       ? 'bg-accent-cyan text-bg-deep'
                       : 'bg-bg-tertiary text-text-secondary hover:bg-bg-tertiary/80'
                   }`}
+                  title={agent.name}
                 >
-                  {agent.name}
+                  {selectedAgents.includes(agent.name) ? '✓ ' : ''}{agent.name}
                 </button>
               ))}
-              {agents.length === 0 && (
-                <p className="text-xs text-text-muted">No agents available</p>
+              {filteredAgents.length === 0 && (
+                <p className="text-xs text-text-muted">No agents match "{agentSearch}"</p>
               )}
             </div>
           </div>
@@ -212,13 +274,13 @@ export function DirectMessageModal({
 
         {/* Message List */}
         <div className="flex-1 overflow-y-auto min-h-0 p-4 space-y-3">
-          {dmMessages.length > 0 ? (
-            dmMessages.map((msg, idx) => {
+          {uniqueDmMessages.length > 0 ? (
+            uniqueDmMessages.map((msg) => {
               const isFromCurrentUser = currentUser && msg.from === currentUser.displayName;
               const isFromAgent = selectedAgents.includes(msg.from);
 
               return (
-                <div key={idx} className={`flex ${isFromCurrentUser ? 'justify-end' : 'justify-start'}`}>
+                <div key={msg.id} className={`flex ${isFromCurrentUser ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[80%] rounded-lg px-3 py-2 ${
                     isFromCurrentUser
                       ? 'bg-accent-cyan text-bg-deep'
