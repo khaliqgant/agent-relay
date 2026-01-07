@@ -28,6 +28,7 @@ import type { ServerInfo } from './ServerCard';
 import { TypingIndicator } from './TypingIndicator';
 import { OnlineUsersIndicator } from './OnlineUsersIndicator';
 import { UserProfilePanel } from './UserProfilePanel';
+import { DirectMessageModal } from './DirectMessageModal';
 import { CoordinatorPanel } from './CoordinatorPanel';
 import { BillingResult } from './BillingResult';
 import { UsageBanner } from './UsageBanner';
@@ -183,6 +184,9 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
 
   // User profile panel state
   const [selectedUserProfile, setSelectedUserProfile] = useState<UserPresence | null>(null);
+
+  // Direct message modal state
+  const [dmUser, setDmUser] = useState<UserPresence | null>(null);
 
   // View mode state
   const [viewMode, setViewMode] = useState<'local' | 'fleet'>('local');
@@ -1297,6 +1301,23 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
           // For now, just close the panel
           setSelectedUserProfile(null);
         }}
+        onSendMessage={(user) => {
+          setDmUser(user);
+        }}
+      />
+
+      {/* Direct Message Modal */}
+      <DirectMessageModal
+        user={dmUser}
+        onClose={() => setDmUser(null)}
+        messages={data?.messages ?? []}
+        agents={agents}
+        humanUsers={humanUsers}
+        onSend={sendMessage}
+        onTyping={sendTyping}
+        isSending={isSending}
+        sendError={sendError}
+        currentUser={currentUser}
       />
 
       {/* Coordinator Panel */}

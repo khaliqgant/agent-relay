@@ -460,6 +460,63 @@ export class DaemonApi extends EventEmitter {
       return { status: 200, body: { success: true, message: 'Auth code submitted' } };
     });
 
+    // Complete auth and wait for credentials
+    this.routes.set('POST /auth/cli/:provider/complete/:sessionId', async (req): Promise<ApiResponse> => {
+      const { sessionId } = req.params;
+      const { authCode, state } = req.body as { authCode?: string; state?: string };
+
+      // For Codex, we need to forward the authCode to the CLI's callback server
+      // The Codex CLI starts a callback server at localhost:1455
+      if (authCode) {
+        try {
+          // Forward the OAuth callback to the Codex CLI's callback server
+          const callbackUrl = `http://localhost:1455/auth/callback?code=${encodeURIComponent(authCode)}${state ? `&state=${encodeURIComponent(state)}` : ''}`;
+          logger.info('Forwarding OAuth callback to Codex CLI', { callbackUrl: callbackUrl.replace(authCode, '[REDACTED]') });
+
+          const callbackResponse = await fetch(callbackUrl, {
+            signal: AbortSignal.timeout(5000),
+          });
+
+          if (!callbackResponse.ok) {
+            logger.error('Failed to forward callback to Codex CLI', { status: callbackResponse.status });
+            return {
+              status: 400,
+              body: {
+                error: 'Failed to deliver OAuth callback to Codex CLI. The CLI may have timed out.',
+                needsRestart: true,
+              },
+            };
+          }
+
+          logger.info('Successfully forwarded OAuth callback to Codex CLI');
+        } catch (err) {
+          logger.error('Error forwarding callback to Codex CLI', { error: String(err) });
+          return {
+            status: 500,
+            body: {
+              error: 'Failed to reach Codex CLI callback server. The CLI may not be running.',
+              needsRestart: true,
+            },
+          };
+        }
+      }
+
+      // Wait for credentials to be available (polls for up to 15 seconds)
+      const { completeAuthSession } = await import('./cli-auth.js');
+      const completeResult = await completeAuthSession(sessionId);
+
+      if (!completeResult.success) {
+        return {
+          status: 400,
+          body: {
+            error: completeResult.error || 'Authentication failed',
+          },
+        };
+      }
+
+      return { status: 200, body: { success: true, token: completeResult.token } };
+    });
+
     // Cancel auth session
     this.routes.set('POST /auth/cli/:provider/cancel/:sessionId', async (req): Promise<ApiResponse> => {
       const { sessionId } = req.params;

@@ -257,6 +257,9 @@ export class CodexContextHandler extends ProviderContextHandler {
     (config.history as Record<string, unknown>).save_history = true;
     (config.history as Record<string, unknown>).max_history_size = 1000;
 
+    // Disable Codex auto-update checks to keep container-stable version
+    (config as Record<string, unknown>).check_for_updates = false;
+
     // Point to our system prompt if using custom context
     if (this.codexConfig.systemPromptPath) {
       config.system_prompt_file = this.codexConfig.systemPromptPath;

@@ -15,9 +15,11 @@ export interface UserProfilePanelProps {
   onClose: () => void;
   /** Callback when mention button is clicked */
   onMention?: (username: string) => void;
+  /** Callback when send message button is clicked */
+  onSendMessage?: (user: UserPresence) => void;
 }
 
-export function UserProfilePanel({ user, onClose, onMention }: UserProfilePanelProps) {
+export function UserProfilePanel({ user, onClose, onMention, onSendMessage }: UserProfilePanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape key
@@ -169,6 +171,20 @@ export function UserProfilePanel({ user, onClose, onMention }: UserProfilePanelP
 
         {/* Actions */}
         <div className="p-4 border-t border-white/10 space-y-2">
+          {/* Send Message Button */}
+          <button
+            onClick={() => {
+              onSendMessage?.(user);
+              onClose();
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#00d4aa] hover:bg-[#00bfa0] text-[#0a0e14] font-medium rounded-lg transition-colors"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Send Message
+          </button>
+
           {/* Mention Button */}
           <button
             onClick={() => {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-01-07T10:19:49.977Z",
+  "lastUpdated": "2026-01-07T14:11:00.071Z",
   "trajectories": {
     "traj_ozd98si6a7ns": {
       "title": "Fix thinking indicator showing on all messages",
@@ -428,6 +428,27 @@
       "startedAt": "2026-01-07T10:19:49.851Z",
       "completedAt": "2026-01-07T10:19:49.966Z",
       "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_y7aiwijyfmmv.json"
+    },
+    "traj_psd9ob0j2ru3": {
+      "title": "Clarify codex rule file location and spawn behavior",
+      "status": "completed",
+      "startedAt": "2026-01-07T12:37:16.374Z",
+      "completedAt": "2026-01-07T12:40:48.197Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_psd9ob0j2ru3.json"
+    },
+    "traj_33iuy72sezbk": {
+      "title": "Ensure Codex config applies without OPENAI_TOKEN",
+      "status": "completed",
+      "startedAt": "2026-01-07T12:53:31.624Z",
+      "completedAt": "2026-01-07T12:53:45.247Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_33iuy72sezbk.json"
+    },
+    "traj_94gnp3k30goq": {
+      "title": "Fix intra-workspace messaging delivery and sidebar/notification visibility",
+      "status": "completed",
+      "startedAt": "2026-01-07T14:03:47.655Z",
+      "completedAt": "2026-01-07T14:11:00.042Z",
+      "path": "/Users/khaliqgant/Projects/agent-workforce/relay/.trajectories/completed/2026-01/traj_94gnp3k30goq.json"
     }
   }
 }

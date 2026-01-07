@@ -82,6 +82,12 @@ export PORT="${PORT}"
 # Disable auto-updates for AI CLIs in container environments
 # Prevents permission errors when CLIs try to self-update with npm/pip
 export DISABLE_AUTOUPDATER=1
+# Belt-and-suspenders flags to block Codex/OpenAI update checks
+export CODEX_CHECK_FOR_UPDATES=false
+export CODEX_DISABLE_AUTOUPDATE=1
+export OPENAI_CLI_NO_UPDATE=1
+export NO_UPDATE_NOTIFIER=1
+export NPM_CONFIG_UPDATE_NOTIFIER=false
 log "Auto-updates disabled for AI CLIs (container environment)"
 
 # ============================================================================
@@ -99,6 +105,8 @@ if [[ -n "${WORKSPACE_OWNER_USER_ID:-}" ]]; then
   mkdir -p "${USER_HOME}/.config/gcloud"
   mkdir -p "${USER_HOME}/.config/gh"
   export HOME="${USER_HOME}"
+  # Ensure user-local bin is on PATH for per-user shims/wrappers
+  export PATH="${HOME}/.local/bin:${PATH}"
   export XDG_CONFIG_HOME="${USER_HOME}/.config"
   export AGENT_RELAY_USER_ID="${WORKSPACE_OWNER_USER_ID}"
   log "HOME set to ${HOME} (user: ${WORKSPACE_OWNER_USER_ID})"
@@ -380,11 +388,44 @@ RELAYEOF
 fi
 log "Claude Code configuration complete"
 
-# Codex CLI expects ~/.codex/auth.json
+# Codex CLI settings (always install config to disable auto-updates)
+mkdir -p "${HOME}/.codex"
+if [[ -f "/app/deploy/workspace/codex.config.toml" ]]; then
+  cp "/app/deploy/workspace/codex.config.toml" "${HOME}/.codex/config.toml"
+  chmod 600 "${HOME}/.codex/config.toml"
+  log "Codex configuration applied from codex.config.toml"
+else
+  # Fallback: create minimal config (should not happen in production)
+  log "WARN: codex.config.toml not found, creating minimal config"
+  cat > "${HOME}/.codex/config.toml" <<CODEXCONFIGEOF
+check_for_updates = false
+CODEXCONFIGEOF
+  chmod 600 "${HOME}/.codex/config.toml"
+fi
+# Also create JSON config for Codex (some versions read config.json instead of config.toml)
+cat > "${HOME}/.codex/config.json" <<'CODEXJSON'
+{
+  "check_for_updates": false
+}
+CODEXJSON
+chmod 600 "${HOME}/.codex/config.json"
+
+# NPM wrapper to block Codex self-updates (no-op when Codex tries npm install -g @openai/codex)
+mkdir -p "${HOME}/.local/bin"
+cat > "${HOME}/.local/bin/npm" <<'NPMWRAPPER'
+#!/usr/bin/env bash
+if [[ "$1" == "install" && "$2" == "-g" && "$3" == @openai/codex* ]]; then
+  echo "npm wrapper: skipping Codex self-update (auto-update disabled)" >&2
+  exit 0
+fi
+exec /usr/local/bin/npm "$@"
+NPMWRAPPER
+chmod +x "${HOME}/.local/bin/npm"
+
+# Codex CLI expects ~/.codex/auth.json for credentials
 # Format: { tokens: { access_token: "...", refresh_token: "...", ... } }
 if [[ -n "${OPENAI_TOKEN:-}" ]]; then
   log "Configuring Codex credentials..."
-  mkdir -p "${HOME}/.codex"
   cat > "${HOME}/.codex/auth.json" <<EOF
 {
   "tokens": {
@@ -394,21 +435,6 @@ if [[ -n "${OPENAI_TOKEN:-}" ]]; then
 }
 EOF
   chmod 600 "${HOME}/.codex/auth.json"
-
-  # Copy Codex configuration from version-controlled file
-  # This provides a modular way to manage Codex settings
-  if [[ -f "/app/deploy/workspace/codex.config.toml" ]]; then
-    cp "/app/deploy/workspace/codex.config.toml" "${HOME}/.codex/config.toml"
-    chmod 600 "${HOME}/.codex/config.toml"
-    log "Codex configuration applied from codex.config.toml"
-  else
-    # Fallback: create minimal config (should not happen in production)
-    log "WARN: codex.config.toml not found, creating minimal config"
-    cat > "${HOME}/.codex/config.toml" <<CODEXCONFIGEOF
-check_for_updates = false
-CODEXCONFIGEOF
-    chmod 600 "${HOME}/.codex/config.toml"
-  fi
 fi
 
 # Google/Gemini - uses application default credentials
