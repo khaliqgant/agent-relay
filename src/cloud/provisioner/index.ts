@@ -14,6 +14,7 @@ import {
   getResourceTierForPlan,
   type ResourceTierName,
 } from '../services/planLimits.js';
+import { deriveSshPassword } from '../services/ssh-security.js';
 
 const WORKSPACE_PORT = 3888;
 const CODEX_OAUTH_PORT = 1455; // Codex CLI OAuth callback port - must be mapped for local dev
@@ -714,8 +715,9 @@ class FlyProvisioner implements ComputeProvisioner {
               CLOUD_API_URL: this.cloudApiUrl,
               WORKSPACE_TOKEN: this.generateWorkspaceToken(workspace.id),
               // SSH for CLI tunneling (Codex OAuth callback forwarding)
+              // Each workspace gets a unique password derived from its ID + secret salt
               ENABLE_SSH: 'true',
-              SSH_PASSWORD: process.env.WORKSPACE_SSH_PASSWORD || 'devpassword',
+              SSH_PASSWORD: deriveSshPassword(workspace.id),
             },
             services: [
               {
@@ -745,6 +747,22 @@ class FlyProvisioner implements ComputeProvisioner {
                   soft_limit: 25,
                   hard_limit: 50,
                 },
+              },
+              // SSH service for CLI tunneling (Codex OAuth callback forwarding)
+              // Exposes port 2222 publicly for SSH connections from user's machine
+              {
+                ports: [
+                  {
+                    port: 2222,
+                    handlers: [], // Empty handlers = raw TCP passthrough
+                  },
+                ],
+                protocol: 'tcp',
+                internal_port: 2222,
+                // SSH connections should also wake the machine
+                auto_stop_machines: 'stop',
+                auto_start_machines: true,
+                min_machines_running: 0,
               },
             ],
             checks: {
@@ -1546,8 +1564,9 @@ class DockerProvisioner implements ComputeProvisioner {
         : `-p ${hostPort}:${WORKSPACE_PORT} -p ${sshHostPort}:2222`;
 
       // Enable SSH in the container for tunneling
+      // Each workspace gets a unique password derived from its ID + secret salt
       envArgs.push('-e ENABLE_SSH=true');
-      envArgs.push(`-e SSH_PASSWORD=${process.env.WORKSPACE_SSH_PASSWORD || 'devpassword'}`);
+      envArgs.push(`-e SSH_PASSWORD=${deriveSshPassword(workspace.id)}`);
 
       execSync(
         `docker run -d --user root --name ${containerName} ${networkArg} ${volumeArgs} ${portMappings} ${envArgs.join(' ')} ${WORKSPACE_IMAGE}`,

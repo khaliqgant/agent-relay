@@ -48,6 +48,7 @@ import { gitRouter } from './api/git.js';
 import { codexAuthHelperRouter } from './api/codex-auth-helper.js';
 import { adminRouter } from './api/admin.js';
 import { db } from './db/index.js';
+import { validateSshSecurityConfig } from './services/ssh-security.js';
 
 /**
  * Proxy a request to the user's primary running workspace
@@ -88,6 +89,10 @@ export interface CloudServer {
 
 export async function createServer(): Promise<CloudServer> {
   const config = getConfig();
+
+  // Validate security configuration at startup
+  validateSshSecurityConfig();
+
   const app = express();
   app.set('trust proxy', 1);
 

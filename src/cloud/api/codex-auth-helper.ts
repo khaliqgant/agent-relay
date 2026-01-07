@@ -18,6 +18,7 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { requireAuth } from './auth.js';
 import { db } from '../db/index.js';
+import { deriveSshPassword } from '../services/ssh-security.js';
 
 export const codexAuthHelperRouter = Router();
 
@@ -251,7 +252,7 @@ codexAuthHelperRouter.get('/tunnel-info/:workspaceId', async (req: Request, res:
     const apiPort = parseInt(url.port, 10) || 80;
 
     // SSH connection info varies by environment:
-    // - Fly.io: Use internal hostname and port 2222 (internal network)
+    // - Fly.io: Use public fly.dev hostname with port 2222 (exposed via TCP service)
     // - Local Docker: Use localhost with derived SSH port (22000 + apiPort - 3000)
     const isOnFly = !!process.env.FLY_APP_NAME;
     const isLocalDocker = (host === 'localhost' || host === '127.0.0.1') && apiPort >= 3000;
@@ -260,10 +261,10 @@ codexAuthHelperRouter.get('/tunnel-info/:workspaceId', async (req: Request, res:
     let sshPort: number;
 
     if (isOnFly) {
-      // Fly.io internal network - use app name format (ar-{workspace_id_prefix}.internal)
-      // computeId is the machine ID, but DNS uses app name
+      // Fly.io public hostname - SSH is exposed as a public TCP service on port 2222
+      // Users can SSH directly from their machine to {app}.fly.dev:2222
       const appName = `ar-${workspace.id.substring(0, 8)}`;
-      sshHost = `${appName}.internal`;
+      sshHost = `${appName}.fly.dev`;
       sshPort = 2222;
     } else if (isLocalDocker) {
       // Local Docker: SSH port is derived from API port
@@ -276,8 +277,9 @@ codexAuthHelperRouter.get('/tunnel-info/:workspaceId', async (req: Request, res:
       sshPort = 2222;
     }
 
-    // SSH password from environment or default
-    const sshPassword = process.env.WORKSPACE_SSH_PASSWORD || 'devpassword';
+    // SSH password is derived per-workspace for security
+    // Each workspace gets a unique password based on its ID + secret salt
+    const sshPassword = deriveSshPassword(workspace.id);
 
     // Get authUrl from CLI token if available
     let authUrl: string | undefined;

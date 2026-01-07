@@ -143,10 +143,9 @@ export function WorkspaceSettingsPanel({
   const [showApiKeyFallback, setShowApiKeyFallback] = useState<Record<string, boolean>>({});
   // Device flow preference for providers that support it
   const [useDeviceFlow, setUseDeviceFlow] = useState<Record<string, boolean>>({});
-  // Use terminal-based setup (default for Claude and Codex)
+  // Use terminal-based setup (default for Claude only - Codex uses CLI helper flow)
   const [useTerminalSetup, setUseTerminalSetup] = useState<Record<string, boolean>>({
     anthropic: true, // Default to terminal for Claude
-    codex: true, // Default to terminal for Codex - same experience as onboarding
   });
 
   // Repo sync state
@@ -636,6 +635,7 @@ export function WorkspaceSettingsPanel({
                               displayName: provider.displayName,
                               color: provider.color,
                               requiresUrlCopy: provider.id === 'codex',
+                              supportsDeviceFlow: provider.supportsDeviceFlow,
                             }}
                             workspaceId={workspaceId}
                             csrfToken={csrfToken}

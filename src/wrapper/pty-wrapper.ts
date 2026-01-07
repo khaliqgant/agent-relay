@@ -136,11 +136,6 @@ export class PtyWrapper extends BaseWrapper {
     super(config);
     this.config = config;
 
-    // Log interactive mode status
-    if (config.interactive) {
-      console.log(`[pty:${config.name}] Starting in INTERACTIVE mode - auto-accept disabled`);
-    }
-
     // Auto-detect agent role from .claude/agents/ or .openagents/ if task not provided
     let detectedTask = config.task;
     if (!detectedTask) {
@@ -624,10 +619,7 @@ export class PtyWrapper extends BaseWrapper {
     if (!this.ptyProcess || !this.running) return;
 
     // Skip auto-accept in interactive mode - user responds to prompts directly
-    if (this.config.interactive) {
-      console.log(`[pty:${this.config.name}] Interactive mode - skipping auto-accept`);
-      return;
-    }
+    if (this.config.interactive) return;
 
     const cleanData = stripAnsi(data);
 
