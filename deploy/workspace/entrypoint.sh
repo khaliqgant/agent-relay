@@ -79,6 +79,11 @@ PORT="${AGENT_RELAY_DASHBOARD_PORT:-${PORT:-3888}}"
 export AGENT_RELAY_DASHBOARD_PORT="${PORT}"
 export PORT="${PORT}"
 
+# Disable auto-updates for AI CLIs in container environments
+# Prevents permission errors when CLIs try to self-update with npm/pip
+export DISABLE_AUTOUPDATER=1
+log "Auto-updates disabled for AI CLIs (container environment)"
+
 # ============================================================================
 # Per-user credential storage setup
 # Create user-specific HOME on persistent volume (/data)
@@ -389,6 +394,21 @@ if [[ -n "${OPENAI_TOKEN:-}" ]]; then
 }
 EOF
   chmod 600 "${HOME}/.codex/auth.json"
+
+  # Copy Codex configuration from version-controlled file
+  # This provides a modular way to manage Codex settings
+  if [[ -f "/app/deploy/workspace/codex.config.toml" ]]; then
+    cp "/app/deploy/workspace/codex.config.toml" "${HOME}/.codex/config.toml"
+    chmod 600 "${HOME}/.codex/config.toml"
+    log "Codex configuration applied from codex.config.toml"
+  else
+    # Fallback: create minimal config (should not happen in production)
+    log "WARN: codex.config.toml not found, creating minimal config"
+    cat > "${HOME}/.codex/config.toml" <<CODEXCONFIGEOF
+check_for_updates = false
+CODEXCONFIGEOF
+    chmod 600 "${HOME}/.codex/config.toml"
+  fi
 fi
 
 # Google/Gemini - uses application default credentials

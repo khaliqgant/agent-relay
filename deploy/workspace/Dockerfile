@@ -45,7 +45,9 @@ COPY --from=builder /app/package*.json ./
 # Copy relay snippets for agent spawning (only what's needed)
 COPY docs/agent-relay-snippet.md docs/agent-relay-protocol.md docs/agent-policy-snippet.md ./docs/
 
+# Copy workspace configuration files
 COPY deploy/workspace/entrypoint.sh /entrypoint.sh
+COPY deploy/workspace/codex.config.toml ./deploy/workspace/codex.config.toml
 COPY deploy/workspace/git-credential-relay /usr/local/bin/git-credential-relay
 RUN chmod +x /entrypoint.sh /usr/local/bin/git-credential-relay
 
