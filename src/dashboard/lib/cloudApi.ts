@@ -807,4 +807,18 @@ export const cloudApi = {
       lastSyncedAt?: string;
     }> }>('/api/github-app/repos');
   },
+
+  /**
+   * Sync a repository to its workspace
+   * Triggers clone/pull on the workspace container
+   */
+  async syncRepo(repoId: string) {
+    return cloudFetch<{
+      message: string;
+      syncStatus: string;
+      result?: unknown;
+    }>(`/api/repos/${encodeURIComponent(repoId)}/sync`, {
+      method: 'POST',
+    });
+  },
 };
