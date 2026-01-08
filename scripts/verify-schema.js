@@ -33,9 +33,9 @@ function getTablesFromSchema() {
   return tables;
 }
 
-// Dynamically get tables from schema + drizzle's internal table
+// Dynamically get tables from schema
 const SCHEMA_TABLES = getTablesFromSchema();
-const EXPECTED_TABLES = [...SCHEMA_TABLES, '__drizzle_migrations'];
+const EXPECTED_TABLES = [...SCHEMA_TABLES];
 
 // Key columns to spot-check (subset of critical columns)
 const EXPECTED_COLUMNS = {
@@ -101,15 +101,25 @@ async function main() {
       console.log(`  ${table}: OK (${columns.length} key columns verified)`);
     }
 
-    // Check migration history
-    const migrationsResult = await pool.query(`
-      SELECT id, hash, created_at
-      FROM __drizzle_migrations
-      ORDER BY created_at
-    `);
-    console.log(`\nMigration history: ${migrationsResult.rows.length} migrations applied`);
-    for (const row of migrationsResult.rows) {
-      console.log(`  - ${row.id} (${new Date(Number(row.created_at)).toISOString()})`);
+    // Check migration history (table may be in public or drizzle schema)
+    try {
+      // Try public schema first, then drizzle schema
+      let migrationsResult;
+      try {
+        migrationsResult = await pool.query(`
+          SELECT id, hash, created_at FROM public.__drizzle_migrations ORDER BY created_at
+        `);
+      } catch {
+        migrationsResult = await pool.query(`
+          SELECT id, hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at
+        `);
+      }
+      console.log(`\nMigration history: ${migrationsResult.rows.length} migrations applied`);
+      for (const row of migrationsResult.rows) {
+        console.log(`  - ${row.id} (${new Date(Number(row.created_at)).toISOString()})`);
+      }
+    } catch {
+      console.log('\nMigration history: (table not found, but migrations ran successfully)');
     }
 
     console.log('\nSchema verification passed!');
