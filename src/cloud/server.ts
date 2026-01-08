@@ -211,11 +211,12 @@ export async function createServer(): Promise<CloudServer> {
 
   // Lightweight CSRF protection using session token
   const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-  // Paths exempt from CSRF (webhooks from external services, workspace proxy, local auth callbacks)
+  // Paths exempt from CSRF (webhooks from external services, workspace proxy, local auth callbacks, admin API)
   const CSRF_EXEMPT_PATHS = [
     '/api/webhooks/',
     '/api/auth/nango/webhook',
     '/api/auth/codex-helper/callback',
+    '/api/admin/',  // Admin API uses X-Admin-Secret header auth
   ];
   // Additional pattern for workspace proxy routes (contains /proxy/)
   const isWorkspaceProxyRoute = (path: string) => /^\/api\/workspaces\/[^/]+\/proxy\//.test(path);
@@ -372,6 +373,7 @@ export async function createServer(): Promise<CloudServer> {
   let scalingOrchestrator: ScalingOrchestrator | null = null;
   let computeEnforcement: ComputeEnforcementService | null = null;
   let introExpiration: IntroExpirationService | null = null;
+  let daemonStaleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   // Create HTTP server for WebSocket upgrade handling
   const httpServer = http.createServer(app);
@@ -749,6 +751,20 @@ export async function createServer(): Promise<CloudServer> {
         }
       }
 
+      // Start daemon stale check (mark daemons offline if no heartbeat for 2+ minutes)
+      // Runs every 60 seconds regardless of RELAY_CLOUD_ENABLED
+      daemonStaleCheckInterval = setInterval(async () => {
+        try {
+          const count = await db.linkedDaemons.markStale();
+          if (count > 0) {
+            console.log(`[cloud] Marked ${count} daemon(s) as offline (stale)`);
+          }
+        } catch (error) {
+          console.error('[cloud] Failed to mark stale daemons:', error);
+        }
+      }, 60_000); // Every 60 seconds
+      console.log('[cloud] Daemon stale check started (60s interval)');
+
       return new Promise((resolve) => {
         server = httpServer.listen(config.port, () => {
           console.log(`Agent Relay Cloud running on port ${config.port}`);
@@ -773,6 +789,12 @@ export async function createServer(): Promise<CloudServer> {
       // Stop intro expiration service
       if (introExpiration) {
         introExpiration.stop();
+      }
+
+      // Stop daemon stale check
+      if (daemonStaleCheckInterval) {
+        clearInterval(daemonStaleCheckInterval);
+        daemonStaleCheckInterval = null;
       }
 
       // Close WebSocket server

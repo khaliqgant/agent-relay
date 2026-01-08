@@ -45,13 +45,28 @@ function hashApiKey(apiKey: string): string {
  */
 daemonsRouter.post('/link', requireAuth, async (req: Request, res: Response) => {
   const userId = req.session.userId!;
-  const { name, machineId, metadata } = req.body;
+  const { name, machineId, metadata, workspaceId } = req.body;
 
   if (!machineId || typeof machineId !== 'string') {
     return res.status(400).json({ error: 'machineId is required' });
   }
 
   try {
+    // Validate workspace ownership if provided
+    if (workspaceId) {
+      const workspace = await db.workspaces.findById(workspaceId);
+      if (!workspace) {
+        return res.status(404).json({ error: 'Workspace not found' });
+      }
+      if (workspace.userId !== userId) {
+        // Check if user is a member of the workspace
+        const member = await db.workspaceMembers.findMembership(workspaceId, userId);
+        if (!member) {
+          return res.status(403).json({ error: 'Not authorized to link to this workspace' });
+        }
+      }
+    }
+
     // Check if this machine is already linked
     const existing = await db.linkedDaemons.findByMachineId(userId, machineId);
 
@@ -63,6 +78,7 @@ daemonsRouter.post('/link', requireAuth, async (req: Request, res: Response) => 
       await db.linkedDaemons.update(existing.id, {
         name: name || existing.name,
         apiKeyHash,
+        workspaceId: workspaceId || existing.workspaceId,
         metadata: metadata || existing.metadata,
         status: 'online',
         lastSeenAt: new Date(),
@@ -71,6 +87,7 @@ daemonsRouter.post('/link', requireAuth, async (req: Request, res: Response) => 
       return res.json({
         success: true,
         daemonId: existing.id,
+        workspaceId: workspaceId || existing.workspaceId,
         apiKey, // Only returned once!
         message: 'Daemon re-linked with new API key',
       });
@@ -82,6 +99,7 @@ daemonsRouter.post('/link', requireAuth, async (req: Request, res: Response) => 
 
     const daemon = await db.linkedDaemons.create({
       userId,
+      workspaceId: workspaceId || null,
       name: name || `Daemon on ${machineId.substring(0, 8)}`,
       machineId,
       apiKeyHash,
@@ -92,6 +110,7 @@ daemonsRouter.post('/link', requireAuth, async (req: Request, res: Response) => 
     res.status(201).json({
       success: true,
       daemonId: daemon.id,
+      workspaceId: workspaceId || null,
       apiKey, // Only returned once - user must save this!
       message: 'Daemon linked successfully. Save your API key - it cannot be retrieved later.',
     });
@@ -125,6 +144,64 @@ daemonsRouter.get('/', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error listing daemons:', error);
     res.status(500).json({ error: 'Failed to list daemons' });
+  }
+});
+
+/**
+ * GET /api/daemons/workspace/:workspaceId/agents
+ * Get local agents for a specific workspace
+ */
+daemonsRouter.get('/workspace/:workspaceId/agents', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const { workspaceId } = req.params;
+
+  try {
+    // Verify user has access to this workspace
+    const workspace = await db.workspaces.findById(workspaceId);
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    // Check if user owns the workspace or is a member
+    if (workspace.userId !== userId) {
+      const member = await db.workspaceMembers.findMembership(workspaceId, userId);
+      if (!member) {
+        return res.status(403).json({ error: 'Not authorized to access this workspace' });
+      }
+    }
+
+    // Get all linked daemons for this workspace
+    const daemons = await db.linkedDaemons.findByWorkspaceId(workspaceId);
+
+    // Extract agents from each daemon's metadata
+    const localAgents = daemons.flatMap((daemon) => {
+      const metadata = daemon.metadata as Record<string, unknown> | null;
+      const agents = (metadata?.agents as Array<{ name: string; status: string }>) || [];
+      return agents.map((agent) => ({
+        name: agent.name,
+        status: agent.status,
+        isLocal: true,
+        daemonId: daemon.id,
+        daemonName: daemon.name,
+        daemonStatus: daemon.status,
+        machineId: daemon.machineId,
+        lastSeenAt: daemon.lastSeenAt,
+      }));
+    });
+
+    res.json({
+      agents: localAgents,
+      daemons: daemons.map((d) => ({
+        id: d.id,
+        name: d.name,
+        machineId: d.machineId,
+        status: d.status,
+        lastSeenAt: d.lastSeenAt,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching local agents:', error);
+    res.status(500).json({ error: 'Failed to fetch local agents' });
   }
 });
 

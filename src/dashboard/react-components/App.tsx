@@ -103,6 +103,9 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
   const [activeCloudWorkspaceId, setActiveCloudWorkspaceId] = useState<string | null>(null);
   const [isLoadingCloudWorkspaces, setIsLoadingCloudWorkspaces] = useState(false);
 
+  // Local agents from linked daemons
+  const [localAgents, setLocalAgents] = useState<Agent[]>([]);
+
   // Fetch cloud workspaces when in cloud mode
   useEffect(() => {
     if (!cloudSession?.user) return;
@@ -128,6 +131,53 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     fetchCloudWorkspaces();
     // Poll for updates every 30 seconds
     const interval = setInterval(fetchCloudWorkspaces, 30000);
+    return () => clearInterval(interval);
+  }, [cloudSession?.user, activeCloudWorkspaceId]);
+
+  // Fetch local agents for the active workspace
+  useEffect(() => {
+    if (!cloudSession?.user || !activeCloudWorkspaceId) {
+      setLocalAgents([]);
+      return;
+    }
+
+    const fetchLocalAgents = async () => {
+      try {
+        const result = await api.get<{
+          agents: Array<{
+            name: string;
+            status: string;
+            isLocal: boolean;
+            daemonId: string;
+            daemonName: string;
+            daemonStatus: string;
+            machineId: string;
+            lastSeenAt: string | null;
+          }>;
+        }>(`/api/daemons/workspace/${activeCloudWorkspaceId}/agents`);
+
+        if (result.agents) {
+          // Convert API response to Agent format
+          // Agent status is 'online' when daemon is online (agent is connected to daemon)
+          const agents: Agent[] = result.agents.map((a) => ({
+            name: a.name,
+            status: a.daemonStatus === 'online' ? 'online' : 'offline',
+            isLocal: true,
+            daemonName: a.daemonName,
+            machineId: a.machineId,
+            lastSeen: a.lastSeenAt || undefined,
+          }));
+          setLocalAgents(agents);
+        }
+      } catch (err) {
+        console.error('Failed to fetch local agents:', err);
+        setLocalAgents([]);
+      }
+    };
+
+    fetchLocalAgents();
+    // Poll for updates every 15 seconds
+    const interval = setInterval(fetchLocalAgents, 15000);
     return () => clearInterval(interval);
   }, [cloudSession?.user, activeCloudWorkspaceId]);
 
@@ -280,19 +330,28 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
     }
   }, []);
 
-  // Merge AI agents with human users from the daemon so the sidebar and notifications include both
+  // Merge AI agents, human users, and local agents from linked daemons
   const combinedAgents = useMemo(() => {
-    const merged = [...(data?.agents ?? []), ...(data?.users ?? [])];
+    const merged = [...(data?.agents ?? []), ...(data?.users ?? []), ...localAgents];
     const byName = new Map<string, Agent>();
 
     for (const agent of merged) {
       const key = agent.name.toLowerCase();
       const existing = byName.get(key);
-      byName.set(key, existing ? { ...existing, ...agent } : agent);
+      // Local agents should preserve their isLocal flag when merging
+      if (existing) {
+        byName.set(key, {
+          ...existing,
+          ...agent,
+          isLocal: existing.isLocal || agent.isLocal,
+        });
+      } else {
+        byName.set(key, agent);
+      }
     }
 
     return Array.from(byName.values());
-  }, [data?.agents, data?.users]);
+  }, [data?.agents, data?.users, localAgents]);
 
   // Mark a DM conversation as seen (used for unread badges)
   const markDmSeen = useCallback((username: string) => {
@@ -1349,6 +1408,8 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         existingAgents={agents.map((a) => a.name)}
         isSpawning={isSpawning}
         error={spawnError}
+        isCloudMode={isCloudMode}
+        workspaceId={effectiveActiveWorkspaceId ?? undefined}
       />
 
       {/* Add Workspace Modal */}
