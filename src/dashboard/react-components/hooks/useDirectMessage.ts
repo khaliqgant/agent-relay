@@ -57,7 +57,9 @@ export function useDirectMessage({
     if (!currentHuman) return messages;
     // Include current user, the other human, and all participant agents
     const participants = new Set<string>([currentHuman.name, ...dmParticipantAgents]);
-    if (currentUserName) participants.add(currentUserName);
+    // Add current user to participants - use "Dashboard" as fallback for local mode
+    const effectiveUserName = currentUserName || 'Dashboard';
+    participants.add(effectiveUserName);
 
     console.log('[DM Filter] currentHuman:', currentHuman.name, 'currentUser:', currentUserName, 'agents:', dmParticipantAgents, 'participants:', Array.from(participants));
 
