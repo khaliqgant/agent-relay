@@ -8,12 +8,28 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Nango from '@nangohq/frontend';
 import { LogoIcon } from '../../react-components/Logo';
 
-export default function LoginPage() {
+// Loading fallback for Suspense
+function LoginLoading() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[#0a0a0f] via-[#0d1117] to-[#0a0a0f] flex flex-col items-center justify-center p-4">
+      <div className="relative z-10 w-full max-w-md">
+        <div className="flex flex-col items-center mb-8">
+          <LogoIcon size={48} withGlow={true} />
+          <h1 className="mt-4 text-2xl font-bold text-white">Agent Relay</h1>
+          <p className="mt-2 text-text-muted">Loading...</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Main login content that uses useSearchParams
+function LoginContent() {
   const searchParams = useSearchParams();
   const [isReady, setIsReady] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -251,5 +267,14 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Export page wrapped in Suspense for static generation
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginLoading />}>
+      <LoginContent />
+    </Suspense>
   );
 }
