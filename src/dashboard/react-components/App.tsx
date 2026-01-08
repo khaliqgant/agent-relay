@@ -1408,6 +1408,8 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
         existingAgents={agents.map((a) => a.name)}
         isSpawning={isSpawning}
         error={spawnError}
+        isCloudMode={isCloudMode}
+        workspaceId={effectiveActiveWorkspaceId ?? undefined}
       />
 
       {/* Add Workspace Modal */}
