@@ -71,6 +71,13 @@
       "when": 1736208003000,
       "tag": "0010_remove_credential_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1736294400000,
+      "tag": "0011_linked_daemon_workspace",
+      "breakpoints": true
     }
   ]
 }

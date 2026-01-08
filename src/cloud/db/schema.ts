@@ -190,6 +190,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   }),
   members: many(workspaceMembers),
   repositories: many(repositories),
+  linkedDaemons: many(linkedDaemons),
 }));
 
 // ============================================================================
@@ -323,6 +324,7 @@ export const repositoriesRelations = relations(repositories, ({ one }) => ({
 export const linkedDaemons = pgTable('linked_daemons', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  workspaceId: uuid('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
   name: varchar('name', { length: 255 }).notNull(),
   machineId: varchar('machine_id', { length: 255 }).notNull(),
   apiKeyHash: varchar('api_key_hash', { length: 255 }).notNull(),
@@ -336,6 +338,7 @@ export const linkedDaemons = pgTable('linked_daemons', {
 }, (table) => ({
   userMachineIdx: unique('linked_daemons_user_machine_unique').on(table.userId, table.machineId),
   userIdIdx: index('idx_linked_daemons_user_id').on(table.userId),
+  workspaceIdIdx: index('idx_linked_daemons_workspace_id').on(table.workspaceId),
   apiKeyHashIdx: index('idx_linked_daemons_api_key_hash').on(table.apiKeyHash),
   statusIdx: index('idx_linked_daemons_status').on(table.status),
 }));
@@ -344,6 +347,10 @@ export const linkedDaemonsRelations = relations(linkedDaemons, ({ one }) => ({
   user: one(users, {
     fields: [linkedDaemons.userId],
     references: [users.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [linkedDaemons.workspaceId],
+    references: [workspaces.id],
   }),
 }));
 
