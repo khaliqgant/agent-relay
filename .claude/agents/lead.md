@@ -169,6 +169,36 @@ This gives you real-time visibility into what agents are actually doing, bypassi
 - Unclear requirements from user
 - Blockers you can't resolve
 
+## Trajectory System (Work Documentation)
+
+Use Trail CLI to record your work trajectory for future agent context:
+
+**Start trajectory at task beginning:**
+```bash
+npx trail start "Brief task description"
+```
+
+**Record key decisions during work:**
+```bash
+npx trail decision "Chose approach X" --reasoning "For scalability"
+```
+
+**Complete with summary when done:**
+```bash
+npx trail complete --summary "What was accomplished" --confidence 0.85
+```
+
+**Configuration:**
+- Trajectories are stored centrally: `~/.config/agent-relay/trajectories/`
+- By default NOT tracked in git (privacy by default)
+- To opt-in to repo storage globally, create `~/.config/agent-relay/relay.json`:
+  ```json
+  {"trajectories": {"storeInRepo": true}}
+  ```
+- Location configurable via `AGENT_RELAY_CONFIG_DIR` environment variable
+
+See Trail documentation for full reference.
+
 ## Remember
 
 > **Your value is in COORDINATION, not IMPLEMENTATION.**
