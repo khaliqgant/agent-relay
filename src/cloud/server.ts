@@ -222,7 +222,8 @@ export async function createServer(): Promise<CloudServer> {
   const isWorkspaceProxyRoute = (path: string) => /^\/api\/workspaces\/[^/]+\/proxy\//.test(path);
   app.use((req: Request, res: Response, next: NextFunction) => {
     // Skip CSRF for webhook endpoints and workspace proxy routes
-    if (CSRF_EXEMPT_PATHS.some(path => req.path.startsWith(path)) || isWorkspaceProxyRoute(req.path)) {
+    const isExemptPath = CSRF_EXEMPT_PATHS.some(exemptPath => req.path.startsWith(exemptPath));
+    if (isExemptPath || isWorkspaceProxyRoute(req.path)) {
       return next();
     }
 
@@ -249,6 +250,12 @@ export async function createServer(): Promise<CloudServer> {
     // Skip CSRF for Bearer-authenticated endpoints (daemon API, test helpers)
     const authHeader = req.get('authorization');
     if (authHeader?.startsWith('Bearer ')) {
+      return next();
+    }
+
+    // Skip CSRF for admin API key authenticated requests
+    const adminSecret = req.get('x-admin-secret');
+    if (adminSecret) {
       return next();
     }
 
