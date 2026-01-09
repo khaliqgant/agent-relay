@@ -142,7 +142,10 @@ jobs:
 
           echo "🔄 Updating workspaces to ghcr.io/agentworkforce/relay-workspace:latest"
 
-          response=$(curl -s -w "\n%{http_code}" -X POST "${CLOUD_API_URL}/api/admin/workspaces/update-image" \
+          # Remove trailing slash from CLOUD_API_URL if present
+          API_URL="${CLOUD_API_URL%/}"
+
+          response=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/api/admin/workspaces/update-image" \
             -H "x-admin-secret: ${ADMIN_API_SECRET}" \
             -H "Content-Type: application/json" \
             -d '{"image": "ghcr.io/agentworkforce/relay-workspace:latest", "skipRestart": false}')
