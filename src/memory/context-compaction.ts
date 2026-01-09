@@ -142,12 +142,15 @@ export function estimateTokens(text: string): number {
   const whitespaceRatio = whitespaceChars / sampleSize;
 
   // Adjust chars per token based on content type
-  // Code: ~3 chars/token, prose: ~4 chars/token
+  // Heuristics based on tokenization patterns:
+  // - Base prose: ~4 chars/token (average English text)
+  // - Code: ~3 chars/token (more tokens due to symbols/structure)
+  // - High whitespace: ~3.5 chars/token (more word boundaries = more tokens)
   const baseCharsPerToken = 4;
-  const codeAdjustment = codeRatio * 1.5; // Code has more tokens
-  const whitespaceAdjustment = whitespaceRatio * 0.3; // Whitespace reduces tokens
+  const codeAdjustment = codeRatio * 1.5; // Code reduces chars/token (more tokens)
+  const whitespaceAdjustment = whitespaceRatio * 0.5; // Whitespace reduces chars/token (more word boundaries)
 
-  const charsPerToken = baseCharsPerToken - codeAdjustment + whitespaceAdjustment;
+  const charsPerToken = baseCharsPerToken - codeAdjustment - whitespaceAdjustment;
   const adjustedCharsPerToken = Math.max(2.5, Math.min(5, charsPerToken));
 
   return Math.ceil(length / adjustedCharsPerToken);

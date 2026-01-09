@@ -119,9 +119,14 @@ export function generateAgentKey(
     };
   }
 
-  // Ed25519 - would require native crypto (node:crypto Ed25519 support)
-  // For now, stub with HMAC-like approach
-  // In production, use: crypto.generateKeyPairSync('ed25519')
+  // WARNING: Ed25519 is NOT YET IMPLEMENTED
+  // This currently uses HMAC-SHA256 as a placeholder stub.
+  // DO NOT use ed25519 in production expecting asymmetric security guarantees.
+  // For actual Ed25519, use: crypto.generateKeyPairSync('ed25519')
+  console.warn(
+    '[signing] WARNING: Ed25519 is not yet implemented. ' +
+    'Using HMAC-SHA256 stub. Do not rely on asymmetric security properties.'
+  );
   const privateKey = randomBytes(32).toString('hex');
   const publicKey = createHash('sha256').update(privateKey).digest('hex');
 
@@ -556,13 +561,20 @@ export function extractSignature(
   const { _sig, ...rest } = envelope;
   const content = JSON.stringify(rest);
 
+  // Safely extract signer from envelope
+  const signer = typeof envelope.from === 'string' ? envelope.from : 'unknown';
+
+  // Validate algorithm value
+  const algorithm: 'hmac-sha256' | 'ed25519' =
+    sig.a === 'ed25519' ? 'ed25519' : 'hmac-sha256';
+
   return {
     content,
     signature: sig.s,
-    signer: (envelope.from as string) ?? 'unknown',
+    signer,
     signedAt: sig.t,
     keyId: sig.k,
-    algorithm: (sig.a as 'hmac-sha256' | 'ed25519') ?? 'hmac-sha256',
+    algorithm,
   };
 }
 
