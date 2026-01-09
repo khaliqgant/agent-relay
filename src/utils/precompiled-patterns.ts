@@ -15,7 +15,7 @@
 // Pattern Cache
 // =============================================================================
 
-interface CompiledPatterns {
+export interface CompiledPatterns {
   inline: RegExp;
   fencedInline: RegExp;
   escape: RegExp;
