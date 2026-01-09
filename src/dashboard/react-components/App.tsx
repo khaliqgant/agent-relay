@@ -675,10 +675,15 @@ export function App({ wsUrl, orchestratorUrl }: AppProps) {
 
   // Determine if local agents should be shown separately
   // Only show "Local" folder if we don't have bridge projects to merge them into
+  // But always include human users so they appear in the sidebar for DM
   const localAgentsForSidebar = useMemo(() => {
+    // Human users should always be shown in sidebar for DM access
+    const humanUsers = projectAgents.filter(a => a.isHuman);
+
     if (mergedProjects.length > 0) {
-      // Don't show local agents separately - they're merged into projects
-      return [];
+      // Don't show AI agents separately - they're merged into projects
+      // But keep human users visible for DM conversations
+      return humanUsers;
     }
     return projectAgents;
   }, [mergedProjects, projectAgents]);

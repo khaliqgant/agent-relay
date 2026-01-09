@@ -446,3 +446,151 @@ daemonsRouter.get('/messages', requireDaemonAuth as any, async (req: Request, re
     res.status(500).json({ error: 'Failed to fetch messages' });
   }
 });
+
+// ============================================================================
+// Message Sync API (sync daemon SQLite messages to cloud PostgreSQL)
+// ============================================================================
+
+/**
+ * Sync message input from daemon
+ */
+interface SyncMessageInput {
+  id: string;           // Original message ID from daemon SQLite
+  ts: number;           // Timestamp in ms
+  from: string;         // From agent name
+  to: string;           // To agent name or '*' for broadcast
+  body: string;         // Message body
+  kind?: string;        // message, action, state, thinking
+  topic?: string;
+  thread?: string;
+  channel?: string;
+  is_broadcast?: boolean;
+  is_urgent?: boolean;
+  data?: Record<string, unknown>;
+  payload_meta?: {
+    requires_ack?: boolean;
+    ttl_ms?: number;
+    importance?: number;
+    replyTo?: string;
+  };
+}
+
+/**
+ * POST /api/daemons/messages/sync
+ * Sync messages from daemon to cloud storage
+ *
+ * Accepts batches of messages and stores them in agent_messages table.
+ * Uses upsert logic to handle duplicates (based on workspace_id + original_id).
+ *
+ * Request body:
+ * {
+ *   messages: SyncMessageInput[]
+ * }
+ *
+ * Response:
+ * {
+ *   success: true,
+ *   synced: number,    // Count of messages synced
+ *   duplicates: number // Count of messages skipped (already existed)
+ * }
+ */
+daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Request, res: Response) => {
+  const daemon = (req as any).daemon;
+  const { messages } = req.body as { messages: SyncMessageInput[] };
+
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array is required' });
+  }
+
+  if (messages.length === 0) {
+    return res.json({ success: true, synced: 0, duplicates: 0 });
+  }
+
+  // Limit batch size to prevent abuse
+  if (messages.length > 500) {
+    return res.status(400).json({ error: 'Maximum batch size is 500 messages' });
+  }
+
+  // Require workspace to be linked
+  if (!daemon.workspaceId) {
+    return res.status(400).json({
+      error: 'Daemon must be linked to a workspace to sync messages. Re-link with a workspace ID.',
+    });
+  }
+
+  try {
+    // Get user plan to determine retention policy
+    const user = await db.users.findById(daemon.userId);
+    const plan = user?.plan || 'free';
+
+    // Calculate expires_at based on plan
+    let expiresAt: Date | null = null;
+    if (plan === 'free') {
+      expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    } else if (plan === 'pro') {
+      expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000); // 90 days
+    }
+    // Enterprise: null (never expires)
+
+    // Transform to NewAgentMessage format
+    const dbMessages = messages.map((msg) => ({
+      workspaceId: daemon.workspaceId,
+      daemonId: daemon.id,
+      originalId: msg.id,
+      fromAgent: msg.from,
+      toAgent: msg.to,
+      body: msg.body,
+      kind: msg.kind || 'message',
+      topic: msg.topic || null,
+      thread: msg.thread || null,
+      channel: msg.channel || null,
+      isBroadcast: msg.is_broadcast || msg.to === '*',
+      isUrgent: msg.is_urgent || false,
+      data: msg.data || null,
+      payloadMeta: msg.payload_meta || null,
+      messageTs: new Date(msg.ts),
+      expiresAt,
+    }));
+
+    // Insert with onConflictDoNothing for deduplication
+    const inserted = await db.agentMessages.createMany(dbMessages);
+
+    const synced = inserted.length;
+    const duplicates = messages.length - synced;
+
+    console.log(`[message-sync] Synced ${synced} messages for daemon ${daemon.id}, ${duplicates} duplicates skipped`);
+
+    res.json({
+      success: true,
+      synced,
+      duplicates,
+    });
+  } catch (error) {
+    console.error('Error syncing messages:', error);
+    res.status(500).json({ error: 'Failed to sync messages' });
+  }
+});
+
+/**
+ * GET /api/daemons/messages/stats
+ * Get message sync statistics for this daemon's workspace
+ */
+daemonsRouter.get('/messages/stats', requireDaemonAuth as any, async (req: Request, res: Response) => {
+  const daemon = (req as any).daemon;
+
+  if (!daemon.workspaceId) {
+    return res.status(400).json({ error: 'Daemon must be linked to a workspace' });
+  }
+
+  try {
+    const count = await db.agentMessages.countByWorkspace(daemon.workspaceId);
+
+    res.json({
+      workspaceId: daemon.workspaceId,
+      messageCount: count,
+    });
+  } catch (error) {
+    console.error('Error fetching message stats:', error);
+    res.status(500).json({ error: 'Failed to fetch message stats' });
+  }
+});
