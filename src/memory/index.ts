@@ -30,3 +30,4 @@ export * from './adapters/index.js';
 export { createMemoryAdapter, getMemoryConfigFromEnv } from './factory.js';
 export { createMemoryService } from './service.js';
 export { createMemoryHooks, getMemoryHooks } from './memory-hooks.js';
+export * from './context-compaction.js';
