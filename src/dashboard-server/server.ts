@@ -2400,6 +2400,36 @@ export async function startDashboard(
     });
   });
 
+  /**
+   * GET /keep-alive - Keep-alive endpoint for Fly.io idle prevention
+   * Called by cloud server when workspace has active agents running.
+   * This inbound request counts as activity for Fly.io's request-based
+   * concurrency tracking, preventing the machine from being idled.
+   */
+  app.get('/keep-alive', (req, res) => {
+    // Count online agents (seen within last 30 seconds)
+    let activeAgents = 0;
+    const agentsPath = path.join(teamDir, 'agents.json');
+    if (fs.existsSync(agentsPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+        const thirtySecondsAgo = Date.now() - 30 * 1000;
+        activeAgents = (data.agents || []).filter((a: { lastSeen?: string }) => {
+          if (!a.lastSeen) return false;
+          return new Date(a.lastSeen).getTime() > thirtySecondsAgo;
+        }).length;
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
+    res.json({
+      ok: true,
+      activeAgents,
+      timestamp: Date.now(),
+    });
+  });
+
   // ===== CLI Auth API (for workspace-based provider authentication) =====
 
   /**
