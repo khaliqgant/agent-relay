@@ -15,6 +15,7 @@ import * as os from 'os';
 import { randomBytes } from 'crypto';
 import { createLogger } from '../utils/logger.js';
 import type { StorageAdapter, StoredMessage } from '../storage/adapter.js';
+import { SyncQueue, type SyncQueueConfig, type SyncQueueStats } from './sync-queue.js';
 
 const log = createLogger('cloud-sync');
 
@@ -27,6 +28,12 @@ export interface CloudSyncConfig {
   messageSyncEnabled?: boolean;
   /** Batch size for message sync (default: 100) */
   messageSyncBatchSize?: number;
+
+  // Optimized sync queue options
+  /** Use optimized sync queue with compression and spillover (default: true) */
+  useOptimizedSync?: boolean;
+  /** Sync queue configuration */
+  syncQueue?: Partial<SyncQueueConfig>;
 }
 
 export interface RemoteAgent {
@@ -60,6 +67,9 @@ export class CloudSyncService extends EventEmitter {
   private lastMessageSyncTs: number = 0;
   private messageSyncInProgress = false;
 
+  // Optimized sync queue
+  private syncQueue: SyncQueue | null = null;
+
   constructor(config: Partial<CloudSyncConfig> = {}) {
     super();
 
@@ -68,10 +78,21 @@ export class CloudSyncService extends EventEmitter {
       cloudUrl: config.cloudUrl || process.env.AGENT_RELAY_CLOUD_URL || 'https://agent-relay.com',
       heartbeatInterval: config.heartbeatInterval || 30000, // 30 seconds
       enabled: config.enabled ?? true,
+      useOptimizedSync: config.useOptimizedSync ?? true,
+      syncQueue: config.syncQueue,
     };
 
     // Generate or load machine ID for consistent identification
     this.machineId = this.getMachineId();
+
+    // Initialize optimized sync queue if enabled and API key is available
+    if (this.config.useOptimizedSync && this.config.apiKey) {
+      this.syncQueue = new SyncQueue({
+        cloudUrl: this.config.cloudUrl,
+        apiKey: this.config.apiKey,
+        ...this.config.syncQueue,
+      });
+    }
   }
 
   /**
@@ -113,6 +134,14 @@ export class CloudSyncService extends EventEmitter {
 
     log.info('Starting cloud sync', { url: this.config.cloudUrl });
 
+    // Recover any spilled messages from previous runs
+    if (this.syncQueue) {
+      const { recovered, failed } = await this.syncQueue.recoverSpilledMessages();
+      if (recovered > 0 || failed > 0) {
+        log.info('Recovered spilled messages', { recovered, failed });
+      }
+    }
+
     // Initial heartbeat
     await this.sendHeartbeat();
 
@@ -129,11 +158,17 @@ export class CloudSyncService extends EventEmitter {
   /**
    * Stop the cloud sync service
    */
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
     }
+
+    // Gracefully close sync queue (flushes pending messages)
+    if (this.syncQueue) {
+      await this.syncQueue.close();
+    }
+
     this.connected = false;
     this.emit('disconnected');
   }
@@ -362,6 +397,38 @@ export class CloudSyncService extends EventEmitter {
   setStorage(storage: StorageAdapter): void {
     this.storage = storage;
     log.info('Storage adapter configured for message sync');
+  }
+
+  /**
+   * Queue a single message for sync to cloud.
+   * Use this for real-time sync as messages are created.
+   * Falls back to batch sync if optimized queue is not enabled.
+   */
+  async queueMessageForSync(message: StoredMessage): Promise<void> {
+    if (!this.connected || this.config.messageSyncEnabled === false) {
+      return;
+    }
+
+    if (this.syncQueue) {
+      await this.syncQueue.enqueue(message);
+    }
+    // If no sync queue, messages will be synced on next heartbeat via syncMessagesToCloud
+  }
+
+  /**
+   * Get sync queue statistics (if optimized sync is enabled).
+   */
+  getSyncQueueStats(): SyncQueueStats | null {
+    return this.syncQueue?.getStats() ?? null;
+  }
+
+  /**
+   * Force flush the sync queue.
+   */
+  async flushSyncQueue(): Promise<void> {
+    if (this.syncQueue) {
+      await this.syncQueue.flush();
+    }
   }
 
   /**
