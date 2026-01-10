@@ -1160,6 +1160,7 @@ class FlyProvisioner implements ComputeProvisioner {
 
   /**
    * Check if workspace has active agents by querying the daemon
+   * Retries up to 3 times with backoff to handle machines that are starting up
    */
   async checkActiveAgents(workspace: Workspace): Promise<{
     hasActiveAgents: boolean;
@@ -1171,72 +1172,88 @@ class FlyProvisioner implements ComputeProvisioner {
       return { hasActiveAgents: false, agentCount: 0, agents: [], verified: true };
     }
 
-    try {
-      // Use internal Fly network URL if available (more reliable)
-      const appName = `ar-${workspace.id.substring(0, 8)}`;
-      const isOnFly = !!process.env.FLY_APP_NAME;
-      const baseUrl = isOnFly
-        ? `http://${appName}.internal:3888`
-        : workspace.publicUrl;
+    // Use internal Fly network URL if available (more reliable)
+    const appName = `ar-${workspace.id.substring(0, 8)}`;
+    const isOnFly = !!process.env.FLY_APP_NAME;
+    const baseUrl = isOnFly
+      ? `http://${appName}.internal:3888`
+      : workspace.publicUrl;
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10_000);
+    const maxRetries = 3;
+    const retryDelays = [2000, 4000, 6000]; // 2s, 4s, 6s backoff
 
-      const response = await fetch(`${baseUrl}/api/agents`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-        signal: controller.signal,
-      });
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
 
-      clearTimeout(timer);
+        const response = await fetch(`${baseUrl}/api/agents`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+          signal: controller.signal,
+        });
 
-      if (!response.ok) {
-        console.warn(`[fly] Failed to check agents for ${workspace.id.substring(0, 8)}: HTTP ${response.status}`);
-        return { hasActiveAgents: false, agentCount: 0, agents: [], verified: false };
-      }
+        clearTimeout(timer);
 
-      const data = await response.json() as {
-        agents: Array<{ name: string; status: string; activityState?: string }>;
-      };
+        if (!response.ok) {
+          console.warn(`[fly] Failed to check agents for ${workspace.id.substring(0, 8)}: HTTP ${response.status} (attempt ${attempt + 1}/${maxRetries})`);
+          if (attempt < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+            continue;
+          }
+          return { hasActiveAgents: false, agentCount: 0, agents: [], verified: false };
+        }
 
-      const agents = data.agents || [];
+        const data = await response.json() as {
+          agents: Array<{ name: string; status: string; activityState?: string }>;
+        };
 
-      // Diagnostic logging: capture raw agent data before filtering
-      if (agents.length > 0) {
-        console.log(`[fly] Workspace ${workspace.id.substring(0, 8)} raw agent data:`,
-          agents.map(a => ({ name: a.name, status: a.status, activityState: a.activityState }))
+        const agents = data.agents || [];
+
+        // Diagnostic logging: capture raw agent data before filtering
+        if (agents.length > 0) {
+          console.log(`[fly] Workspace ${workspace.id.substring(0, 8)} raw agent data:`,
+            agents.map(a => ({ name: a.name, status: a.status, activityState: a.activityState }))
+          );
+        }
+
+        // Consider agents with 'active' or 'idle' activity state as active
+        // 'disconnected' agents are not active
+        const activeAgents = agents.filter(a =>
+          a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle'
         );
+
+        // Log filtering results for diagnostics
+        if (agents.length > 0 && activeAgents.length !== agents.length) {
+          const filteredOut = agents.filter(a =>
+            !(a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle')
+          );
+          console.log(`[fly] Workspace ${workspace.id.substring(0, 8)} filtered out agents:`,
+            filteredOut.map(a => ({ name: a.name, status: a.status, activityState: a.activityState }))
+          );
+        }
+
+        return {
+          hasActiveAgents: activeAgents.length > 0,
+          agentCount: activeAgents.length,
+          agents: agents.map(a => ({ name: a.name, status: a.status || a.activityState || 'unknown' })),
+          verified: true,
+        };
+      } catch (error) {
+        // Workspace might be stopped or unreachable - retry with backoff
+        console.warn(`[fly] Could not reach workspace ${workspace.id.substring(0, 8)} (attempt ${attempt + 1}/${maxRetries}):`, (error as Error).message);
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+          continue;
+        }
       }
-
-      // Consider agents with 'active' or 'idle' activity state as active
-      // 'disconnected' agents are not active
-      const activeAgents = agents.filter(a =>
-        a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle'
-      );
-
-      // Log filtering results for diagnostics
-      if (agents.length > 0 && activeAgents.length !== agents.length) {
-        const filteredOut = agents.filter(a =>
-          !(a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle')
-        );
-        console.log(`[fly] Workspace ${workspace.id.substring(0, 8)} filtered out agents:`,
-          filteredOut.map(a => ({ name: a.name, status: a.status, activityState: a.activityState }))
-        );
-      }
-
-      return {
-        hasActiveAgents: activeAgents.length > 0,
-        agentCount: activeAgents.length,
-        agents: agents.map(a => ({ name: a.name, status: a.status || a.activityState || 'unknown' })),
-        verified: true,
-      };
-    } catch (error) {
-      // Workspace might be stopped or unreachable - cannot verify agent status
-      console.warn(`[fly] Could not reach workspace ${workspace.id.substring(0, 8)} to check agents:`, (error as Error).message);
-      return { hasActiveAgents: false, agentCount: 0, agents: [], verified: false };
     }
+
+    // All retries exhausted
+    console.warn(`[fly] Workspace ${workspace.id.substring(0, 8)} unreachable after ${maxRetries} attempts`);
+    return { hasActiveAgents: false, agentCount: 0, agents: [], verified: false };
   }
 
   /**
