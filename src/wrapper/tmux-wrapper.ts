@@ -50,6 +50,7 @@ import {
   INJECTION_CONSTANTS,
   CLI_QUIRKS,
 } from './shared.js';
+import { getTmuxPanePid } from './idle-detector.js';
 
 const execAsync = promisify(exec);
 
@@ -450,11 +451,21 @@ export class TmuxWrapper extends BaseWrapper {
     // Initialize continuity and get/create agentId
     this.initializeAgentId();
 
-    // Inject instructions for the agent (after a delay to let CLI initialize)
-    setTimeout(() => this.injectInstructions(), 3000);
-
     // Start background polling (silent - no stdout writes)
     this.startSilentPolling();
+
+    // Initialize idle detector with the tmux pane PID for process state inspection
+    this.initializeIdleDetectorPid();
+
+    // Wait for agent to be ready, then inject instructions
+    // This replaces the fixed 3-second delay with actual readiness detection
+    this.waitForAgentReady().then(() => {
+      this.injectInstructions();
+    }).catch(err => {
+      this.logStderr(`Failed to wait for agent ready: ${err.message}`, true);
+      // Fall back to injecting after a delay
+      setTimeout(() => this.injectInstructions(), 3000);
+    });
 
     // Attach user to tmux session
     // This takes over stdin/stdout - user sees the real terminal
@@ -511,6 +522,42 @@ export class TmuxWrapper extends BaseWrapper {
       this.agentId = ledger.agentId;
     } catch (err: any) {
       this.logStderr(`Failed to initialize agent ID: ${err.message}`, true);
+    }
+  }
+
+  /**
+   * Initialize the idle detector with the tmux pane PID.
+   * This enables process state inspection on Linux for more reliable idle detection.
+   */
+  private async initializeIdleDetectorPid(): Promise<void> {
+    try {
+      const pid = await getTmuxPanePid(this.tmuxPath, this.sessionName);
+      if (pid) {
+        this.setIdleDetectorPid(pid);
+        this.logStderr(`Idle detector initialized with PID ${pid}`);
+      } else {
+        this.logStderr('Could not get pane PID for idle detection (will use output analysis)');
+      }
+    } catch (err: any) {
+      this.logStderr(`Failed to initialize idle detector PID: ${err.message}`);
+    }
+  }
+
+  /**
+   * Wait for the agent to be ready for input.
+   * Uses idle detection instead of a fixed delay.
+   */
+  private async waitForAgentReady(): Promise<void> {
+    // Minimum wait to ensure the CLI process has started
+    await sleep(500);
+
+    // Wait for agent to become idle (CLI fully initialized)
+    const result = await this.waitForIdleState(10000, 200);
+
+    if (result.isIdle) {
+      this.logStderr(`Agent ready (confidence: ${(result.confidence * 100).toFixed(0)}%)`);
+    } else {
+      this.logStderr('Agent readiness timeout, proceeding anyway');
     }
   }
 
@@ -720,6 +767,11 @@ export class TmuxWrapper extends BaseWrapper {
       if (stdout.length !== this.processedOutputLength) {
         this.lastOutputTime = Date.now();
         this.markActivity();
+
+        // Feed new output to idle detector for more robust idle detection
+        const newOutput = stdout.substring(this.processedOutputLength);
+        this.feedIdleDetectorOutput(newOutput);
+
         this.processedOutputLength = stdout.length;
 
         // Stream new output to daemon for dashboard log viewing
@@ -1369,19 +1421,28 @@ export class TmuxWrapper extends BaseWrapper {
   }
 
   /**
-   * Check if we should inject a message
+   * Check if we should inject a message.
+   * Uses UniversalIdleDetector (from BaseWrapper) for robust cross-CLI idle detection.
    */
   private checkForInjectionOpportunity(): void {
     if (this.messageQueue.length === 0) return;
     if (this.isInjecting) return;
     if (!this.running) return;
 
-    // Wait for output to settle (agent might be busy)
-    const timeSinceOutput = Date.now() - this.lastOutputTime;
-    if (timeSinceOutput < (this.config.idleBeforeInjectMs ?? 1500)) {
+    // Use universal idle detector for more reliable detection (inherited from BaseWrapper)
+    const idleResult = this.checkIdleForInjection();
+
+    if (!idleResult.isIdle) {
+      // Not idle yet, retry later
       const retryMs = this.config.injectRetryMs ?? 500;
       setTimeout(() => this.checkForInjectionOpportunity(), retryMs);
       return;
+    }
+
+    // Log detection method in debug mode
+    if (this.config.debug && idleResult.signals.length > 0) {
+      const signalInfo = idleResult.signals.map(s => `${s.source}:${(s.confidence * 100).toFixed(0)}%`).join(', ');
+      this.logStderr(`Idle detected (${signalInfo})`);
     }
 
     this.injectNextMessage();
