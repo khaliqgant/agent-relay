@@ -32,4 +32,25 @@ export {
   getMemoryHooks,
   InMemoryAdapter,
   SupermemoryAdapter,
+  // Context compaction
+  ContextCompactor,
+  createContextCompactor,
+  estimateTokens,
+  estimateContextTokens,
+  type CompactionConfig,
+  type CompactionResult,
 } from './memory/index.js';
+
+// Dead Letter Queue adapters
+export {
+  type DLQStorageAdapter,
+  type DeadLetter,
+  type DLQConfig,
+  type DLQStats,
+  type DLQQuery,
+  SQLiteDLQAdapter,
+  PostgresDLQAdapter,
+  InMemoryDLQAdapter,
+  createDLQAdapter,
+  DEFAULT_DLQ_CONFIG,
+} from './storage/dlq-adapter.js';
