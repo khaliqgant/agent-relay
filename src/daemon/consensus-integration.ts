@@ -56,6 +56,8 @@ export interface CloudSyncConfig {
   url?: string;
   /** Daemon API key for authentication (defaults to AGENT_RELAY_API_KEY) */
   apiKey?: string;
+  /** Workspace ID for self-hosted setups (optional - cloud can derive from API key) */
+  workspaceId?: string;
 }
 
 export interface ConsensusIntegrationConfig {
@@ -278,8 +280,9 @@ export class ConsensusIntegration {
 
   /**
    * Sync a proposal to the cloud dashboard.
-   * Uses AGENT_RELAY_API_KEY and AGENT_RELAY_CLOUD_URL env vars.
-   * Workspace is derived from the linked daemon record on the cloud side.
+   *
+   * For self-hosted: Set cloudSync.url to your cloud URL
+   * For remote cloud: Uses AGENT_RELAY_API_KEY env var
    */
   private async syncToCloud(
     proposal: Proposal,
@@ -287,26 +290,32 @@ export class ConsensusIntegration {
   ): Promise<void> {
     // Get cloud sync settings with defaults from env vars
     const cloudUrl = this.config.cloudSync?.url
-      || process.env.AGENT_RELAY_CLOUD_URL
-      || 'https://agent-relay.com';
+      || process.env.AGENT_RELAY_CLOUD_URL;
     const apiKey = this.config.cloudSync?.apiKey
       || process.env.AGENT_RELAY_API_KEY;
+    const workspaceId = this.config.cloudSync?.workspaceId
+      || process.env.AGENT_RELAY_WORKSPACE_ID;
 
-    // Skip if no API key (not linked to cloud)
-    if (!apiKey) {
+    // Skip if no cloud URL configured
+    if (!cloudUrl) {
       return;
     }
 
     try {
-      // Use the daemon-focused endpoint - workspace is derived from API key
       const url = `${cloudUrl}/api/daemons/consensus/sync`;
+
+      // Build headers - API key is optional for self-hosted
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({ proposal, event }),
+        headers,
+        body: JSON.stringify({ proposal, event, workspaceId }),
       });
 
       if (!response.ok) {

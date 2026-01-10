@@ -211,51 +211,59 @@ consensusRouter.get(
  * This endpoint receives state updates from the daemon and stores them
  * so the dashboard can display agent consensus activity.
  *
- * Authentication: Uses daemon API key (Authorization: Bearer ar_live_xxx)
- * Workspace is derived from the linked daemon's record.
+ * Authentication options (in order of precedence):
+ * 1. Daemon API key (Authorization: Bearer ar_live_xxx) - workspace from daemon record
+ * 2. Workspace ID in request body - for self-hosted setups
+ * 3. Default workspace "local" - for simple local development
  */
 consensusRouter.post(
   '/daemons/consensus/sync',
   async (req: Request, res: Response) => {
     try {
-      // Authenticate daemon via API key
-      const authHeader = req.headers.authorization;
-
-      if (!authHeader?.startsWith('Bearer ar_live_')) {
-        return res.status(401).json({ error: 'Unauthorized - daemon API key required' });
-      }
-
-      const apiKey = authHeader.replace('Bearer ', '');
-      const apiKeyHash = hashApiKey(apiKey);
-      const { db } = await import('../db/index.js');
-      const daemon = await db.linkedDaemons.findByApiKeyHash(apiKeyHash);
-
-      if (!daemon) {
-        return res.status(401).json({ error: 'Invalid API key' });
-      }
-
-      if (!daemon.workspaceId) {
-        return res.status(400).json({ error: 'Daemon not associated with a workspace' });
-      }
-
-      const { proposal, event } = req.body as {
+      const { proposal, event, workspaceId: bodyWorkspaceId } = req.body as {
         proposal: Proposal;
         event: 'created' | 'voted' | 'resolved' | 'expired' | 'cancelled';
+        workspaceId?: string;
       };
 
       if (!proposal || !event) {
         return res.status(400).json({ error: 'Missing proposal or event' });
       }
 
-      // Store/update the proposal using workspace from daemon record
-      const proposalsMap = getProposalsForWorkspace(daemon.workspaceId);
+      let workspaceId: string;
+
+      // Try to authenticate via API key first
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith('Bearer ar_live_')) {
+        const apiKey = authHeader.replace('Bearer ', '');
+        const apiKeyHash = hashApiKey(apiKey);
+        const { db } = await import('../db/index.js');
+        const daemon = await db.linkedDaemons.findByApiKeyHash(apiKeyHash);
+
+        if (daemon?.workspaceId) {
+          workspaceId = daemon.workspaceId;
+        } else if (bodyWorkspaceId) {
+          workspaceId = bodyWorkspaceId;
+        } else {
+          return res.status(400).json({ error: 'Daemon not associated with a workspace' });
+        }
+      } else if (bodyWorkspaceId) {
+        // Self-hosted: workspace specified in body
+        workspaceId = bodyWorkspaceId;
+      } else {
+        // Default for simple local setups
+        workspaceId = 'local';
+      }
+
+      // Store/update the proposal
+      const proposalsMap = getProposalsForWorkspace(workspaceId);
       proposalsMap.set(proposal.id, proposal);
 
       console.log(
-        `[consensus] Synced ${event} for proposal "${proposal.title}" (${proposal.id}) in workspace ${daemon.workspaceId}`
+        `[consensus] Synced ${event} for proposal "${proposal.title}" (${proposal.id}) in workspace ${workspaceId}`
       );
 
-      res.json({ success: true, workspaceId: daemon.workspaceId });
+      res.json({ success: true, workspaceId });
     } catch (error) {
       console.error('Error syncing consensus:', error);
       res.status(500).json({ error: 'Failed to sync consensus' });
