@@ -15,3 +15,4 @@ export * from './agent-manager.js';
 export * from './enhanced-features.js';
 export * from './agent-signing.js';
 export * from './consensus.js';
+export * from './consensus-integration.js';

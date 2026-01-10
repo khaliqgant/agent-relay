@@ -47,6 +47,7 @@ import { nangoAuthRouter } from './api/nango-auth.js';
 import { gitRouter } from './api/git.js';
 import { codexAuthHelperRouter } from './api/codex-auth-helper.js';
 import { adminRouter } from './api/admin.js';
+import { consensusRouter } from './api/consensus.js';
 import { db } from './db/index.js';
 import { validateSshSecurityConfig } from './services/ssh-security.js';
 
@@ -299,6 +300,7 @@ export async function createServer(): Promise<CloudServer> {
   // --- Routes with session auth ---
   app.use('/api/providers', providersRouter);
   app.use('/api/workspaces', workspacesRouter);
+  app.use('/api', consensusRouter);                      // Consensus API (nested under /api/workspaces/:id/consensus)
   app.use('/api/repos', reposRouter);
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/billing', billingRouter);

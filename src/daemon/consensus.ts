@@ -733,3 +733,127 @@ export function formatResultMessage(proposal: Proposal, result: ConsensusResult)
 
   return lines.join('\n');
 }
+
+// =============================================================================
+// Proposal Command Parsing
+// =============================================================================
+
+export interface ParsedProposalCommand {
+  title: string;
+  description: string;
+  participants: string[];
+  consensusType: ConsensusType;
+  timeoutMs?: number;
+  quorum?: number;
+  threshold?: number;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Parse a PROPOSE command from a relay message.
+ *
+ * Format:
+ * ```
+ * PROPOSE: Title of the proposal
+ * TYPE: majority|supermajority|unanimous|weighted|quorum
+ * PARTICIPANTS: Agent1, Agent2, Agent3
+ * DESCRIPTION: Detailed description of what is being proposed
+ * TIMEOUT: 3600000 (optional, in milliseconds)
+ * QUORUM: 3 (optional, minimum votes)
+ * THRESHOLD: 0.67 (optional, for supermajority)
+ * ```
+ */
+export function parseProposalCommand(message: string): ParsedProposalCommand | null {
+  // Check if message starts with PROPOSE:
+  if (!message.trim().startsWith('PROPOSE:')) {
+    return null;
+  }
+
+  const lines = message.split('\n').map(line => line.trim());
+
+  // Parse each field
+  let title: string | undefined;
+  let description: string | undefined;
+  let participants: string[] | undefined;
+  let consensusType: ConsensusType = 'majority';
+  let timeoutMs: number | undefined;
+  let quorum: number | undefined;
+  let threshold: number | undefined;
+
+  let inDescription = false;
+  const descriptionLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith('PROPOSE:')) {
+      title = line.substring('PROPOSE:'.length).trim();
+      inDescription = false;
+    } else if (line.startsWith('TYPE:')) {
+      const type = line.substring('TYPE:'.length).trim().toLowerCase();
+      if (['majority', 'supermajority', 'unanimous', 'weighted', 'quorum'].includes(type)) {
+        consensusType = type as ConsensusType;
+      }
+      inDescription = false;
+    } else if (line.startsWith('PARTICIPANTS:')) {
+      const participantStr = line.substring('PARTICIPANTS:'.length).trim();
+      participants = participantStr.split(',').map(p => p.trim()).filter(p => p.length > 0);
+      inDescription = false;
+    } else if (line.startsWith('DESCRIPTION:')) {
+      description = line.substring('DESCRIPTION:'.length).trim();
+      inDescription = true;
+    } else if (line.startsWith('TIMEOUT:')) {
+      const val = parseInt(line.substring('TIMEOUT:'.length).trim(), 10);
+      if (!isNaN(val) && val > 0) {
+        timeoutMs = val;
+      }
+      inDescription = false;
+    } else if (line.startsWith('QUORUM:')) {
+      const val = parseInt(line.substring('QUORUM:'.length).trim(), 10);
+      if (!isNaN(val) && val > 0) {
+        quorum = val;
+      }
+      inDescription = false;
+    } else if (line.startsWith('THRESHOLD:')) {
+      const val = parseFloat(line.substring('THRESHOLD:'.length).trim());
+      if (!isNaN(val) && val > 0 && val <= 1) {
+        threshold = val;
+      }
+      inDescription = false;
+    } else if (inDescription && line.length > 0) {
+      // Continue collecting description lines
+      descriptionLines.push(line);
+    }
+  }
+
+  // Append continuation lines to description
+  if (descriptionLines.length > 0 && description) {
+    description = description + '\n' + descriptionLines.join('\n');
+  }
+
+  // Validate required fields
+  if (!title || !participants || participants.length === 0) {
+    return null;
+  }
+
+  // Default description if not provided
+  if (!description) {
+    description = title;
+  }
+
+  return {
+    title,
+    description,
+    participants,
+    consensusType,
+    timeoutMs,
+    quorum,
+    threshold,
+  };
+}
+
+/**
+ * Check if a message is a consensus command (PROPOSE or VOTE).
+ */
+export function isConsensusCommand(message: string): boolean {
+  const trimmed = message.trim();
+  return trimmed.startsWith('PROPOSE:') || /^VOTE\s+/i.test(trimmed);
+}

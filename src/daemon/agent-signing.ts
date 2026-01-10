@@ -12,7 +12,17 @@
  * - Agent identity attestation
  */
 
-import { createHmac, randomBytes, createHash } from 'node:crypto';
+import {
+  createHmac,
+  randomBytes,
+  createHash,
+  generateKeyPairSync,
+  sign,
+  verify,
+  createPrivateKey,
+  createPublicKey,
+  KeyObject,
+} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -119,21 +129,23 @@ export function generateAgentKey(
     };
   }
 
-  // WARNING: Ed25519 is NOT YET IMPLEMENTED
-  // This currently uses HMAC-SHA256 as a placeholder stub.
-  // DO NOT use ed25519 in production expecting asymmetric security guarantees.
-  // For actual Ed25519, use: crypto.generateKeyPairSync('ed25519')
-  console.warn(
-    '[signing] WARNING: Ed25519 is not yet implemented. ' +
-    'Using HMAC-SHA256 stub. Do not rely on asymmetric security properties.'
-  );
-  const privateKey = randomBytes(32).toString('hex');
-  const publicKey = createHash('sha256').update(privateKey).digest('hex');
+  // Ed25519 asymmetric key generation
+  const { publicKey: pubKeyObj, privateKey: privKeyObj } = generateKeyPairSync('ed25519');
+
+  // Export keys in PEM format for storage
+  const privateKeyPem = privKeyObj.export({ type: 'pkcs8', format: 'pem' }) as string;
+  const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }) as string;
+
+  // Create a key ID from the public key hash (for rotation tracking)
+  const keyId = createHash('sha256')
+    .update(publicKeyPem)
+    .digest('hex')
+    .substring(0, 16);
 
   return {
     agentName,
-    publicKey,
-    privateKey,
+    publicKey: publicKeyPem,
+    privateKey: privateKeyPem,
     createdAt: now,
     expiresAt: expiresInHours ? now + expiresInHours * 3600000 : undefined,
     algorithm,
@@ -215,17 +227,23 @@ export function signMessage(
   const dataToSign = `${key.agentName}:${signedAt}:${content}`;
 
   let signature: string;
+  let keyId: string;
 
   if (key.algorithm === 'hmac-sha256') {
     signature = createHmac('sha256', key.privateKey)
       .update(dataToSign)
       .digest('hex');
+    keyId = key.publicKey; // For HMAC, publicKey is the key ID
   } else {
-    // Ed25519 - stub implementation
-    // In production, use crypto.sign('ed25519', ...)
-    signature = createHmac('sha256', key.privateKey)
-      .update(dataToSign)
-      .digest('hex');
+    // Ed25519 signing using Node.js native crypto
+    const privateKeyObj = createPrivateKey(key.privateKey);
+    const signatureBuffer = sign(null, Buffer.from(dataToSign), privateKeyObj);
+    signature = signatureBuffer.toString('hex');
+    // For Ed25519, derive key ID from public key hash
+    keyId = createHash('sha256')
+      .update(key.publicKey)
+      .digest('hex')
+      .substring(0, 16);
   }
 
   return {
@@ -233,7 +251,7 @@ export function signMessage(
     signature,
     signer: key.agentName,
     signedAt,
-    keyId: key.publicKey,
+    keyId,
     algorithm: key.algorithm,
   };
 }
@@ -287,11 +305,15 @@ export function verifyMessage(
     };
   }
 
-  // Check key ID
-  if (signed.keyId !== key.publicKey) {
+  // Check key ID for HMAC, or derive it for Ed25519
+  const expectedKeyId = key.algorithm === 'hmac-sha256'
+    ? key.publicKey
+    : createHash('sha256').update(key.publicKey).digest('hex').substring(0, 16);
+
+  if (signed.keyId !== expectedKeyId) {
     return {
       valid: false,
-      error: `Key ID mismatch: expected ${key.publicKey}, got ${signed.keyId}`,
+      error: `Key ID mismatch: expected ${expectedKeyId}, got ${signed.keyId}`,
     };
   }
 
@@ -304,25 +326,100 @@ export function verifyMessage(
   }
 
   // Verify signature
-  const dataToSign = `${signed.signer}:${signed.signedAt}:${signed.content}`;
-
-  let expectedSignature: string;
+  const dataToVerify = `${signed.signer}:${signed.signedAt}:${signed.content}`;
 
   if (key.algorithm === 'hmac-sha256') {
-    expectedSignature = createHmac('sha256', key.privateKey)
-      .update(dataToSign)
+    // HMAC verification: recompute and compare
+    const expectedSignature = createHmac('sha256', key.privateKey)
+      .update(dataToVerify)
       .digest('hex');
+
+    if (signed.signature !== expectedSignature) {
+      return {
+        valid: false,
+        error: 'Invalid signature',
+      };
+    }
   } else {
-    // Ed25519 verification stub
-    expectedSignature = createHmac('sha256', key.privateKey)
-      .update(dataToSign)
-      .digest('hex');
+    // Ed25519 verification using public key only (true asymmetric verification)
+    try {
+      const publicKeyObj = createPublicKey(key.publicKey);
+      const signatureBuffer = Buffer.from(signed.signature, 'hex');
+      const isValid = verify(null, Buffer.from(dataToVerify), publicKeyObj, signatureBuffer);
+
+      if (!isValid) {
+        return {
+          valid: false,
+          error: 'Invalid signature',
+        };
+      }
+    } catch (err) {
+      return {
+        valid: false,
+        error: `Signature verification failed: ${err instanceof Error ? err.message : 'unknown error'}`,
+      };
+    }
   }
 
-  if (signed.signature !== expectedSignature) {
+  return {
+    valid: true,
+    signer: signed.signer,
+    signedAt: signed.signedAt,
+  };
+}
+
+/**
+ * Verify an Ed25519 signed message using only the public key.
+ * This is the key advantage of asymmetric signing - verifiers don't need the private key.
+ */
+export function verifyEd25519WithPublicKey(
+  signed: SignedMessage,
+  publicKeyPem: string,
+  expectedSigner: string
+): VerificationResult {
+  if (signed.algorithm !== 'ed25519') {
     return {
       valid: false,
-      error: 'Invalid signature',
+      error: `Algorithm mismatch: expected ed25519, got ${signed.algorithm}`,
+    };
+  }
+
+  if (signed.signer !== expectedSigner) {
+    return {
+      valid: false,
+      error: `Signer mismatch: expected ${expectedSigner}, got ${signed.signer}`,
+    };
+  }
+
+  const expectedKeyId = createHash('sha256')
+    .update(publicKeyPem)
+    .digest('hex')
+    .substring(0, 16);
+
+  if (signed.keyId !== expectedKeyId) {
+    return {
+      valid: false,
+      error: `Key ID mismatch: expected ${expectedKeyId}, got ${signed.keyId}`,
+    };
+  }
+
+  const dataToVerify = `${signed.signer}:${signed.signedAt}:${signed.content}`;
+
+  try {
+    const publicKeyObj = createPublicKey(publicKeyPem);
+    const signatureBuffer = Buffer.from(signed.signature, 'hex');
+    const isValid = verify(null, Buffer.from(dataToVerify), publicKeyObj, signatureBuffer);
+
+    if (!isValid) {
+      return {
+        valid: false,
+        error: 'Invalid signature',
+      };
+    }
+  } catch (err) {
+    return {
+      valid: false,
+      error: `Signature verification failed: ${err instanceof Error ? err.message : 'unknown error'}`,
     };
   }
 

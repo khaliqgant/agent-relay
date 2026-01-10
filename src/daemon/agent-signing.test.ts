@@ -15,6 +15,7 @@ import {
   signWithSharedSecret,
   verifyMessage,
   verifyWithSharedSecret,
+  verifyEd25519WithPublicKey,
   AgentSigningManager,
   attachSignature,
   extractSignature,
@@ -59,13 +60,24 @@ describe('Agent Signing', () => {
       expect(key.expiresAt).toBeUndefined();
     });
 
-    it('generates Ed25519 key (stub)', () => {
+    it('generates Ed25519 key with PEM format', () => {
       const key = generateAgentKey('TestAgent', 'ed25519');
 
       expect(key.agentName).toBe('TestAgent');
       expect(key.algorithm).toBe('ed25519');
-      expect(key.publicKey).toHaveLength(64); // SHA256 hash
-      expect(key.privateKey).toHaveLength(64);
+      // Keys are in PEM format
+      expect(key.publicKey).toContain('-----BEGIN PUBLIC KEY-----');
+      expect(key.publicKey).toContain('-----END PUBLIC KEY-----');
+      expect(key.privateKey).toContain('-----BEGIN PRIVATE KEY-----');
+      expect(key.privateKey).toContain('-----END PRIVATE KEY-----');
+    });
+
+    it('generates unique Ed25519 keys', () => {
+      const key1 = generateAgentKey('Agent1', 'ed25519');
+      const key2 = generateAgentKey('Agent2', 'ed25519');
+
+      expect(key1.publicKey).not.toBe(key2.publicKey);
+      expect(key1.privateKey).not.toBe(key2.privateKey);
     });
 
     it('sets expiry when specified', () => {
@@ -315,6 +327,127 @@ describe('Agent Signing', () => {
   });
 
   // ===========================================================================
+  // Ed25519 Signing and Verification Tests
+  // ===========================================================================
+
+  describe('Ed25519 signing', () => {
+    it('signs and verifies message with Ed25519', () => {
+      const key = generateAgentKey('TestAgent', 'ed25519');
+      const signed = signMessage('Hello world', key);
+
+      expect(signed.algorithm).toBe('ed25519');
+      expect(signed.signature).toBeDefined();
+      expect(signed.signature.length).toBeGreaterThan(0);
+
+      const result = verifyMessage(signed, key);
+      expect(result.valid).toBe(true);
+      expect(result.signer).toBe('TestAgent');
+    });
+
+    it('produces valid hex signatures', () => {
+      const key = generateAgentKey('TestAgent', 'ed25519');
+      const signed = signMessage('Test content', key);
+
+      // Ed25519 signatures are 64 bytes = 128 hex chars
+      expect(signed.signature).toMatch(/^[a-f0-9]+$/);
+      expect(signed.signature.length).toBe(128);
+    });
+
+    it('rejects tampered content with Ed25519', () => {
+      const key = generateAgentKey('TestAgent', 'ed25519');
+      const signed = signMessage('Original content', key);
+      signed.content = 'Tampered content';
+
+      const result = verifyMessage(signed, key);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Invalid signature');
+    });
+
+    it('rejects tampered signature with Ed25519', () => {
+      const key = generateAgentKey('TestAgent', 'ed25519');
+      const signed = signMessage('Hello', key);
+      // Tamper with signature
+      signed.signature = 'a'.repeat(128);
+
+      const result = verifyMessage(signed, key);
+      expect(result.valid).toBe(false);
+    });
+
+    it('signs messages consistently with same key', () => {
+      const key = generateAgentKey('TestAgent', 'ed25519');
+      const content = 'Test message';
+
+      const signed1 = signMessage(content, key);
+      const signed2 = signMessage(content, key);
+
+      // Both should be verifiable
+      expect(verifyMessage(signed1, key).valid).toBe(true);
+      expect(verifyMessage(signed2, key).valid).toBe(true);
+    });
+  });
+
+  describe('verifyEd25519WithPublicKey', () => {
+    it('verifies signature with only public key (asymmetric verification)', () => {
+      const key = generateAgentKey('TestAgent', 'ed25519');
+      const signed = signMessage('Hello world', key);
+
+      // Verify using only the public key (the main benefit of asymmetric signing)
+      const result = verifyEd25519WithPublicKey(signed, key.publicKey, 'TestAgent');
+
+      expect(result.valid).toBe(true);
+      expect(result.signer).toBe('TestAgent');
+    });
+
+    it('rejects wrong algorithm', () => {
+      const hmacKey = generateAgentKey('TestAgent', 'hmac-sha256');
+      const signed = signMessage('Hello', hmacKey);
+
+      const ed25519Key = generateAgentKey('TestAgent', 'ed25519');
+      const result = verifyEd25519WithPublicKey(signed, ed25519Key.publicKey, 'TestAgent');
+
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Algorithm mismatch');
+    });
+
+    it('rejects wrong signer', () => {
+      const key = generateAgentKey('TestAgent', 'ed25519');
+      const signed = signMessage('Hello', key);
+
+      const result = verifyEd25519WithPublicKey(signed, key.publicKey, 'WrongAgent');
+
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Signer mismatch');
+    });
+
+    it('rejects wrong public key', () => {
+      const key1 = generateAgentKey('TestAgent', 'ed25519');
+      const key2 = generateAgentKey('OtherAgent', 'ed25519');
+      const signed = signMessage('Hello', key1);
+
+      const result = verifyEd25519WithPublicKey(signed, key2.publicKey, 'TestAgent');
+
+      expect(result.valid).toBe(false);
+      // Will fail on key ID mismatch
+      expect(result.error).toContain('Key ID mismatch');
+    });
+
+    it('enables zero-trust verification without private key', () => {
+      // This is the key use case for Ed25519:
+      // A verifier can check signatures without access to the private key
+
+      const key = generateAgentKey('SecureAgent', 'ed25519');
+      const signed = signMessage('Sensitive operation approved', key);
+
+      // Extract only the public key (simulating distribution to verifiers)
+      const publicKeyOnly = key.publicKey;
+
+      // Verifier can validate without ever seeing the private key
+      const result = verifyEd25519WithPublicKey(signed, publicKeyOnly, 'SecureAgent');
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  // ===========================================================================
   // Signing Manager Tests
   // ===========================================================================
 
@@ -426,6 +559,42 @@ describe('Agent Signing', () => {
 
       expect(manager.requiresVerification('RandomAgent')).toBe(true);
       expect(manager.requiresVerification('TrustedAgent')).toBe(false);
+    });
+
+    it('signs and verifies with Ed25519', () => {
+      const manager = new AgentSigningManager(
+        { enabled: true, algorithm: 'ed25519', requireSignatures: false },
+        tempDir
+      );
+
+      manager.registerAgent('Ed25519Agent');
+      const signed = manager.sign('Ed25519Agent', 'Secure message');
+
+      expect(signed).not.toBeNull();
+      expect(signed!.algorithm).toBe('ed25519');
+
+      const result = manager.verify(signed!);
+      expect(result.valid).toBe(true);
+    });
+
+    it('persists and loads Ed25519 keys', () => {
+      const manager1 = new AgentSigningManager(
+        { enabled: true, algorithm: 'ed25519', requireSignatures: false },
+        tempDir
+      );
+
+      const originalKey = manager1.registerAgent('PersistentAgent');
+
+      // Create new manager to load from disk
+      const manager2 = new AgentSigningManager(
+        { enabled: true, algorithm: 'ed25519', requireSignatures: false },
+        tempDir
+      );
+
+      const loadedKey = manager2.getKey('PersistentAgent');
+      expect(loadedKey).not.toBeNull();
+      expect(loadedKey!.publicKey).toBe(originalKey.publicKey);
+      expect(loadedKey!.privateKey).toBe(originalKey.privateKey);
     });
   });
 
