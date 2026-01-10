@@ -20,6 +20,8 @@ export interface BrowseChannel {
 }
 
 export interface UseChannelBrowserOptions {
+  /** Workspace ID (required for API calls) */
+  workspaceId: string;
   /** Initial page size (default: 20) */
   pageSize?: number;
   /** Search debounce delay in ms (default: 300) */
@@ -56,9 +58,10 @@ export interface UseChannelBrowserReturn {
 }
 
 export function useChannelBrowser(
-  options: UseChannelBrowserOptions = {}
+  options: UseChannelBrowserOptions
 ): UseChannelBrowserReturn {
   const {
+    workspaceId,
     pageSize = 20,
     debounceDelay = 300,
     autoFetch = true,
@@ -79,8 +82,13 @@ export function useChannelBrowser(
     return Math.max(1, Math.ceil(totalCount / pageSize));
   }, [totalCount, pageSize]);
 
-  // Fetch channels from API
+  // Fetch channels from API (workspace-scoped)
   const fetchChannels = useCallback(async (page: number, search: string) => {
+    if (!workspaceId) {
+      setError('Workspace ID is required');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
@@ -95,18 +103,39 @@ export function useChannelBrowser(
         params.set('search', search.trim());
       }
 
+      // Use workspace-scoped endpoint
       const result = await api.get<{
-        channels: BrowseChannel[];
-        pagination: {
+        channels: Array<{
+          id: string;
+          name: string;
+          description?: string;
+          memberCount?: number;
+          isPrivate?: boolean;
+          createdAt: string;
+          // Backend may use different field names
+          isMember?: boolean;
+        }>;
+        archivedChannels?: unknown[];
+        pagination?: {
           page: number;
           limit: number;
           total: number;
           totalPages: number;
         };
-      }>(`/api/channels/browse?${params.toString()}`);
+      }>(`/api/workspaces/${workspaceId}/channels?${params.toString()}`);
 
       if (result.channels) {
-        setChannels(result.channels);
+        // Map backend response to BrowseChannel format
+        const mappedChannels: BrowseChannel[] = result.channels.map((ch) => ({
+          id: ch.id,
+          name: ch.name,
+          description: ch.description,
+          memberCount: ch.memberCount || 0,
+          isJoined: ch.isMember ?? false,
+          isPrivate: ch.isPrivate ?? false,
+          createdAt: ch.createdAt,
+        }));
+        setChannels(mappedChannels);
         setTotalCount(result.pagination?.total || result.channels.length);
       } else {
         // API might return different structure - handle gracefully
@@ -120,7 +149,7 @@ export function useChannelBrowser(
     } finally {
       setIsLoading(false);
     }
-  }, [pageSize]);
+  }, [workspaceId, pageSize]);
 
   // Fetch when search or page changes
   useEffect(() => {
@@ -140,10 +169,14 @@ export function useChannelBrowser(
     setCurrentPage(validPage);
   }, [totalPages]);
 
-  // Join a channel
+  // Join a channel (workspace-scoped)
   const joinChannel = useCallback(async (channelId: string) => {
+    if (!workspaceId) {
+      throw new Error('Workspace ID is required');
+    }
+
     try {
-      await api.post(`/api/channels/${channelId}/join`);
+      await api.post(`/api/workspaces/${workspaceId}/channels/${encodeURIComponent(channelId)}/join`);
 
       // Optimistically update local state
       setChannels((prev) =>
@@ -158,12 +191,16 @@ export function useChannelBrowser(
       setError(message);
       throw err;
     }
-  }, []);
+  }, [workspaceId]);
 
-  // Leave a channel
+  // Leave a channel (workspace-scoped)
   const leaveChannel = useCallback(async (channelId: string) => {
+    if (!workspaceId) {
+      throw new Error('Workspace ID is required');
+    }
+
     try {
-      await api.post(`/api/channels/${channelId}/leave`);
+      await api.post(`/api/workspaces/${workspaceId}/channels/${encodeURIComponent(channelId)}/leave`);
 
       // Optimistically update local state
       setChannels((prev) =>
@@ -178,7 +215,7 @@ export function useChannelBrowser(
       setError(message);
       throw err;
     }
-  }, []);
+  }, [workspaceId]);
 
   // Refresh current view
   const refresh = useCallback(() => {
