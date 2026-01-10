@@ -953,6 +953,34 @@ export const channelReadStateRelations = relations(channelReadState, ({ one }) =
   }),
 }));
 
+// ============================================================================
+// Message Reactions
+// ============================================================================
+
+export const messageReactions = pgTable('message_reactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  messageId: uuid('message_id').notNull().references(() => channelMessages.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  emoji: varchar('emoji', { length: 20 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  messageUserEmojiIdx: unique('message_reactions_unique').on(table.messageId, table.userId, table.emoji),
+  messageIdIdx: index('idx_message_reactions_message').on(table.messageId),
+  messageEmojiIdx: index('idx_message_reactions_message_emoji').on(table.messageId, table.emoji),
+  userIdIdx: index('idx_message_reactions_user').on(table.userId),
+}));
+
+export const messageReactionsRelations = relations(messageReactions, ({ one }) => ({
+  message: one(channelMessages, {
+    fields: [messageReactions.messageId],
+    references: [channelMessages.id],
+  }),
+  user: one(users, {
+    fields: [messageReactions.userId],
+    references: [users.id],
+  }),
+}));
+
 // Type exports for channel tables
 export type Channel = typeof channels.$inferSelect;
 export type NewChannel = typeof channels.$inferInsert;
@@ -962,3 +990,5 @@ export type ChannelMessage = typeof channelMessages.$inferSelect;
 export type NewChannelMessage = typeof channelMessages.$inferInsert;
 export type ChannelReadState = typeof channelReadState.$inferSelect;
 export type NewChannelReadState = typeof channelReadState.$inferInsert;
+export type MessageReaction = typeof messageReactions.$inferSelect;
+export type NewMessageReaction = typeof messageReactions.$inferInsert;

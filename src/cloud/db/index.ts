@@ -60,6 +60,9 @@ export type {
   NewChannelMessage,
   ChannelReadState,
   NewChannelReadState,
+  // Message reaction types
+  MessageReaction,
+  NewMessageReaction,
 } from './schema.js';
 
 // Re-export schema tables for direct access if needed
@@ -82,6 +85,7 @@ export {
   channelMembers as channelMembersTable,
   channelMessages as channelMessagesTable,
   channelReadState as channelReadStateTable,
+  messageReactions as messageReactionsTable,
 } from './schema.js';
 
 // Import query modules

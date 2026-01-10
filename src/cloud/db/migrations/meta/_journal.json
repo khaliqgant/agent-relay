@@ -99,6 +99,13 @@
       "when": 1736467200000,
       "tag": "0014_channel_messages_fts",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1736553600000,
+      "tag": "0015_message_reactions",
+      "breakpoints": true
     }
   ]
 }
