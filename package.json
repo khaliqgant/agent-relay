@@ -96,7 +96,8 @@
     "ssh2": "^1.17.0",
     "stripe": "^20.1.0",
     "uuid": "^10.0.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

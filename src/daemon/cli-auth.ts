@@ -20,6 +20,12 @@ import {
   type CLIAuthConfig,
   type PromptHandler,
 } from '../shared/cli-auth-config.js';
+import {
+  getCodexAuth,
+  getProviderAuth,
+  isCodexAuthenticated,
+  type CodexAuthResult,
+} from '../shared/codex-auth.js';
 
 const logger = createLogger('cli-auth');
 
@@ -107,7 +113,31 @@ export async function startCLIAuth(
     allSessionIds: Array.from(sessions.keys()),
   });
 
-  // Check if already authenticated (credentials exist)
+  // For OpenAI/Codex: Check standardized auth (env var, config file) first
+  // This follows the official Codex pattern: OPENAI_API_KEY takes priority
+  if (provider === 'openai') {
+    try {
+      const codexAuth = await getCodexAuth();
+      if (codexAuth.authenticated) {
+        logger.info('Already authenticated via standardized Codex auth', {
+          provider,
+          sessionId,
+          method: codexAuth.method,
+        });
+        session.status = 'success';
+        session.token = codexAuth.apiKey || codexAuth.accessToken;
+        session.refreshToken = codexAuth.refreshToken;
+        session.tokenExpiresAt = codexAuth.expiresAt;
+        return session;
+      }
+    } catch (err) {
+      logger.debug('Standardized Codex auth check failed, continuing with CLI flow', {
+        error: String(err),
+      });
+    }
+  }
+
+  // Check if already authenticated (credentials exist in CLI credential file)
   try {
     const existingCreds = await extractCredentials(provider, config);
     if (existingCreds?.token) {
@@ -750,8 +780,28 @@ async function extractCredentials(
 /**
  * Check if a provider is authenticated (credentials exist)
  * Used by the auth check endpoint for SSH tunnel flow
+ *
+ * For OpenAI/Codex, this follows the standardized Codex auth pattern:
+ * 1. OPENAI_API_KEY environment variable (highest priority)
+ * 2. OAuth tokens from ~/.codex/auth.json
+ * 3. API key from config file
+ * 4. CLI credential file
  */
 export async function checkProviderAuth(provider: string): Promise<boolean> {
+  // For OpenAI/Codex, use standardized auth check
+  if (provider === 'openai') {
+    const auth = await getCodexAuth();
+    if (auth.authenticated) {
+      logger.info('Codex auth found via standardized check', {
+        method: auth.method,
+        hasApiKey: !!auth.apiKey,
+        hasAccessToken: !!auth.accessToken,
+      });
+      return true;
+    }
+  }
+
+  // Fall back to CLI credential file check
   const config = CLI_AUTH_CONFIG[provider];
   if (!config) {
     return false;
@@ -764,4 +814,17 @@ export async function checkProviderAuth(provider: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Get detailed auth status for Codex/OpenAI
+ * Exposes the authentication method and details
+ */
+export async function getCodexAuthStatus(): Promise<CodexAuthResult> {
+  return getCodexAuth();
+}
+
+/**
+ * Re-export for consumers who need direct access
+ */
+export { getCodexAuth, getProviderAuth, isCodexAuthenticated };
 

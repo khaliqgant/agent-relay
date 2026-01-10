@@ -10,6 +10,10 @@ import { createClient } from 'redis';
 import { requireAuth } from './auth.js';
 import { getConfig } from '../config.js';
 import { db } from '../db/index.js';
+import {
+  DEFAULT_PROVIDERS as CODEX_PROVIDERS,
+  OPENAI_API_KEY_ENV,
+} from '../../shared/codex-auth.js';
 
 export const providersRouter = Router();
 
@@ -39,6 +43,10 @@ interface CliProvider extends BaseProvider {
   authStrategy: 'cli';
   cliCommand: string;
   credentialPath: string;
+  /** Environment variable for API key (alternative to CLI auth) */
+  envKey?: string;
+  /** Base URL for API (when using env-based auth) */
+  baseURL?: string;
 }
 
 // Device flow OAuth provider (Google)
@@ -68,8 +76,12 @@ const PROVIDERS: Record<string, Provider> = {
     description: 'Codex - OpenAI coding assistant',
     authStrategy: 'cli',
     cliCommand: 'codex login',
-    credentialPath: '~/.codex/credentials.json',
+    credentialPath: '~/.codex/auth.json',
     color: '#10A37F',
+    // Codex also supports env-based auth via OPENAI_API_KEY
+    // See: https://github.com/openai/codex
+    envKey: OPENAI_API_KEY_ENV,
+    baseURL: CODEX_PROVIDERS.openai?.baseURL,
   },
   opencode: {
     name: 'OpenCode',
@@ -223,17 +235,32 @@ providersRouter.post('/:provider/connect', async (req: Request, res: Response) =
 
   // CLI-based auth (Claude, Codex) - return instructions
   if (providerConfig.authStrategy === 'cli') {
+    // Build instructions - include env var option for providers that support it
+    const instructions = [
+      `1. Open your terminal`,
+      `2. Run: ${providerConfig.cliCommand}`,
+      `3. Complete the login in your browser`,
+      `4. Return here and click "Verify Connection"`,
+    ];
+
+    // For Codex, add alternative env var method (following official Codex patterns)
+    const envInstructions = providerConfig.envKey ? [
+      `**Alternative: Use API Key**`,
+      `Set the ${providerConfig.envKey} environment variable:`,
+      `export ${providerConfig.envKey}="your-api-key"`,
+      `Or add to your .env file:`,
+      `${providerConfig.envKey}=your-api-key`,
+    ] : undefined;
+
     return res.json({
       authStrategy: 'cli',
       provider: provider,
       displayName: providerConfig.displayName,
-      instructions: [
-        `1. Open your terminal`,
-        `2. Run: ${providerConfig.cliCommand}`,
-        `3. Complete the login in your browser`,
-        `4. Return here and click "Verify Connection"`,
-      ],
+      instructions,
+      envInstructions,
       cliCommand: providerConfig.cliCommand,
+      envKey: providerConfig.envKey,
+      baseURL: providerConfig.baseURL,
       // For cloud-hosted: we'll check the workspace container for credentials
       // For self-hosted: user's local credentials will be synced
       verifyEndpoint: `/api/providers/${provider}/verify`,
