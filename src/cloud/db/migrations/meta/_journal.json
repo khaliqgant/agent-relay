@@ -71,6 +71,20 @@
       "when": 1736208003000,
       "tag": "0010_remove_credential_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1736380800000,
+      "tag": "0012_nervous_thundra",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1736380801000,
+      "tag": "0013_add_channel_topic_activity",
+      "breakpoints": true
     }
   ]
 }

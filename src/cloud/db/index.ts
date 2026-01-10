@@ -49,6 +49,21 @@ export type {
   CommentMention,
   NewCommentMention,
   AgentTriggerConfig,
+  // Agent message types
+  AgentMessage,
+  NewAgentMessage,
+  MessagePayloadMeta,
+  // Channel types
+  Channel,
+  NewChannel,
+  ChannelMember,
+  NewChannelMember,
+  ChannelMemberRole,
+  ChannelMemberType,
+  ChannelMessage,
+  NewChannelMessage,
+  ChannelReadState,
+  NewChannelReadState,
 } from './schema.js';
 
 // Re-export schema tables for direct access if needed
@@ -67,6 +82,11 @@ export {
   ciFixAttempts as ciFixAttemptsTable,
   issueAssignments as issueAssignmentsTable,
   commentMentions as commentMentionsTable,
+  agentMessages as agentMessagesTable,
+  channels as channelsTable,
+  channelMembers as channelMembersTable,
+  channelMessages as channelMessagesTable,
+  channelReadState as channelReadStateTable,
 } from './schema.js';
 
 // Import query modules
@@ -86,6 +106,11 @@ import {
   ciFixAttemptQueries,
   issueAssignmentQueries,
   commentMentionQueries,
+  agentMessageQueries,
+  channelQueries,
+  channelMemberQueries,
+  channelMessageQueries,
+  channelReadStateQueries,
 } from './drizzle.js';
 
 // Legacy type aliases for backwards compatibility
@@ -116,6 +141,13 @@ export const db = {
   // Issue and comment tracking
   issueAssignments: issueAssignmentQueries,
   commentMentions: commentMentionQueries,
+  // Agent messages (cloud-synced relay messages)
+  agentMessages: agentMessageQueries,
+  // Channels
+  channels: channelQueries,
+  channelMembers: channelMemberQueries,
+  channelMessages: channelMessageQueries,
+  channelReadState: channelReadStateQueries,
   // Database utilities
   getDb,
   close: closeDb,
@@ -136,6 +168,11 @@ export {
   ciFixAttemptQueries,
   issueAssignmentQueries,
   commentMentionQueries,
+  agentMessageQueries,
+  channelQueries,
+  channelMemberQueries,
+  channelMessageQueries,
+  channelReadStateQueries,
 };
 
 // Export database utilities

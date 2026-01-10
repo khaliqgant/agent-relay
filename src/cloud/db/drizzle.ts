@@ -7,7 +7,7 @@
 
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { eq, and, sql, desc, lt, isNull, isNotNull } from 'drizzle-orm';
+import { eq, and, sql, desc, lt, gt, isNull, isNotNull, count } from 'drizzle-orm';
 import * as schema from './schema.js';
 import { getConfig } from '../config.js';
 
@@ -1554,6 +1554,561 @@ export const commentMentionQueries: CommentMentionQueries = {
       .update(schema.commentMentions)
       .set({ status: 'ignored' })
       .where(eq(schema.commentMentions.id, id));
+  },
+};
+
+// ============================================================================
+// Channel Queries
+// ============================================================================
+
+export interface ChannelQueries {
+  findById(id: string): Promise<schema.Channel | null>;
+  findByWorkspaceId(workspaceId: string, options?: { includeArchived?: boolean }): Promise<schema.Channel[]>;
+  findByName(workspaceId: string, name: string): Promise<schema.Channel | null>;
+  create(data: schema.NewChannel): Promise<schema.Channel>;
+  update(id: string, data: Partial<Pick<schema.Channel, 'name' | 'description' | 'topic' | 'isPrivate' | 'isArchived'>>): Promise<void>;
+  archive(id: string): Promise<void>;
+  unarchive(id: string): Promise<void>;
+  delete(id: string): Promise<void>;
+  incrementMemberCount(id: string): Promise<void>;
+  decrementMemberCount(id: string): Promise<void>;
+  updateLastActivity(id: string): Promise<void>;
+}
+
+export const channelQueries: ChannelQueries = {
+  async findById(id: string): Promise<schema.Channel | null> {
+    const db = getDb();
+    const result = await db.select().from(schema.channels).where(eq(schema.channels.id, id));
+    return result[0] ?? null;
+  },
+
+  async findByWorkspaceId(workspaceId: string, options?: { includeArchived?: boolean }): Promise<schema.Channel[]> {
+    const db = getDb();
+    const conditions = [eq(schema.channels.workspaceId, workspaceId)];
+    if (!options?.includeArchived) {
+      conditions.push(eq(schema.channels.isArchived, false));
+    }
+    return db
+      .select()
+      .from(schema.channels)
+      .where(and(...conditions))
+      .orderBy(schema.channels.name);
+  },
+
+  async findByName(workspaceId: string, name: string): Promise<schema.Channel | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.channels)
+      .where(and(eq(schema.channels.workspaceId, workspaceId), eq(schema.channels.name, name)));
+    return result[0] ?? null;
+  },
+
+  async create(data: schema.NewChannel): Promise<schema.Channel> {
+    const db = getDb();
+    const result = await db.insert(schema.channels).values(data).returning();
+    return result[0];
+  },
+
+  async update(id: string, data: Partial<Pick<schema.Channel, 'name' | 'description' | 'topic' | 'isPrivate' | 'isArchived'>>): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channels)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(schema.channels.id, id));
+  },
+
+  async archive(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channels)
+      .set({ isArchived: true, updatedAt: new Date() })
+      .where(eq(schema.channels.id, id));
+  },
+
+  async unarchive(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channels)
+      .set({ isArchived: false, updatedAt: new Date() })
+      .where(eq(schema.channels.id, id));
+  },
+
+  async delete(id: string): Promise<void> {
+    const db = getDb();
+    await db.delete(schema.channels).where(eq(schema.channels.id, id));
+  },
+
+  async incrementMemberCount(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channels)
+      .set({ memberCount: sql`${schema.channels.memberCount} + 1`, updatedAt: new Date() })
+      .where(eq(schema.channels.id, id));
+  },
+
+  async decrementMemberCount(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channels)
+      .set({ memberCount: sql`GREATEST(${schema.channels.memberCount} - 1, 0)`, updatedAt: new Date() })
+      .where(eq(schema.channels.id, id));
+  },
+
+  async updateLastActivity(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channels)
+      .set({ lastActivityAt: new Date(), updatedAt: new Date() })
+      .where(eq(schema.channels.id, id));
+  },
+};
+
+// ============================================================================
+// Channel Member Queries
+// ============================================================================
+
+export interface ChannelMemberQueries {
+  findById(id: string): Promise<schema.ChannelMember | null>;
+  findByChannelId(channelId: string): Promise<schema.ChannelMember[]>;
+  findByMemberId(memberId: string, memberType: schema.ChannelMemberType): Promise<schema.ChannelMember[]>;
+  findMembership(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<schema.ChannelMember | null>;
+  addMember(data: schema.NewChannelMember): Promise<schema.ChannelMember>;
+  updateRole(channelId: string, memberId: string, memberType: schema.ChannelMemberType, role: schema.ChannelMemberRole): Promise<void>;
+  removeMember(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<void>;
+  isMember(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<boolean>;
+  isAdmin(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<boolean>;
+  canPost(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<boolean>;
+  countMembers(channelId: string): Promise<number>;
+}
+
+export const channelMemberQueries: ChannelMemberQueries = {
+  async findById(id: string): Promise<schema.ChannelMember | null> {
+    const db = getDb();
+    const result = await db.select().from(schema.channelMembers).where(eq(schema.channelMembers.id, id));
+    return result[0] ?? null;
+  },
+
+  async findByChannelId(channelId: string): Promise<schema.ChannelMember[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.channelMembers)
+      .where(eq(schema.channelMembers.channelId, channelId))
+      .orderBy(schema.channelMembers.joinedAt);
+  },
+
+  async findByMemberId(memberId: string, memberType: schema.ChannelMemberType): Promise<schema.ChannelMember[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.channelMembers)
+      .where(and(eq(schema.channelMembers.memberId, memberId), eq(schema.channelMembers.memberType, memberType)));
+  },
+
+  async findMembership(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<schema.ChannelMember | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.channelMembers)
+      .where(
+        and(
+          eq(schema.channelMembers.channelId, channelId),
+          eq(schema.channelMembers.memberId, memberId),
+          eq(schema.channelMembers.memberType, memberType)
+        )
+      );
+    return result[0] ?? null;
+  },
+
+  async addMember(data: schema.NewChannelMember): Promise<schema.ChannelMember> {
+    const db = getDb();
+    const result = await db.insert(schema.channelMembers).values(data).returning();
+    return result[0];
+  },
+
+  async updateRole(channelId: string, memberId: string, memberType: schema.ChannelMemberType, role: schema.ChannelMemberRole): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channelMembers)
+      .set({ role })
+      .where(
+        and(
+          eq(schema.channelMembers.channelId, channelId),
+          eq(schema.channelMembers.memberId, memberId),
+          eq(schema.channelMembers.memberType, memberType)
+        )
+      );
+  },
+
+  async removeMember(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<void> {
+    const db = getDb();
+    await db
+      .delete(schema.channelMembers)
+      .where(
+        and(
+          eq(schema.channelMembers.channelId, channelId),
+          eq(schema.channelMembers.memberId, memberId),
+          eq(schema.channelMembers.memberType, memberType)
+        )
+      );
+  },
+
+  async isMember(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<boolean> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.channelMembers)
+      .where(
+        and(
+          eq(schema.channelMembers.channelId, channelId),
+          eq(schema.channelMembers.memberId, memberId),
+          eq(schema.channelMembers.memberType, memberType)
+        )
+      );
+    return result.length > 0;
+  },
+
+  async isAdmin(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<boolean> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.channelMembers)
+      .where(
+        and(
+          eq(schema.channelMembers.channelId, channelId),
+          eq(schema.channelMembers.memberId, memberId),
+          eq(schema.channelMembers.memberType, memberType),
+          eq(schema.channelMembers.role, 'admin')
+        )
+      );
+    return result.length > 0;
+  },
+
+  async canPost(channelId: string, memberId: string, memberType: schema.ChannelMemberType): Promise<boolean> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.channelMembers)
+      .where(
+        and(
+          eq(schema.channelMembers.channelId, channelId),
+          eq(schema.channelMembers.memberId, memberId),
+          eq(schema.channelMembers.memberType, memberType)
+        )
+      );
+    const member = result[0];
+    return !!member && member.role !== 'read_only';
+  },
+
+  async countMembers(channelId: string): Promise<number> {
+    const db = getDb();
+    const result = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.channelMembers)
+      .where(eq(schema.channelMembers.channelId, channelId));
+    return Number(result[0]?.count ?? 0);
+  },
+};
+
+// ============================================================================
+// Channel Message Queries
+// ============================================================================
+
+export interface ChannelMessageQueries {
+  findById(id: string): Promise<schema.ChannelMessage | null>;
+  findByChannelId(channelId: string, options?: { limit?: number; beforeId?: string }): Promise<schema.ChannelMessage[]>;
+  findPinned(channelId: string): Promise<schema.ChannelMessage[]>;
+  findThread(threadId: string): Promise<schema.ChannelMessage[]>;
+  create(data: schema.NewChannelMessage): Promise<schema.ChannelMessage>;
+  update(id: string, data: Partial<Pick<schema.ChannelMessage, 'body'>>): Promise<void>;
+  pin(id: string, pinnedById: string): Promise<void>;
+  unpin(id: string): Promise<void>;
+  delete(id: string): Promise<void>;
+  incrementReplyCount(id: string): Promise<void>;
+  decrementReplyCount(id: string): Promise<void>;
+}
+
+export const channelMessageQueries: ChannelMessageQueries = {
+  async findById(id: string): Promise<schema.ChannelMessage | null> {
+    const db = getDb();
+    const result = await db.select().from(schema.channelMessages).where(eq(schema.channelMessages.id, id));
+    return result[0] ?? null;
+  },
+
+  async findByChannelId(channelId: string, options?: { limit?: number; beforeId?: string }): Promise<schema.ChannelMessage[]> {
+    const db = getDb();
+    const conditions = [
+      eq(schema.channelMessages.channelId, channelId),
+      isNull(schema.channelMessages.threadId),
+    ];
+
+    if (options?.beforeId) {
+      const beforeMsg = await db.select().from(schema.channelMessages).where(eq(schema.channelMessages.id, options.beforeId));
+      if (beforeMsg[0]) {
+        conditions.push(lt(schema.channelMessages.createdAt, beforeMsg[0].createdAt));
+      }
+    }
+
+    let query = db
+      .select()
+      .from(schema.channelMessages)
+      .where(and(...conditions))
+      .orderBy(desc(schema.channelMessages.createdAt));
+
+    if (options?.limit) {
+      query = query.limit(options.limit) as typeof query;
+    }
+
+    return query;
+  },
+
+  async findPinned(channelId: string): Promise<schema.ChannelMessage[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.channelMessages)
+      .where(and(eq(schema.channelMessages.channelId, channelId), eq(schema.channelMessages.isPinned, true)))
+      .orderBy(desc(schema.channelMessages.pinnedAt));
+  },
+
+  async findThread(threadId: string): Promise<schema.ChannelMessage[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.channelMessages)
+      .where(eq(schema.channelMessages.threadId, threadId))
+      .orderBy(schema.channelMessages.createdAt);
+  },
+
+  async create(data: schema.NewChannelMessage): Promise<schema.ChannelMessage> {
+    const db = getDb();
+    const result = await db.insert(schema.channelMessages).values(data).returning();
+    return result[0];
+  },
+
+  async update(id: string, data: Partial<Pick<schema.ChannelMessage, 'body'>>): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channelMessages)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(schema.channelMessages.id, id));
+  },
+
+  async pin(id: string, pinnedById: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channelMessages)
+      .set({ isPinned: true, pinnedAt: new Date(), pinnedById, updatedAt: new Date() })
+      .where(eq(schema.channelMessages.id, id));
+  },
+
+  async unpin(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channelMessages)
+      .set({ isPinned: false, pinnedAt: null, pinnedById: null, updatedAt: new Date() })
+      .where(eq(schema.channelMessages.id, id));
+  },
+
+  async delete(id: string): Promise<void> {
+    const db = getDb();
+    await db.delete(schema.channelMessages).where(eq(schema.channelMessages.id, id));
+  },
+
+  async incrementReplyCount(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channelMessages)
+      .set({ replyCount: sql`${schema.channelMessages.replyCount} + 1`, updatedAt: new Date() })
+      .where(eq(schema.channelMessages.id, id));
+  },
+
+  async decrementReplyCount(id: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.channelMessages)
+      .set({ replyCount: sql`GREATEST(${schema.channelMessages.replyCount} - 1, 0)`, updatedAt: new Date() })
+      .where(eq(schema.channelMessages.id, id));
+  },
+};
+
+// ============================================================================
+// Channel Read State Queries
+// ============================================================================
+
+export interface ChannelReadStateQueries {
+  findByChannelAndUser(channelId: string, userId: string): Promise<schema.ChannelReadState | null>;
+  findByUserId(userId: string): Promise<schema.ChannelReadState[]>;
+  upsert(channelId: string, userId: string, lastReadMessageId: string): Promise<schema.ChannelReadState>;
+  markRead(channelId: string, userId: string): Promise<void>;
+  markReadUpTo(channelId: string, userId: string, lastMessageId: string): Promise<number>;
+  getUnreadCount(channelId: string, userId: string): Promise<number>;
+  getUnreadCountsForUser(userId: string, channelIds: string[]): Promise<Map<string, number>>;
+  deleteByChannel(channelId: string): Promise<void>;
+}
+
+export const channelReadStateQueries: ChannelReadStateQueries = {
+  async findByChannelAndUser(channelId: string, userId: string): Promise<schema.ChannelReadState | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.channelReadState)
+      .where(and(eq(schema.channelReadState.channelId, channelId), eq(schema.channelReadState.userId, userId)));
+    return result[0] ?? null;
+  },
+
+  async findByUserId(userId: string): Promise<schema.ChannelReadState[]> {
+    const db = getDb();
+    return db.select().from(schema.channelReadState).where(eq(schema.channelReadState.userId, userId));
+  },
+
+  async upsert(channelId: string, userId: string, lastReadMessageId: string): Promise<schema.ChannelReadState> {
+    const db = getDb();
+    const result = await db
+      .insert(schema.channelReadState)
+      .values({ channelId, userId, lastReadMessageId, lastReadAt: new Date() })
+      .onConflictDoUpdate({
+        target: [schema.channelReadState.channelId, schema.channelReadState.userId],
+        set: { lastReadMessageId, lastReadAt: new Date() },
+      })
+      .returning();
+    return result[0];
+  },
+
+  async markRead(channelId: string, userId: string): Promise<void> {
+    const db = getDb();
+    const latestMessage = await db
+      .select()
+      .from(schema.channelMessages)
+      .where(eq(schema.channelMessages.channelId, channelId))
+      .orderBy(desc(schema.channelMessages.createdAt))
+      .limit(1);
+
+    if (latestMessage[0]) {
+      await db
+        .insert(schema.channelReadState)
+        .values({ channelId, userId, lastReadMessageId: latestMessage[0].id, lastReadAt: new Date() })
+        .onConflictDoUpdate({
+          target: [schema.channelReadState.channelId, schema.channelReadState.userId],
+          set: { lastReadMessageId: latestMessage[0].id, lastReadAt: new Date() },
+        });
+    }
+  },
+
+  async markReadUpTo(channelId: string, userId: string, lastMessageId: string): Promise<number> {
+    const db = getDb();
+
+    // Get the message to verify it exists and get its timestamp
+    const message = await db
+      .select()
+      .from(schema.channelMessages)
+      .where(and(eq(schema.channelMessages.id, lastMessageId), eq(schema.channelMessages.channelId, channelId)))
+      .limit(1);
+
+    if (!message[0]) {
+      return 0;
+    }
+
+    // Upsert the read state
+    await db
+      .insert(schema.channelReadState)
+      .values({ channelId, userId, lastReadMessageId: lastMessageId, lastReadAt: message[0].createdAt })
+      .onConflictDoUpdate({
+        target: [schema.channelReadState.channelId, schema.channelReadState.userId],
+        set: { lastReadMessageId: lastMessageId, lastReadAt: message[0].createdAt },
+      });
+
+    // Return remaining unread count (messages after this one)
+    const result = await db
+      .select({ count: count() })
+      .from(schema.channelMessages)
+      .where(
+        and(eq(schema.channelMessages.channelId, channelId), gt(schema.channelMessages.createdAt, message[0].createdAt))
+      );
+
+    return Number(result[0]?.count ?? 0);
+  },
+
+  async getUnreadCount(channelId: string, userId: string): Promise<number> {
+    const db = getDb();
+
+    // Get user's read state for this channel
+    const readState = await db
+      .select()
+      .from(schema.channelReadState)
+      .where(and(eq(schema.channelReadState.channelId, channelId), eq(schema.channelReadState.userId, userId)))
+      .limit(1);
+
+    // If no read state, count all messages in channel
+    if (!readState[0]) {
+      const result = await db
+        .select({ count: count() })
+        .from(schema.channelMessages)
+        .where(eq(schema.channelMessages.channelId, channelId));
+      return Number(result[0]?.count ?? 0);
+    }
+
+    // Count messages after last_read_at
+    const result = await db
+      .select({ count: count() })
+      .from(schema.channelMessages)
+      .where(
+        and(
+          eq(schema.channelMessages.channelId, channelId),
+          gt(schema.channelMessages.createdAt, readState[0].lastReadAt)
+        )
+      );
+
+    return Number(result[0]?.count ?? 0);
+  },
+
+  async getUnreadCountsForUser(userId: string, channelIds: string[]): Promise<Map<string, number>> {
+    const db = getDb();
+    const counts = new Map<string, number>();
+
+    if (channelIds.length === 0) {
+      return counts;
+    }
+
+    // Get all read states for this user
+    const readStates = await db
+      .select()
+      .from(schema.channelReadState)
+      .where(eq(schema.channelReadState.userId, userId));
+
+    const readStateMap = new Map<string, Date>();
+    for (const rs of readStates) {
+      readStateMap.set(rs.channelId, rs.lastReadAt);
+    }
+
+    // For each channel, count unread messages
+    for (const channelId of channelIds) {
+      const lastReadAt = readStateMap.get(channelId);
+
+      if (!lastReadAt) {
+        // No read state - count all messages
+        const result = await db
+          .select({ count: count() })
+          .from(schema.channelMessages)
+          .where(eq(schema.channelMessages.channelId, channelId));
+        counts.set(channelId, Number(result[0]?.count ?? 0));
+      } else {
+        // Count messages after last_read_at
+        const result = await db
+          .select({ count: count() })
+          .from(schema.channelMessages)
+          .where(and(eq(schema.channelMessages.channelId, channelId), gt(schema.channelMessages.createdAt, lastReadAt)));
+        counts.set(channelId, Number(result[0]?.count ?? 0));
+      }
+    }
+
+    return counts;
+  },
+
+  async deleteByChannel(channelId: string): Promise<void> {
+    const db = getDb();
+    await db.delete(schema.channelReadState).where(eq(schema.channelReadState.channelId, channelId));
   },
 };
 
