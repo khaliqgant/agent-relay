@@ -417,7 +417,7 @@ function MessageContent({
   return <>{parts}</>;
 }
 
-function AttachmentPreview({ attachment }: { attachment: ChannelMessage['attachments'][0] }) {
+function AttachmentPreview({ attachment }: { attachment: NonNullable<ChannelMessage['attachments']>[0] }) {
   const isImage = attachment.mimeType.startsWith('image/');
 
   if (isImage) {

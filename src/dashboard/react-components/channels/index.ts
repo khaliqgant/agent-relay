@@ -24,6 +24,8 @@ export {
   pinMessage,
   unpinMessage,
   getMentionSuggestions,
+  searchMessages,
+  searchChannel,
   isRealApiEnabled,
   setApiMode,
   getApiMode,
@@ -36,6 +38,8 @@ export { ChannelHeader } from './ChannelHeader';
 export { ChannelMessageList } from './ChannelMessageList';
 export { MessageInput } from './MessageInput';
 export { ChannelViewV1 } from './ChannelViewV1';
+export { SearchInput } from './SearchInput';
+export { SearchResults } from './SearchResults';
 
 // Dialogs
 export {
@@ -46,11 +50,12 @@ export {
 } from './ChannelDialogs';
 
 // Re-export prop types for convenience
-export type { ChannelSidebarV1Props } from './ChannelSidebarV1';
+export type { ChannelSidebarV1Props } from './types';
 export type { ChannelHeaderProps } from './types';
 export type { ChannelMessageListProps } from './types';
 export type { MessageInputProps } from './types';
 export type { ChannelViewV1Props } from './ChannelViewV1';
+export type { SearchInputProps, SearchResultsProps, SearchResult, SearchResponse } from './types';
 export type {
   ArchiveChannelDialogProps,
   DeleteChannelDialogProps,

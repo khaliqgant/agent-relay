@@ -16,6 +16,8 @@ import type {
   CreateChannelResponse,
   SendMessageRequest,
   SendMessageResponse,
+  SearchResult,
+  SearchResponse,
 } from './types';
 
 // Feature flag for switching between mock and real API
@@ -373,6 +375,87 @@ export async function getMentionSuggestions(
     // Fallback to empty if endpoint not available
     return [];
   }
+}
+
+// =============================================================================
+// Search API Functions (Task 5)
+// =============================================================================
+
+/**
+ * Search messages across a workspace
+ */
+export async function searchMessages(
+  workspaceId: string,
+  query: string,
+  options?: { channelId?: string; limit?: number; offset?: number }
+): Promise<SearchResponse> {
+  if (!USE_REAL_API) {
+    // Mock search response
+    return {
+      results: [],
+      total: 0,
+      hasMore: false,
+      query,
+    };
+  }
+
+  const params = new URLSearchParams();
+  params.append('q', query);
+  if (options?.limit) params.append('limit', String(options.limit));
+  if (options?.offset) params.append('offset', String(options.offset));
+
+  // Use channel-scoped or workspace-wide search
+  const basePath = options?.channelId
+    ? `/api/workspaces/${workspaceId}/channels/${encodeURIComponent(options.channelId)}/search`
+    : `/api/workspaces/${workspaceId}/search`;
+
+  const url = `${basePath}?${params.toString()}`;
+
+  const data = await apiRequest<{
+    results: unknown[];
+    total: number;
+    hasMore: boolean;
+  }>(url);
+
+  return {
+    results: data.results.map(mapSearchResultFromBackend),
+    total: data.total,
+    hasMore: data.hasMore,
+    query,
+  };
+}
+
+/**
+ * Search within a specific channel
+ */
+export async function searchChannel(
+  workspaceId: string,
+  channelId: string,
+  query: string,
+  options?: { limit?: number; offset?: number }
+): Promise<SearchResponse> {
+  return searchMessages(workspaceId, query, {
+    ...options,
+    channelId,
+  });
+}
+
+/**
+ * Map search result from backend format
+ */
+function mapSearchResultFromBackend(backend: unknown): SearchResult {
+  const b = backend as Record<string, unknown>;
+  return {
+    id: String(b.id || b.messageId || ''),
+    channelId: String(b.channelId || ''),
+    channelName: String(b.channelName || ''),
+    from: String(b.from || b.senderName || ''),
+    fromEntityType: (b.fromEntityType as 'agent' | 'user') || 'user',
+    content: String(b.content || b.body || ''),
+    snippet: String(b.snippet || b.headline || b.content || ''),
+    timestamp: String(b.timestamp || b.createdAt || new Date().toISOString()),
+    rank: Number(b.rank) || 0,
+  };
 }
 
 // =============================================================================

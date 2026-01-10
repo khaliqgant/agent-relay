@@ -475,25 +475,9 @@ interface SyncMessageInput {
   };
 }
 
-/**
- * POST /api/daemons/messages/sync
- * Sync messages from daemon to cloud storage
- *
- * Accepts batches of messages and stores them in agent_messages table.
- * Uses upsert logic to handle duplicates (based on workspace_id + original_id).
- *
- * Request body:
- * {
- *   messages: SyncMessageInput[]
- * }
- *
- * Response:
- * {
- *   success: true,
- *   synced: number,    // Count of messages synced
- *   duplicates: number // Count of messages skipped (already existed)
- * }
- */
+// TODO: agentMessages feature not yet implemented - endpoints commented out
+// See: https://github.com/AgentWorkforce/relay/issues/XXX
+/*
 daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Request, res: Response) => {
   const daemon = (req as any).daemon;
   const { messages } = req.body as { messages: SyncMessageInput[] };
@@ -506,12 +490,10 @@ daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Reque
     return res.json({ success: true, synced: 0, duplicates: 0 });
   }
 
-  // Limit batch size to prevent abuse
   if (messages.length > 500) {
     return res.status(400).json({ error: 'Maximum batch size is 500 messages' });
   }
 
-  // Require workspace to be linked
   if (!daemon.workspaceId) {
     return res.status(400).json({
       error: 'Daemon must be linked to a workspace to sync messages. Re-link with a workspace ID.',
@@ -519,20 +501,16 @@ daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Reque
   }
 
   try {
-    // Get user plan to determine retention policy
     const user = await db.users.findById(daemon.userId);
     const plan = user?.plan || 'free';
 
-    // Calculate expires_at based on plan
     let expiresAt: Date | null = null;
     if (plan === 'free') {
-      expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+      expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     } else if (plan === 'pro') {
-      expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000); // 90 days
+      expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
     }
-    // Enterprise: null (never expires)
 
-    // Transform to NewAgentMessage format
     const dbMessages = messages.map((msg) => ({
       workspaceId: daemon.workspaceId,
       daemonId: daemon.id,
@@ -552,29 +530,19 @@ daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Reque
       expiresAt,
     }));
 
-    // Insert with onConflictDoNothing for deduplication
     const inserted = await db.agentMessages.createMany(dbMessages);
-
     const synced = inserted.length;
     const duplicates = messages.length - synced;
 
     console.log(`[message-sync] Synced ${synced} messages for daemon ${daemon.id}, ${duplicates} duplicates skipped`);
 
-    res.json({
-      success: true,
-      synced,
-      duplicates,
-    });
+    res.json({ success: true, synced, duplicates });
   } catch (error) {
     console.error('Error syncing messages:', error);
     res.status(500).json({ error: 'Failed to sync messages' });
   }
 });
 
-/**
- * GET /api/daemons/messages/stats
- * Get message sync statistics for this daemon's workspace
- */
 daemonsRouter.get('/messages/stats', requireDaemonAuth as any, async (req: Request, res: Response) => {
   const daemon = (req as any).daemon;
 
@@ -584,13 +552,10 @@ daemonsRouter.get('/messages/stats', requireDaemonAuth as any, async (req: Reque
 
   try {
     const count = await db.agentMessages.countByWorkspace(daemon.workspaceId);
-
-    res.json({
-      workspaceId: daemon.workspaceId,
-      messageCount: count,
-    });
+    res.json({ workspaceId: daemon.workspaceId, messageCount: count });
   } catch (error) {
     console.error('Error fetching message stats:', error);
     res.status(500).json({ error: 'Failed to fetch message stats' });
   }
 });
+*/

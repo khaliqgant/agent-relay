@@ -331,6 +331,7 @@ export const linkedDaemons = pgTable('linked_daemons', {
   metadata: jsonb('metadata').notNull().default({}),
   pendingUpdates: jsonb('pending_updates').notNull().default([]),
   messageQueue: jsonb('message_queue').notNull().default([]),
+  workspaceId: uuid('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({
@@ -338,12 +339,17 @@ export const linkedDaemons = pgTable('linked_daemons', {
   userIdIdx: index('idx_linked_daemons_user_id').on(table.userId),
   apiKeyHashIdx: index('idx_linked_daemons_api_key_hash').on(table.apiKeyHash),
   statusIdx: index('idx_linked_daemons_status').on(table.status),
+  workspaceIdIdx: index('idx_linked_daemons_workspace_id').on(table.workspaceId),
 }));
 
 export const linkedDaemonsRelations = relations(linkedDaemons, ({ one }) => ({
   user: one(users, {
     fields: [linkedDaemons.userId],
     references: [users.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [linkedDaemons.workspaceId],
+    references: [workspaces.id],
   }),
 }));
 

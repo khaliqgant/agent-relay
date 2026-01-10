@@ -513,3 +513,99 @@ export const MOCK_MESSAGES: ChannelMessage[] = [
     isRead: false,
   },
 ];
+
+// =============================================================================
+// Search Types (Task 5)
+// =============================================================================
+
+/**
+ * Search result item from full-text search.
+ */
+export interface SearchResult {
+  /** Message ID */
+  id: string;
+  /** Channel ID where message was found */
+  channelId: string;
+  /** Channel name for display */
+  channelName: string;
+  /** Sender name */
+  from: string;
+  /** Sender entity type */
+  fromEntityType: EntityType;
+  /** Message content (may contain highlight markers) */
+  content: string;
+  /** Highlighted snippet with search terms marked */
+  snippet: string;
+  /** Message timestamp */
+  timestamp: string;
+  /** Search relevance rank */
+  rank: number;
+}
+
+/**
+ * API: Search messages across workspace.
+ * GET /api/workspaces/:workspaceId/search?q=query
+ */
+export interface SearchRequest {
+  /** Search query string */
+  query: string;
+  /** Optional channel ID to limit search scope */
+  channelId?: string;
+  /** Pagination limit */
+  limit?: number;
+  /** Pagination offset */
+  offset?: number;
+}
+
+export interface SearchResponse {
+  /** Search results */
+  results: SearchResult[];
+  /** Total number of matching results */
+  total: number;
+  /** Whether there are more results */
+  hasMore: boolean;
+  /** Search query that was executed */
+  query: string;
+}
+
+/**
+ * Props for SearchInput component.
+ */
+export interface SearchInputProps {
+  /** Initial query value */
+  initialQuery?: string;
+  /** Placeholder text */
+  placeholder?: string;
+  /** Debounce delay in ms */
+  debounceMs?: number;
+  /** Whether search is in progress */
+  isSearching?: boolean;
+  /** Callback when search query changes */
+  onSearch: (query: string) => void;
+  /** Callback when search is cleared */
+  onClear?: () => void;
+  /** Optional channel scope */
+  channelId?: string;
+}
+
+/**
+ * Props for SearchResults component.
+ */
+export interface SearchResultsProps {
+  /** Search results to display */
+  results: SearchResult[];
+  /** Total count for pagination */
+  total: number;
+  /** Current search query (for highlighting) */
+  query: string;
+  /** Whether currently loading */
+  isLoading?: boolean;
+  /** Whether there are more results */
+  hasMore?: boolean;
+  /** Error message if search failed */
+  error?: string;
+  /** Callback to load more results */
+  onLoadMore?: () => void;
+  /** Callback when a result is clicked */
+  onResultClick?: (result: SearchResult) => void;
+}

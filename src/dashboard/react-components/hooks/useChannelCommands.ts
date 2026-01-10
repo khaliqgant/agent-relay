@@ -5,7 +5,7 @@
  * Integrates /create-channel, /join-channel, /leave-channel, /channels commands.
  */
 
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, createElement } from 'react';
 import type { Command } from '../CommandPalette';
 import { api } from '../../lib/api';
 
@@ -98,8 +98,8 @@ export function useChannelCommands(
         id: 'browse-channels',
         label: 'Browse Channels',
         description: 'Discover and join public channels',
-        category: 'channels' as 'actions', // Cast for now since 'channels' category needs to be added
-        icon: <HashIcon />,
+        category: 'channels',
+        icon: createElement('span', { className: 'text-sm' }, '#'),
         shortcut: '/channels',
         action: onBrowseChannels,
       },
@@ -107,8 +107,8 @@ export function useChannelCommands(
         id: 'create-channel',
         label: 'Create Channel',
         description: 'Start a new channel',
-        category: 'channels' as 'actions',
-        icon: <PlusIcon />,
+        category: 'channels',
+        icon: createElement('span', { className: 'text-sm' }, '+'),
         shortcut: '/create-channel',
         action: onCreateChannel,
       },
@@ -121,8 +121,8 @@ export function useChannelCommands(
         id: `leave-${channel}`,
         label: `Leave ${displayName}`,
         description: 'Leave this channel',
-        category: 'channels' as 'actions',
-        icon: <LeaveIcon />,
+        category: 'channels',
+        icon: createElement('span', { className: 'text-sm' }, '⊗'),
         action: () => leaveChannel(channel),
       });
     }
@@ -136,33 +136,3 @@ export function useChannelCommands(
   };
 }
 
-// Icons
-function HashIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <line x1="4" y1="9" x2="20" y2="9" />
-      <line x1="4" y1="15" x2="20" y2="15" />
-      <line x1="10" y1="3" x2="8" y2="21" />
-      <line x1="16" y1="3" x2="14" y2="21" />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function LeaveIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  );
-}

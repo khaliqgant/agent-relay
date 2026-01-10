@@ -639,6 +639,7 @@ export interface DaemonUpdate {
 export interface LinkedDaemonQueries {
   findById(id: string): Promise<schema.LinkedDaemon | null>;
   findByUserId(userId: string): Promise<schema.LinkedDaemon[]>;
+  findByWorkspaceId(workspaceId: string): Promise<schema.LinkedDaemon[]>;
   findByMachineId(userId: string, machineId: string): Promise<schema.LinkedDaemon | null>;
   findByApiKeyHash(apiKeyHash: string): Promise<schema.LinkedDaemon | null>;
   create(data: schema.NewLinkedDaemon): Promise<schema.LinkedDaemon>;
@@ -667,6 +668,15 @@ export const linkedDaemonQueries: LinkedDaemonQueries = {
       .select()
       .from(schema.linkedDaemons)
       .where(eq(schema.linkedDaemons.userId, userId))
+      .orderBy(desc(schema.linkedDaemons.lastSeenAt));
+  },
+
+  async findByWorkspaceId(workspaceId: string): Promise<schema.LinkedDaemon[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.linkedDaemons)
+      .where(eq(schema.linkedDaemons.workspaceId, workspaceId))
       .orderBy(desc(schema.linkedDaemons.lastSeenAt));
   },
 
