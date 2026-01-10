@@ -2291,6 +2291,7 @@ export class WorkspaceProvisioner {
     agentCount?: number;
     agents?: Array<{ name: string; status: string }>;
     error?: string;
+    reason?: string;  // Used for skipped results that aren't errors (e.g., workspace unreachable)
   }> {
     const workspace = await db.workspaces.findById(workspaceId);
     if (!workspace) {
@@ -2332,13 +2333,16 @@ export class WorkspaceProvisioner {
         const agentCheck = await flyProvisioner.checkActiveAgents(workspace);
 
         // If we couldn't verify agent status and not forcing, skip to be safe
+        // This is expected behavior for workspaces that are waking up from auto-stop
+        // or experiencing temporary network issues - not an error condition
         if (!agentCheck.verified && !options.force) {
-          console.log(`[provisioner] Skipped workspace ${workspaceId.substring(0, 8)}: unable to verify agent status (workspace unreachable)`);
+          console.log(`[provisioner] Skipped workspace ${workspaceId.substring(0, 8)}: workspace unreachable (will update on next restart)`);
           return {
             result: WorkspaceProvisioner.UpdateResult.SKIPPED_VERIFICATION_FAILED,
             workspaceId,
             machineState,
-            error: 'Unable to verify agent status - workspace unreachable',
+            // Use 'reason' instead of 'error' - this is expected behavior, not an error
+            reason: 'Workspace unreachable - will update on next restart or when accessible',
           };
         }
 
@@ -2421,6 +2425,7 @@ export class WorkspaceProvisioner {
       updated: number;
       pendingRestart: number;
       skippedActiveAgents: number;
+      skippedVerificationFailed: number;  // Workspaces that couldn't be reached to verify agent status
       skippedNotRunning: number;
       errors: number;
     };
@@ -2430,6 +2435,7 @@ export class WorkspaceProvisioner {
       machineState?: string;
       agentCount?: number;
       error?: string;
+      reason?: string;  // Used for skipped results that aren't errors
     }>;
   }> {
     // Get all workspaces to update
@@ -2464,6 +2470,7 @@ export class WorkspaceProvisioner {
       machineState?: string;
       agentCount?: number;
       error?: string;
+      reason?: string;
     }> = [];
 
     // Process in batches
