@@ -128,6 +128,150 @@ testHelpersRouter.post('/create-daemon', async (req: Request, res: Response) => 
 });
 
 /**
+ * POST /api/test/create-workspace
+ * Creates a test workspace for integration tests with optional linked repository
+ */
+testHelpersRouter.post('/create-workspace', async (req: Request, res: Response) => {
+  if (!isTestMode) {
+    return res.status(403).json({ error: 'Test endpoints disabled in production' });
+  }
+
+  try {
+    const { name, repoFullName, userId: providedUserId } = req.body;
+    const db = getDb();
+
+    // Use provided userId, session userId, or create a test user
+    let targetUserId = providedUserId || req.session.userId;
+
+    if (!targetUserId) {
+      // Create a test user if none exists
+      const testId = `test-ws-${randomUUID()}`;
+      const [newUser] = await db.insert(users).values({
+        email: `${testId}@test.local`,
+        githubId: testId,
+        githubUsername: 'workspace-test-user',
+        avatarUrl: null,
+        plan: 'free',
+      }).returning();
+      targetUserId = newUser.id;
+    }
+
+    const targetRepoFullName = repoFullName || `test-org/test-repo-${Date.now()}`;
+
+    // Create workspace
+    const [workspace] = await db.insert(workspaces).values({
+      userId: targetUserId,
+      name: name || `Test Workspace ${Date.now()}`,
+      status: 'running',
+      publicUrl: 'http://localhost:3889',
+      computeProvider: 'docker',
+      computeId: `test-${randomUUID().slice(0, 8)}`,
+      config: {
+        providers: ['anthropic'],
+        repositories: [targetRepoFullName],
+        supervisorEnabled: true,
+        maxAgents: 10,
+      },
+    }).returning();
+
+    // Create a linked repository for workspace lookup via repoFullName
+    const [repo] = await db.insert(repositories).values({
+      userId: targetUserId,
+      workspaceId: workspace.id,
+      githubId: Math.floor(Math.random() * 1000000),
+      githubFullName: targetRepoFullName,
+      isPrivate: false,
+      defaultBranch: 'main',
+      syncStatus: 'synced',
+      nangoConnectionId: `mock-${randomUUID().slice(0, 8)}`,
+      lastSyncedAt: new Date(),
+    }).returning();
+
+    res.json({
+      workspaceId: workspace.id,
+      name: workspace.name,
+      repoFullName: repo.githubFullName,
+      repoId: repo.id,
+      userId: targetUserId,
+    });
+  } catch (error) {
+    console.error('Error creating test workspace:', error);
+    res.status(500).json({ error: 'Failed to create test workspace' });
+  }
+});
+
+/**
+ * POST /api/test/create-daemon-with-workspace
+ * Creates a test daemon linked to a workspace
+ */
+testHelpersRouter.post('/create-daemon-with-workspace', async (req: Request, res: Response) => {
+  if (!isTestMode) {
+    return res.status(403).json({ error: 'Test endpoints disabled in production' });
+  }
+
+  try {
+    const { name, machineId, workspaceId, userId: providedUserId } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const db = getDb();
+
+    // Get or create test user
+    let targetUserId = providedUserId;
+
+    if (!targetUserId) {
+      const existingUsers = await db.select().from(users).limit(1);
+      if (existingUsers.length > 0) {
+        targetUserId = existingUsers[0].id;
+      } else {
+        const testId = `test-daemon-${randomUUID()}`;
+        const [newUser] = await db.insert(users).values({
+          email: `${testId}@test.local`,
+          githubId: testId,
+          githubUsername: 'daemon-test-user',
+          avatarUrl: null,
+          plan: 'free',
+        }).returning();
+        targetUserId = newUser.id;
+      }
+    }
+
+    // Generate API key
+    const apiKey = `ar_live_${randomBytes(32).toString('hex')}`;
+    const apiKeyHash = createHash('sha256').update(apiKey).digest('hex');
+
+    // Create daemon with optional workspace link
+    const [daemon] = await db.insert(linkedDaemons).values({
+      userId: targetUserId,
+      workspaceId: workspaceId || null,
+      name,
+      machineId: machineId || randomUUID(),
+      apiKeyHash,
+      status: 'online',
+      metadata: {
+        hostname: 'test-host',
+        platform: 'linux',
+        version: '1.0.0-test',
+      },
+    }).returning();
+
+    res.json({
+      daemonId: daemon.id,
+      apiKey,
+      name: daemon.name,
+      machineId: daemon.machineId,
+      workspaceId: daemon.workspaceId,
+      userId: targetUserId,
+    });
+  } catch (error) {
+    console.error('Error creating test daemon:', error);
+    res.status(500).json({ error: 'Failed to create test daemon' });
+  }
+});
+
+/**
  * DELETE /api/test/cleanup
  * Cleans up test data
  */

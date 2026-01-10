@@ -34,6 +34,7 @@ import {
   hasContinuityCommand,
   type ContinuityManager,
 } from '../continuity/index.js';
+import { UniversalIdleDetector } from './idle-detector.js';
 
 /**
  * Base configuration shared by all wrapper types
@@ -70,6 +71,10 @@ export interface BaseWrapperConfig {
   /** Shadow configuration */
   shadowOf?: string;
   shadowSpeakOn?: SpeakOnTrigger[];
+  /** Milliseconds of idle time before injection is allowed (default: 1500) */
+  idleBeforeInjectMs?: number;
+  /** Confidence threshold for idle detection (0-1, default: 0.7) */
+  idleConfidenceThreshold?: number;
 }
 
 /**
@@ -102,6 +107,9 @@ export abstract class BaseWrapper extends EventEmitter {
   protected sessionEndData?: { summary?: string; completedTasks?: string[] };
   protected lastSummaryRawContent = '';
 
+  // Universal idle detection (shared across all wrapper types)
+  protected idleDetector: UniversalIdleDetector;
+
   constructor(config: BaseWrapperConfig) {
     super();
     this.config = config;
@@ -120,6 +128,12 @@ export abstract class BaseWrapper extends EventEmitter {
 
     // Initialize continuity manager
     this.continuity = getContinuityManager({ defaultCli: this.cliType });
+
+    // Initialize universal idle detector for robust injection timing
+    this.idleDetector = new UniversalIdleDetector({
+      minSilenceMs: config.idleBeforeInjectMs ?? 1500,
+      confidenceThreshold: config.idleConfidenceThreshold ?? 0.7,
+    });
 
     // Set up message handler
     this.client.onMessage = (from, payload, messageId, meta, originalTo) => {
@@ -173,6 +187,44 @@ export abstract class BaseWrapper extends EventEmitter {
 
   get pendingMessageCount(): number {
     return this.messageQueue.length;
+  }
+
+  // =========================================================================
+  // Idle detection (shared across all wrapper types)
+  // =========================================================================
+
+  /**
+   * Set the PID for process state inspection (Linux only).
+   * Call this after the agent process is started.
+   */
+  protected setIdleDetectorPid(pid: number): void {
+    this.idleDetector.setPid(pid);
+  }
+
+  /**
+   * Feed output to the idle detector.
+   * Call this whenever new output is received from the agent.
+   */
+  protected feedIdleDetectorOutput(output: string): void {
+    this.idleDetector.onOutput(output);
+  }
+
+  /**
+   * Check if the agent is idle and ready for injection.
+   * Returns idle state with confidence signals.
+   */
+  protected checkIdleForInjection(): { isIdle: boolean; confidence: number; signals: Array<{ source: string; confidence: number }> } {
+    return this.idleDetector.checkIdle({
+      minSilenceMs: this.config.idleBeforeInjectMs ?? 1500,
+    });
+  }
+
+  /**
+   * Wait for the agent to become idle.
+   * Returns when idle or after timeout.
+   */
+  protected async waitForIdleState(timeoutMs = 30000, pollMs = 200): Promise<{ isIdle: boolean; confidence: number }> {
+    return this.idleDetector.waitForIdle(timeoutMs, pollMs);
   }
 
   // =========================================================================

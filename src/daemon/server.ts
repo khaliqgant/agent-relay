@@ -17,6 +17,11 @@ import { AgentRegistry } from './agent-registry.js';
 import { daemonLog as log } from '../utils/logger.js';
 import { getCloudSync, type CloudSyncService, type RemoteAgent, type CrossMachineMessage } from './cloud-sync.js';
 import { v4 as uuid } from 'uuid';
+import {
+  ConsensusIntegration,
+  createConsensusIntegration,
+  type ConsensusIntegrationConfig,
+} from './consensus-integration.js';
 
 export interface DaemonConfig extends ConnectionConfig {
   socketPath: string;
@@ -31,6 +36,8 @@ export interface DaemonConfig extends ConnectionConfig {
   cloudSync?: boolean;
   /** Cloud API URL (defaults to https://agent-relay.com) */
   cloudUrl?: string;
+  /** Consensus mechanism for multi-agent decisions (enabled by default, set to false to disable) */
+  consensus?: boolean | Partial<ConsensusIntegrationConfig>;
 }
 
 export const DEFAULT_SOCKET_PATH = '/tmp/agent-relay.sock';
@@ -53,6 +60,7 @@ export class Daemon {
   private processingStateInterval?: NodeJS.Timeout;
   private cloudSync?: CloudSyncService;
   private remoteAgents: RemoteAgent[] = [];
+  private consensus?: ConsensusIntegration;
 
   /** Callback for log output from agents (used by dashboard for streaming) */
   onLogOutput?: (agentName: string, data: string, timestamp: number) => void;
@@ -138,6 +146,17 @@ export class Daemon {
         isRemoteAgent: this.isRemoteAgent.bind(this),
       },
     });
+
+    // Initialize consensus (enabled by default, can be disabled with consensus: false)
+    if (this.config.consensus !== false) {
+      const consensusConfig = typeof this.config.consensus === 'object'
+        ? this.config.consensus
+        : {};
+
+      this.consensus = createConsensusIntegration(this.router, consensusConfig);
+      log.info('Consensus mechanism enabled');
+    }
+
     this.storageInitialized = true;
   }
 
@@ -561,9 +580,27 @@ export class Daemon {
    */
   private handleMessage(connection: Connection, envelope: Envelope): void {
     switch (envelope.type) {
-      case 'SEND':
-        this.router.route(connection, envelope as Envelope<SendPayload>);
+      case 'SEND': {
+        const sendEnvelope = envelope as SendEnvelope;
+
+        // Check for consensus commands (messages to _consensus)
+        if (this.consensus?.enabled && sendEnvelope.to === '_consensus') {
+          const from = connection.agentName ?? 'unknown';
+          const result = this.consensus.processIncomingMessage(from, sendEnvelope.payload.body);
+
+          if (result.isConsensusCommand) {
+            log.info(`Consensus ${result.type} from ${from}`, {
+              success: result.result?.success,
+              proposalId: result.result?.proposal?.id,
+            });
+            // Don't route consensus commands to the router
+            return;
+          }
+        }
+
+        this.router.route(connection, sendEnvelope);
         break;
+      }
 
       case 'SUBSCRIBE':
         if (connection.agentName && envelope.topic) {
@@ -640,6 +677,20 @@ export class Daemon {
    */
   get isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * Check if consensus is enabled.
+   */
+  get consensusEnabled(): boolean {
+    return this.consensus?.enabled ?? false;
+  }
+
+  /**
+   * Get the consensus integration (for API access).
+   */
+  getConsensus(): ConsensusIntegration | undefined {
+    return this.consensus;
   }
 }
 

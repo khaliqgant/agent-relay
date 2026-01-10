@@ -16,7 +16,7 @@ import { RedisStore } from 'connect-redis';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getConfig } from './config.js';
 import { runMigrations } from './db/index.js';
-import { getScalingOrchestrator, ScalingOrchestrator, getComputeEnforcementService, ComputeEnforcementService, getIntroExpirationService, IntroExpirationService } from './services/index.js';
+import { getScalingOrchestrator, ScalingOrchestrator, getComputeEnforcementService, ComputeEnforcementService, getIntroExpirationService, IntroExpirationService, getWorkspaceKeepaliveService, WorkspaceKeepaliveService } from './services/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +48,7 @@ import { gitRouter } from './api/git.js';
 import { codexAuthHelperRouter } from './api/codex-auth-helper.js';
 import { adminRouter } from './api/admin.js';
 import { channelsRouter } from './api/channels.js';
+import { consensusRouter } from './api/consensus.js';
 import { db } from './db/index.js';
 import { validateSshSecurityConfig } from './services/ssh-security.js';
 
@@ -300,6 +301,7 @@ export async function createServer(): Promise<CloudServer> {
   // --- Routes with session auth ---
   app.use('/api/providers', providersRouter);
   app.use('/api/workspaces', workspacesRouter);
+  app.use('/api', consensusRouter);                      // Consensus API (nested under /api/workspaces/:id/consensus)
   app.use('/api/repos', reposRouter);
   app.use('/api/onboarding', onboardingRouter);
   app.use('/api/billing', billingRouter);
@@ -382,6 +384,7 @@ export async function createServer(): Promise<CloudServer> {
   let scalingOrchestrator: ScalingOrchestrator | null = null;
   let computeEnforcement: ComputeEnforcementService | null = null;
   let introExpiration: IntroExpirationService | null = null;
+  let workspaceKeepalive: WorkspaceKeepaliveService | null = null;
   let daemonStaleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   // Create HTTP server for WebSocket upgrade handling
@@ -758,6 +761,16 @@ export async function createServer(): Promise<CloudServer> {
         } catch (error) {
           console.warn('[cloud] Failed to start intro expiration:', error);
         }
+
+        // Start workspace keepalive service (pings workspaces with active agents)
+        // This prevents Fly.io from idling machines that have running Claude agents
+        try {
+          workspaceKeepalive = getWorkspaceKeepaliveService();
+          workspaceKeepalive.start();
+          console.log('[cloud] Workspace keepalive service started');
+        } catch (error) {
+          console.warn('[cloud] Failed to start workspace keepalive:', error);
+        }
       }
 
       // Start daemon stale check (mark daemons offline if no heartbeat for 2+ minutes)
@@ -798,6 +811,11 @@ export async function createServer(): Promise<CloudServer> {
       // Stop intro expiration service
       if (introExpiration) {
         introExpiration.stop();
+      }
+
+      // Stop workspace keepalive service
+      if (workspaceKeepalive) {
+        workspaceKeepalive.stop();
       }
 
       // Stop daemon stale check

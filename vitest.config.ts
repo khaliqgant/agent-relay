@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
     // Use jsdom environment for frontend tests
     environmentMatchGlobs: [
       ['src/dashboard/frontend/**/*.test.ts', 'jsdom'],

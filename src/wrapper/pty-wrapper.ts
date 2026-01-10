@@ -278,6 +278,12 @@ export class PtyWrapper extends BaseWrapper {
     this.running = true;
     this.sessionStartTime = Date.now();
 
+    // Set PID for idle detector (enables process state inspection on Linux)
+    if (this.ptyProcess.pid) {
+      this.setIdleDetectorPid(this.ptyProcess.pid);
+      console.log(`[pty:${this.config.name}] Idle detector initialized with PID ${this.ptyProcess.pid}`);
+    }
+
     // Skip hooks and continuity in interactive mode - user handles all prompts directly
     if (!this.config.interactive) {
       // Dispatch session start hook (handles trajectory initialization)
@@ -306,9 +312,9 @@ export class PtyWrapper extends BaseWrapper {
       this.client.destroy();
     });
 
-    // Inject initial instructions after a delay, then mark ready for messages
-    // Skip in interactive mode - user handles all prompts directly
-    setTimeout(() => {
+    // Wait for agent to be idle before injecting instructions
+    // This replaces the fixed 2-second delay with actual readiness detection
+    this.waitForAgentReady().then(() => {
       if (!this.config.interactive) {
         this.injectInstructions();
       }
@@ -317,7 +323,29 @@ export class PtyWrapper extends BaseWrapper {
       if (!this.config.interactive) {
         this.processMessageQueue();
       }
-    }, 2000);
+    }).catch(err => {
+      console.error(`[pty:${this.config.name}] Failed to wait for agent ready:`, err);
+      // Fall back to marking ready anyway to avoid blocking forever
+      this.readyForMessages = true;
+    });
+  }
+
+  /**
+   * Wait for the agent to be ready for input.
+   * Uses idle detection instead of a fixed delay.
+   */
+  private async waitForAgentReady(): Promise<void> {
+    // Minimum wait to ensure the CLI process has started
+    await sleep(500);
+
+    // Wait for agent to become idle (CLI fully initialized)
+    const result = await this.waitForIdleState(10000, 200);
+
+    if (result.isIdle) {
+      console.log(`[pty:${this.config.name}] Agent ready (confidence: ${(result.confidence * 100).toFixed(0)}%)`);
+    } else {
+      console.warn(`[pty:${this.config.name}] Agent readiness timeout, proceeding anyway`);
+    }
   }
 
   // Note: initializeAgentId() and getAgentId() are inherited from BaseWrapper
@@ -426,6 +454,9 @@ export class PtyWrapper extends BaseWrapper {
   private handleOutput(data: string): void {
     // Track output timing for stability checks
     this.lastOutputTime = Date.now();
+
+    // Feed output to idle detector for robust idle detection
+    this.feedIdleDetectorOutput(data);
 
     // Append to raw buffer
     this.rawBuffer += data;
@@ -1230,29 +1261,18 @@ export class PtyWrapper extends BaseWrapper {
 
   /**
    * Wait for output to stabilize before injection.
-   * Returns true if output has been stable for the required duration.
+   * Uses UniversalIdleDetector (from BaseWrapper) for robust cross-CLI idle detection.
+   * Returns true if agent is idle and ready for input.
    */
   private async waitForOutputStable(): Promise<boolean> {
-    const startTime = Date.now();
-    let stablePolls = 0;
-    let lastBufferLength = this.rawBuffer.length;
+    const result = await this.waitForIdleState(
+      INJECTION_CONSTANTS.STABILITY_TIMEOUT_MS,
+      INJECTION_CONSTANTS.STABILITY_POLL_MS
+    );
 
-    while (Date.now() - startTime < INJECTION_CONSTANTS.STABILITY_TIMEOUT_MS) {
-      await sleep(INJECTION_CONSTANTS.STABILITY_POLL_MS);
-
-      const timeSinceOutput = Date.now() - this.lastOutputTime;
-      const bufferUnchanged = this.rawBuffer.length === lastBufferLength;
-
-      // Consider stable if no output for at least one poll interval
-      if (timeSinceOutput >= INJECTION_CONSTANTS.STABILITY_POLL_MS && bufferUnchanged) {
-        stablePolls++;
-        if (stablePolls >= INJECTION_CONSTANTS.REQUIRED_STABLE_POLLS) {
-          return true;
-        }
-      } else {
-        stablePolls = 0;
-        lastBufferLength = this.rawBuffer.length;
-      }
+    if (result.isIdle) {
+      console.log(`[pty:${this.config.name}] Idle detected (confidence: ${(result.confidence * 100).toFixed(0)}%)`);
+      return true;
     }
 
     // Timeout - return true anyway to avoid blocking forever

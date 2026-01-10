@@ -87,3 +87,12 @@ export {
   startIntroExpirationService,
   stopIntroExpirationService,
 } from './intro-expiration.js';
+
+// Workspace keepalive (prevent Fly.io from idling machines with active agents)
+export {
+  WorkspaceKeepaliveService,
+  WorkspaceKeepaliveConfig,
+  KeepaliveStats,
+  getWorkspaceKeepaliveService,
+  createWorkspaceKeepaliveService,
+} from './workspace-keepalive.js';

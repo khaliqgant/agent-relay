@@ -5,6 +5,7 @@
  */
 
 import * as crypto from 'crypto';
+import { createHash } from 'node:crypto';
 import { getConfig } from '../config.js';
 import { db, Workspace, PlanType } from '../db/index.js';
 import { nangoService } from '../services/nango.js';
@@ -15,6 +16,50 @@ import {
   type ResourceTierName,
 } from '../services/planLimits.js';
 import { deriveSshPassword } from '../services/ssh-security.js';
+
+// ============================================================================
+// Daemon API Key Management
+// ============================================================================
+
+/**
+ * Generate a daemon API key in the format ar_live_<32 hex chars>
+ */
+function generateDaemonApiKey(): string {
+  const random = crypto.randomBytes(32).toString('hex');
+  return `ar_live_${random}`;
+}
+
+/**
+ * Hash an API key for secure storage
+ */
+function hashApiKey(apiKey: string): string {
+  return createHash('sha256').update(apiKey).digest('hex');
+}
+
+/**
+ * Create a linked daemon record for a workspace during provisioning
+ * @param preGeneratedApiKey - Pre-generated API key (if not provided, one will be generated)
+ */
+async function createLinkedDaemon(
+  userId: string,
+  workspaceId: string,
+  machineId: string,
+  preGeneratedApiKey?: string,
+): Promise<{ daemonId: string; apiKey: string }> {
+  const apiKey = preGeneratedApiKey ?? generateDaemonApiKey();
+  const apiKeyHash = hashApiKey(apiKey);
+
+  const daemon = await db.linkedDaemons.create({
+    userId,
+    workspaceId,
+    name: `auto-provisioned-${Date.now()}`,
+    machineId,
+    apiKeyHash,
+    status: 'offline',
+  });
+
+  return { daemonId: daemon.id, apiKey };
+}
 
 const WORKSPACE_PORT = 3888;
 const WORKSPACE_HEALTH_PORT = 3889; // Health check on separate thread - always responsive
@@ -653,6 +698,10 @@ class FlyProvisioner implements ComputeProvisioner {
     // Stage: Machine (includes volume creation)
     updateProvisioningStage(workspace.id, 'machine');
 
+    // Generate API key for cloud message sync BEFORE creating the machine
+    // The key is set as an env var on the machine and stored hashed in linkedDaemons
+    const machineApiKey = generateDaemonApiKey();
+
     // Create volume with automatic daily snapshots before machine
     // Fly.io takes daily snapshots automatically; we configure retention
     const volume = await this.createVolume(appName);
@@ -719,6 +768,9 @@ class FlyProvisioner implements ComputeProvisioner {
               // Git gateway configuration
               CLOUD_API_URL: this.cloudApiUrl,
               WORKSPACE_TOKEN: this.generateWorkspaceToken(workspace.id),
+              // Daemon API key for cloud message sync
+              // Auto-generated during provisioning, stored in linkedDaemons table
+              AGENT_RELAY_API_KEY: machineApiKey,
               // SSH for CLI tunneling (Codex OAuth callback forwarding)
               // Each workspace gets a unique password derived from its ID + secret salt
               ENABLE_SSH: 'true',
@@ -801,6 +853,16 @@ class FlyProvisioner implements ComputeProvisioner {
     }
 
     const machine = (await machineResponse.json()) as { id: string };
+
+    // Create linked daemon for cloud message sync
+    // Pass the pre-generated API key so it matches what was set in the machine env vars
+    const { daemonId } = await createLinkedDaemon(
+      workspace.userId,
+      workspace.id,
+      machine.id, // Use Fly machine ID as daemon's machine ID
+      machineApiKey, // Pass the pre-generated key
+    );
+    console.log(`[fly] Created linked daemon ${daemonId.substring(0, 8)} for workspace ${workspace.id.substring(0, 8)}`);
 
     // Return custom domain URL if configured, otherwise default fly.dev
     const publicUrl = customHostname
@@ -1098,6 +1160,7 @@ class FlyProvisioner implements ComputeProvisioner {
 
   /**
    * Check if workspace has active agents by querying the daemon
+   * Retries up to 3 times with backoff to handle machines that are starting up
    */
   async checkActiveAgents(workspace: Workspace): Promise<{
     hasActiveAgents: boolean;
@@ -1109,72 +1172,90 @@ class FlyProvisioner implements ComputeProvisioner {
       return { hasActiveAgents: false, agentCount: 0, agents: [], verified: true };
     }
 
-    try {
-      // Use internal Fly network URL if available (more reliable)
-      const appName = `ar-${workspace.id.substring(0, 8)}`;
-      const isOnFly = !!process.env.FLY_APP_NAME;
-      const baseUrl = isOnFly
-        ? `http://${appName}.internal:3888`
-        : workspace.publicUrl;
+    // Use internal Fly network URL if available (more reliable)
+    const appName = `ar-${workspace.id.substring(0, 8)}`;
+    const isOnFly = !!process.env.FLY_APP_NAME;
+    const baseUrl = isOnFly
+      ? `http://${appName}.internal:3888`
+      : workspace.publicUrl;
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10_000);
+    const maxRetries = 3;
+    const retryDelays = [2000, 4000, 6000]; // 2s, 4s, 6s backoff
 
-      const response = await fetch(`${baseUrl}/api/agents`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-        signal: controller.signal,
-      });
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
 
-      clearTimeout(timer);
+        // Use /api/data endpoint which returns { agents: [...], ... }
+        // Note: /api/agents doesn't exist on the workspace dashboard-server
+        const response = await fetch(`${baseUrl}/api/data`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+          signal: controller.signal,
+        });
 
-      if (!response.ok) {
-        console.warn(`[fly] Failed to check agents for ${workspace.id.substring(0, 8)}: HTTP ${response.status}`);
-        return { hasActiveAgents: false, agentCount: 0, agents: [], verified: false };
-      }
+        clearTimeout(timer);
 
-      const data = await response.json() as {
-        agents: Array<{ name: string; status: string; activityState?: string }>;
-      };
+        if (!response.ok) {
+          console.warn(`[fly] Failed to check agents for ${workspace.id.substring(0, 8)}: HTTP ${response.status} (attempt ${attempt + 1}/${maxRetries})`);
+          if (attempt < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+            continue;
+          }
+          return { hasActiveAgents: false, agentCount: 0, agents: [], verified: false };
+        }
 
-      const agents = data.agents || [];
+        const data = await response.json() as {
+          agents: Array<{ name: string; status: string; activityState?: string }>;
+        };
 
-      // Diagnostic logging: capture raw agent data before filtering
-      if (agents.length > 0) {
-        console.log(`[fly] Workspace ${workspace.id.substring(0, 8)} raw agent data:`,
-          agents.map(a => ({ name: a.name, status: a.status, activityState: a.activityState }))
+        const agents = data.agents || [];
+
+        // Diagnostic logging: capture raw agent data before filtering
+        if (agents.length > 0) {
+          console.log(`[fly] Workspace ${workspace.id.substring(0, 8)} raw agent data:`,
+            agents.map(a => ({ name: a.name, status: a.status, activityState: a.activityState }))
+          );
+        }
+
+        // Consider agents with 'active' or 'idle' activity state as active
+        // 'disconnected' agents are not active
+        const activeAgents = agents.filter(a =>
+          a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle'
         );
+
+        // Log filtering results for diagnostics
+        if (agents.length > 0 && activeAgents.length !== agents.length) {
+          const filteredOut = agents.filter(a =>
+            !(a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle')
+          );
+          console.log(`[fly] Workspace ${workspace.id.substring(0, 8)} filtered out agents:`,
+            filteredOut.map(a => ({ name: a.name, status: a.status, activityState: a.activityState }))
+          );
+        }
+
+        return {
+          hasActiveAgents: activeAgents.length > 0,
+          agentCount: activeAgents.length,
+          agents: agents.map(a => ({ name: a.name, status: a.status || a.activityState || 'unknown' })),
+          verified: true,
+        };
+      } catch (error) {
+        // Workspace might be stopped or unreachable - retry with backoff
+        console.warn(`[fly] Could not reach workspace ${workspace.id.substring(0, 8)} (attempt ${attempt + 1}/${maxRetries}):`, (error as Error).message);
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+          continue;
+        }
       }
-
-      // Consider agents with 'active' or 'idle' activity state as active
-      // 'disconnected' agents are not active
-      const activeAgents = agents.filter(a =>
-        a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle'
-      );
-
-      // Log filtering results for diagnostics
-      if (agents.length > 0 && activeAgents.length !== agents.length) {
-        const filteredOut = agents.filter(a =>
-          !(a.status === 'running' || a.activityState === 'active' || a.activityState === 'idle')
-        );
-        console.log(`[fly] Workspace ${workspace.id.substring(0, 8)} filtered out agents:`,
-          filteredOut.map(a => ({ name: a.name, status: a.status, activityState: a.activityState }))
-        );
-      }
-
-      return {
-        hasActiveAgents: activeAgents.length > 0,
-        agentCount: activeAgents.length,
-        agents: agents.map(a => ({ name: a.name, status: a.status || a.activityState || 'unknown' })),
-        verified: true,
-      };
-    } catch (error) {
-      // Workspace might be stopped or unreachable - cannot verify agent status
-      console.warn(`[fly] Could not reach workspace ${workspace.id.substring(0, 8)} to check agents:`, (error as Error).message);
-      return { hasActiveAgents: false, agentCount: 0, agents: [], verified: false };
     }
+
+    // All retries exhausted
+    console.warn(`[fly] Workspace ${workspace.id.substring(0, 8)} unreachable after ${maxRetries} attempts`);
+    return { hasActiveAgents: false, agentCount: 0, agents: [], verified: false };
   }
 
   /**
@@ -1291,6 +1372,15 @@ class RailwayProvisioner implements ComputeProvisioner {
     const serviceData = await serviceResponse.json() as { data: { serviceCreate: { id: string } } };
     const serviceId = serviceData.data.serviceCreate.id;
 
+    // Create linked daemon for cloud message sync
+    // This generates an API key and registers the daemon in the linkedDaemons table
+    const { daemonId, apiKey: railwayApiKey } = await createLinkedDaemon(
+      workspace.userId,
+      workspace.id,
+      serviceId, // Use Railway service ID as daemon's machine ID
+    );
+    console.log(`[railway] Created linked daemon ${daemonId.substring(0, 8)} for workspace ${workspace.id.substring(0, 8)}`);
+
     // Set environment variables
     const envVars: Record<string, string> = {
       WORKSPACE_ID: workspace.id,
@@ -1305,6 +1395,9 @@ class RailwayProvisioner implements ComputeProvisioner {
       WORKSPACE_DIR: '/data/repos',
       CLOUD_API_URL: this.cloudApiUrl,
       WORKSPACE_TOKEN: this.generateWorkspaceToken(workspace.id),
+      // Daemon API key for cloud message sync
+      // Auto-generated during provisioning, stored in linkedDaemons table
+      AGENT_RELAY_API_KEY: railwayApiKey,
     };
 
     for (const [provider, token] of credentials) {
@@ -1539,6 +1632,16 @@ class DockerProvisioner implements ComputeProvisioner {
   ): Promise<{ computeId: string; publicUrl: string; sshPort?: number }> {
     const containerName = `ar-${workspace.id.substring(0, 8)}`;
 
+    // Create linked daemon for cloud message sync
+    // This generates an API key and registers the daemon in the linkedDaemons table
+    // Use container name as daemon's machine ID (will be updated to actual container ID after creation)
+    const { daemonId, apiKey: dockerApiKey } = await createLinkedDaemon(
+      workspace.userId,
+      workspace.id,
+      containerName,
+    );
+    console.log(`[docker] Created linked daemon ${daemonId.substring(0, 8)} for workspace ${workspace.id.substring(0, 8)}`);
+
     // Build environment variables
     const envArgs: string[] = [
       `-e WORKSPACE_ID=${workspace.id}`,
@@ -1553,6 +1656,9 @@ class DockerProvisioner implements ComputeProvisioner {
       `-e WORKSPACE_DIR=/data/repos`,
       `-e CLOUD_API_URL=${this.cloudApiUrlForContainer}`,
       `-e WORKSPACE_TOKEN=${this.generateWorkspaceToken(workspace.id)}`,
+      // Daemon API key for cloud message sync
+      // Auto-generated during provisioning, stored in linkedDaemons table
+      `-e AGENT_RELAY_API_KEY=${dockerApiKey}`,
     ];
 
     for (const [provider, token] of credentials) {
@@ -2187,6 +2293,7 @@ export class WorkspaceProvisioner {
     agentCount?: number;
     agents?: Array<{ name: string; status: string }>;
     error?: string;
+    reason?: string;  // Used for skipped results that aren't errors (e.g., workspace unreachable)
   }> {
     const workspace = await db.workspaces.findById(workspaceId);
     if (!workspace) {
@@ -2228,13 +2335,16 @@ export class WorkspaceProvisioner {
         const agentCheck = await flyProvisioner.checkActiveAgents(workspace);
 
         // If we couldn't verify agent status and not forcing, skip to be safe
+        // This is expected behavior for workspaces that are waking up from auto-stop
+        // or experiencing temporary network issues - not an error condition
         if (!agentCheck.verified && !options.force) {
-          console.log(`[provisioner] Skipped workspace ${workspaceId.substring(0, 8)}: unable to verify agent status (workspace unreachable)`);
+          console.log(`[provisioner] Skipped workspace ${workspaceId.substring(0, 8)}: workspace unreachable (will update on next restart)`);
           return {
             result: WorkspaceProvisioner.UpdateResult.SKIPPED_VERIFICATION_FAILED,
             workspaceId,
             machineState,
-            error: 'Unable to verify agent status - workspace unreachable',
+            // Use 'reason' instead of 'error' - this is expected behavior, not an error
+            reason: 'Workspace unreachable - will update on next restart or when accessible',
           };
         }
 
@@ -2317,6 +2427,7 @@ export class WorkspaceProvisioner {
       updated: number;
       pendingRestart: number;
       skippedActiveAgents: number;
+      skippedVerificationFailed: number;  // Workspaces that couldn't be reached to verify agent status
       skippedNotRunning: number;
       errors: number;
     };
@@ -2326,6 +2437,7 @@ export class WorkspaceProvisioner {
       machineState?: string;
       agentCount?: number;
       error?: string;
+      reason?: string;  // Used for skipped results that aren't errors
     }>;
   }> {
     // Get all workspaces to update
@@ -2360,6 +2472,7 @@ export class WorkspaceProvisioner {
       machineState?: string;
       agentCount?: number;
       error?: string;
+      reason?: string;
     }> = [];
 
     // Process in batches
