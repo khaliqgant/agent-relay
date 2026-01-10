@@ -6,14 +6,31 @@ This document describes the standardized authentication patterns for OpenAI Code
 
 Agent Relay supports multiple authentication methods for Codex/OpenAI, prioritized in this order:
 
-1. **Environment variable** - `OPENAI_API_KEY` (recommended)
-2. **OAuth tokens** - From `~/.codex/auth.json`
-3. **Config file API key** - From `~/.codex/auth.json`
+1. **OAuth tokens** - From `~/.codex/auth.json` (recommended - ChatGPT sign-in)
+2. **Environment variable** - `OPENAI_API_KEY` (fallback)
+3. **Config file API key** - From `~/.codex/auth.json` (legacy)
 4. **CLI-based OAuth** - Interactive `codex login` flow
 
-## Environment Variable Authentication
+## OAuth Authentication (Recommended)
 
-The simplest and most portable method. Set the `OPENAI_API_KEY` environment variable:
+The recommended method is to use the ChatGPT sign-in flow via the Codex CLI:
+
+```bash
+codex login
+```
+
+This uses OAuth device flow with PKCE for secure authentication and stores tokens in `~/.codex/auth.json`.
+
+### Why OAuth over API Keys?
+
+- **Recommended by Codex**: The official Codex CLI defaults to ChatGPT sign-in
+- **Token refresh**: OAuth tokens can be refreshed automatically
+- **No secrets to manage**: No need to handle API key rotation
+- **Consistent experience**: Same authentication as the Codex CLI
+
+## Environment Variable Authentication (Fallback)
+
+For users who prefer API keys, you can set the `OPENAI_API_KEY` environment variable:
 
 ```bash
 # In your shell
@@ -23,7 +40,7 @@ export OPENAI_API_KEY="sk-your-api-key-here"
 OPENAI_API_KEY=sk-your-api-key-here
 ```
 
-The relay automatically loads `.env` files from the project root.
+**Note**: OAuth tokens take priority over API keys when both are present.
 
 ## Configuration Files
 
@@ -89,20 +106,26 @@ The module supports all Codex-compatible providers:
 ### Check Authentication
 
 ```typescript
-import { getCodexAuth, isCodexAuthenticated } from './shared/codex-auth.js';
+import { getCodexAuth, getCodexOAuth, isCodexAuthenticated } from './shared/codex-auth.js';
 
 // Quick check
 if (await isCodexAuthenticated()) {
   console.log('Codex is authenticated');
 }
 
-// Detailed info
+// Detailed info (OAuth-first, with API key fallback)
 const auth = await getCodexAuth();
 if (auth.authenticated) {
-  console.log(`Auth method: ${auth.method}`);
-  console.log(`API Key: ${auth.apiKey || auth.accessToken}`);
+  console.log(`Auth method: ${auth.method}`); // 'oauth', 'env', or 'config'
+  console.log(`Token: ${auth.accessToken || auth.apiKey}`);
   console.log(`Provider: ${auth.provider}`);
   console.log(`Base URL: ${auth.baseURL}`);
+}
+
+// OAuth-only mode (no API key fallback)
+const oauthAuth = await getCodexOAuth();
+if (oauthAuth.authenticated) {
+  console.log('Using OAuth tokens');
 }
 ```
 
@@ -143,9 +166,34 @@ for (const provider of statuses) {
 }
 ```
 
-## CLI Authentication Flow
+## OAuth Device Flow
 
-When environment variables or config files don't provide authentication, the relay supports the interactive `codex login` OAuth flow:
+The Codex CLI uses OAuth device flow with PKCE for secure authentication. This is the recommended approach.
+
+### OAuth Endpoints
+
+```typescript
+import { CODEX_OAUTH } from './shared/codex-auth.js';
+
+// Available OAuth endpoints:
+CODEX_OAUTH.authBaseUrl        // 'https://auth.openai.com'
+CODEX_OAUTH.deviceCodeEndpoint // '/deviceauth/usercode'
+CODEX_OAUTH.tokenEndpoint      // '/deviceauth/token'
+CODEX_OAUTH.callbackEndpoint   // '/deviceauth/callback'
+CODEX_OAUTH.pollingTimeoutMs   // 15 minutes
+CODEX_OAUTH.pollingIntervalMs  // 5 seconds
+```
+
+### How Device Flow Works
+
+1. CLI requests a device code from `/deviceauth/usercode`
+2. User visits the verification URL and enters the code
+3. CLI polls `/deviceauth/token` until authorization completes
+4. On success, tokens are exchanged and stored in `~/.codex/auth.json`
+
+### CLI Authentication Flow
+
+When no existing authentication is found, the relay supports the interactive `codex login` OAuth flow:
 
 1. User initiates auth via dashboard or API
 2. Relay spawns `codex login` in a PTY
@@ -154,7 +202,7 @@ When environment variables or config files don't provide authentication, the rel
 5. Codex CLI receives callback and stores tokens in `~/.codex/auth.json`
 6. Relay detects success and marks provider as authenticated
 
-### Device Flow (Headless Environments)
+### Device Flow for Headless Environments
 
 For container/headless environments, use device auth:
 

@@ -2,12 +2,15 @@
  * Codex Authentication Module
  *
  * Standardized authentication for OpenAI Codex following official patterns:
- * - Environment variable support (OPENAI_API_KEY)
- * - Config file loading from ~/.codex/
- * - Multi-provider support with baseURL + envKey pattern
- * - .env file support via dotenv
+ * - OAuth device flow (recommended - ChatGPT sign-in)
+ * - OAuth tokens from ~/.codex/auth.json
+ * - Environment variable support (OPENAI_API_KEY) as fallback
  *
  * Based on: https://github.com/openai/codex
+ *
+ * The Codex CLI uses OAuth device flow with PKCE for secure authentication.
+ * This module prioritizes OAuth tokens over API keys to match the recommended
+ * ChatGPT sign-in flow.
  */
 
 import * as fs from 'node:fs/promises';
@@ -145,6 +148,25 @@ export const CODEX_PATHS = {
 };
 
 /**
+ * OAuth endpoints for Codex device flow authentication
+ * Based on: https://github.com/openai/codex/blob/main/codex-rs/login/src/device_code_auth.rs
+ */
+export const CODEX_OAUTH = {
+  /** Base URL for OpenAI auth service */
+  authBaseUrl: 'https://auth.openai.com',
+  /** Device code request endpoint */
+  deviceCodeEndpoint: '/deviceauth/usercode',
+  /** Token polling endpoint */
+  tokenEndpoint: '/deviceauth/token',
+  /** Callback endpoint for token exchange */
+  callbackEndpoint: '/deviceauth/callback',
+  /** Default polling timeout (15 minutes) */
+  pollingTimeoutMs: 15 * 60 * 1000,
+  /** Default polling interval (5 seconds) */
+  pollingIntervalMs: 5000,
+};
+
+/**
  * Load .env file from project root if it exists
  */
 export async function loadDotEnv(projectRoot?: string): Promise<void> {
@@ -226,44 +248,74 @@ export async function saveCodexAuth(
 }
 
 /**
+ * Options for getCodexAuth
+ */
+export interface GetCodexAuthOptions {
+  /** Project root for .env file loading */
+  projectRoot?: string;
+  /** If true, skip API key checks and only use OAuth (default: false) */
+  oauthOnly?: boolean;
+}
+
+/**
  * Get authentication for Codex/OpenAI
  *
- * Priority order (matching official Codex CLI):
- * 1. OPENAI_API_KEY environment variable
- * 2. OAuth tokens from ~/.codex/auth.json
- * 3. API key from config file
+ * Priority order (OAuth-first, following recommended ChatGPT sign-in flow):
+ * 1. OAuth tokens from ~/.codex/auth.json (recommended)
+ * 2. OPENAI_API_KEY environment variable (fallback, can be disabled)
+ * 3. API key from config file (legacy fallback)
  *
- * @param projectRoot - Optional project root for .env loading
+ * @param options - Authentication options or project root string for backward compatibility
  */
 export async function getCodexAuth(
-  projectRoot?: string
+  options?: string | GetCodexAuthOptions
 ): Promise<CodexAuthResult> {
-  // Load .env file first
-  await loadDotEnv(projectRoot);
+  // Handle backward compatibility - string argument is projectRoot
+  const opts: GetCodexAuthOptions =
+    typeof options === 'string' ? { projectRoot: options } : options || {};
 
-  // 1. Check environment variable (highest priority)
+  // Load .env file (for non-API-key settings)
+  await loadDotEnv(opts.projectRoot);
+
+  // 1. Check OAuth credentials from auth.json (HIGHEST PRIORITY - recommended flow)
+  const authCredentials = await loadCodexAuth();
+  if (authCredentials?.tokens?.access_token) {
+    // Check if token is expired
+    const expiresAt = authCredentials.tokens.expires_at
+      ? new Date(authCredentials.tokens.expires_at)
+      : undefined;
+    const isExpired = expiresAt && expiresAt.getTime() < Date.now();
+
+    if (!isExpired) {
+      return {
+        authenticated: true,
+        method: 'oauth',
+        accessToken: authCredentials.tokens.access_token,
+        refreshToken: authCredentials.tokens.refresh_token,
+        expiresAt,
+        provider: 'openai',
+        baseURL: DEFAULT_PROVIDERS.openai.baseURL,
+      };
+    }
+    // Token expired - fall through to check for refresh token handling
+    // (refresh logic would be handled by the CLI or a separate refresh function)
+  }
+
+  // If oauthOnly is set, don't check API keys
+  if (opts.oauthOnly) {
+    return {
+      authenticated: false,
+      method: 'none',
+    };
+  }
+
+  // 2. Check environment variable (fallback for users who prefer API keys)
   const envApiKey = process.env.OPENAI_API_KEY;
   if (envApiKey) {
     return {
       authenticated: true,
       method: 'env',
       apiKey: envApiKey,
-      provider: 'openai',
-      baseURL: DEFAULT_PROVIDERS.openai.baseURL,
-    };
-  }
-
-  // 2. Check OAuth credentials from auth.json
-  const authCredentials = await loadCodexAuth();
-  if (authCredentials?.tokens?.access_token) {
-    return {
-      authenticated: true,
-      method: 'oauth',
-      accessToken: authCredentials.tokens.access_token,
-      refreshToken: authCredentials.tokens.refresh_token,
-      expiresAt: authCredentials.tokens.expires_at
-        ? new Date(authCredentials.tokens.expires_at)
-        : undefined,
       provider: 'openai',
       baseURL: DEFAULT_PROVIDERS.openai.baseURL,
     };
@@ -285,6 +337,18 @@ export async function getCodexAuth(
     authenticated: false,
     method: 'none',
   };
+}
+
+/**
+ * Get OAuth-only authentication (no API key fallback)
+ *
+ * Use this when you specifically want to use the ChatGPT sign-in flow
+ * and not fall back to API keys.
+ */
+export async function getCodexOAuth(
+  projectRoot?: string
+): Promise<CodexAuthResult> {
+  return getCodexAuth({ projectRoot, oauthOnly: true });
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   loadCodexConfig,
   loadCodexAuth,
   getCodexAuth,
+  getCodexOAuth,
   getProviderAuth,
   isCodexAuthenticated,
   getCodexToken,
@@ -25,6 +26,7 @@ import {
   getProviderStatuses,
   DEFAULT_PROVIDERS,
   CODEX_PATHS,
+  CODEX_OAUTH,
   OPENAI_API_KEY_ENV,
   loadDotEnv,
 } from '../../src/shared/codex-auth.js';
@@ -85,18 +87,39 @@ describe('Codex Auth Module', () => {
     });
   });
 
+  describe('CODEX_OAUTH', () => {
+    it('should define OAuth endpoints', () => {
+      expect(CODEX_OAUTH.authBaseUrl).toBe('https://auth.openai.com');
+      expect(CODEX_OAUTH.deviceCodeEndpoint).toBe('/deviceauth/usercode');
+      expect(CODEX_OAUTH.tokenEndpoint).toBe('/deviceauth/token');
+      expect(CODEX_OAUTH.callbackEndpoint).toBe('/deviceauth/callback');
+      expect(CODEX_OAUTH.pollingTimeoutMs).toBe(15 * 60 * 1000);
+      expect(CODEX_OAUTH.pollingIntervalMs).toBe(5000);
+    });
+  });
+
   describe('getCodexAuth', () => {
-    it('should return env-based auth when OPENAI_API_KEY is set', async () => {
+    it('should prioritize OAuth tokens over env vars (OAuth-first)', async () => {
       process.env.OPENAI_API_KEY = 'sk-test-key-123';
-      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      vi.mocked(fs.readFile).mockImplementation(async (filePath) => {
+        if (String(filePath).endsWith('auth.json')) {
+          return JSON.stringify({
+            tokens: {
+              access_token: 'oauth-access-token',
+              refresh_token: 'oauth-refresh-token',
+              expires_at: Date.now() + 3600000,
+            },
+          });
+        }
+        throw new Error('ENOENT');
+      });
 
       const result = await getCodexAuth();
 
+      // OAuth should take priority over env var
       expect(result.authenticated).toBe(true);
-      expect(result.method).toBe('env');
-      expect(result.apiKey).toBe('sk-test-key-123');
-      expect(result.provider).toBe('openai');
-      expect(result.baseURL).toBe('https://api.openai.com/v1');
+      expect(result.method).toBe('oauth');
+      expect(result.accessToken).toBe('oauth-access-token');
     });
 
     it('should return oauth-based auth when auth.json has tokens', async () => {
@@ -119,6 +142,17 @@ describe('Codex Auth Module', () => {
       expect(result.method).toBe('oauth');
       expect(result.accessToken).toBe('oauth-access-token');
       expect(result.refreshToken).toBe('oauth-refresh-token');
+    });
+
+    it('should fall back to env var when no OAuth tokens', async () => {
+      process.env.OPENAI_API_KEY = 'sk-test-key-123';
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+
+      const result = await getCodexAuth();
+
+      expect(result.authenticated).toBe(true);
+      expect(result.method).toBe('env');
+      expect(result.apiKey).toBe('sk-test-key-123');
     });
 
     it('should return config-based auth when auth.json has OPENAI_API_KEY', async () => {
@@ -147,12 +181,15 @@ describe('Codex Auth Module', () => {
       expect(result.method).toBe('none');
     });
 
-    it('should prioritize env var over config file', async () => {
+    it('should skip expired OAuth tokens and fall back to env var', async () => {
       process.env.OPENAI_API_KEY = 'env-api-key';
       vi.mocked(fs.readFile).mockImplementation(async (filePath) => {
         if (String(filePath).endsWith('auth.json')) {
           return JSON.stringify({
-            OPENAI_API_KEY: 'config-api-key',
+            tokens: {
+              access_token: 'expired-token',
+              expires_at: Date.now() - 3600000, // Expired 1 hour ago
+            },
           });
         }
         throw new Error('ENOENT');
@@ -163,6 +200,39 @@ describe('Codex Auth Module', () => {
       expect(result.authenticated).toBe(true);
       expect(result.method).toBe('env');
       expect(result.apiKey).toBe('env-api-key');
+    });
+  });
+
+  describe('getCodexOAuth', () => {
+    it('should return OAuth auth only, ignoring env vars', async () => {
+      process.env.OPENAI_API_KEY = 'sk-test-key-123';
+      vi.mocked(fs.readFile).mockImplementation(async (filePath) => {
+        if (String(filePath).endsWith('auth.json')) {
+          return JSON.stringify({
+            tokens: {
+              access_token: 'oauth-access-token',
+              expires_at: Date.now() + 3600000,
+            },
+          });
+        }
+        throw new Error('ENOENT');
+      });
+
+      const result = await getCodexOAuth();
+
+      expect(result.authenticated).toBe(true);
+      expect(result.method).toBe('oauth');
+      expect(result.accessToken).toBe('oauth-access-token');
+    });
+
+    it('should return not authenticated when no OAuth (even if env var exists)', async () => {
+      process.env.OPENAI_API_KEY = 'sk-test-key-123';
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+
+      const result = await getCodexOAuth();
+
+      expect(result.authenticated).toBe(false);
+      expect(result.method).toBe('none');
     });
   });
 

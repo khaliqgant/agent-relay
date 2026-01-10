@@ -22,9 +22,12 @@ import {
 } from '../shared/cli-auth-config.js';
 import {
   getCodexAuth,
+  getCodexOAuth,
   getProviderAuth,
   isCodexAuthenticated,
+  CODEX_OAUTH,
   type CodexAuthResult,
+  type GetCodexAuthOptions,
 } from '../shared/codex-auth.js';
 
 const logger = createLogger('cli-auth');
@@ -78,6 +81,8 @@ setInterval(() => {
 export interface StartCLIAuthOptions {
   /** Use device flow instead of standard OAuth (if provider supports it) */
   useDeviceFlow?: boolean;
+  /** Skip API key fallback and only use OAuth (for Codex) */
+  oauthOnly?: boolean;
 }
 
 /**
@@ -113,19 +118,25 @@ export async function startCLIAuth(
     allSessionIds: Array.from(sessions.keys()),
   });
 
-  // For OpenAI/Codex: Check standardized auth (env var, config file) first
-  // This follows the official Codex pattern: OPENAI_API_KEY takes priority
+  // For OpenAI/Codex: Check OAuth tokens first (recommended ChatGPT sign-in flow)
+  // OAuth takes priority over API keys to match the official Codex patterns
   if (provider === 'openai') {
     try {
-      const codexAuth = await getCodexAuth();
+      // Use oauthOnly option to skip API key fallback if requested
+      const codexAuth = options.oauthOnly
+        ? await getCodexOAuth()
+        : await getCodexAuth();
+
       if (codexAuth.authenticated) {
         logger.info('Already authenticated via standardized Codex auth', {
           provider,
           sessionId,
           method: codexAuth.method,
+          isOAuth: codexAuth.method === 'oauth',
         });
         session.status = 'success';
-        session.token = codexAuth.apiKey || codexAuth.accessToken;
+        // Prefer OAuth access token over API key
+        session.token = codexAuth.accessToken || codexAuth.apiKey;
         session.refreshToken = codexAuth.refreshToken;
         session.tokenExpiresAt = codexAuth.expiresAt;
         return session;
@@ -826,5 +837,11 @@ export async function getCodexAuthStatus(): Promise<CodexAuthResult> {
 /**
  * Re-export for consumers who need direct access
  */
-export { getCodexAuth, getProviderAuth, isCodexAuthenticated };
+export {
+  getCodexAuth,
+  getCodexOAuth,
+  getProviderAuth,
+  isCodexAuthenticated,
+  CODEX_OAUTH,
+};
 
