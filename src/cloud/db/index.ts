@@ -49,10 +49,20 @@ export type {
   CommentMention,
   NewCommentMention,
   AgentTriggerConfig,
-  // Agent message types
-  AgentMessage,
-  NewAgentMessage,
-  MessagePayloadMeta,
+  // Channel types
+  Channel,
+  NewChannel,
+  ChannelMember,
+  NewChannelMember,
+  ChannelMemberRole,
+  ChannelMemberType,
+  ChannelMessage,
+  NewChannelMessage,
+  ChannelReadState,
+  NewChannelReadState,
+  // Message reaction types
+  MessageReaction,
+  NewMessageReaction,
 } from './schema.js';
 
 // Re-export schema tables for direct access if needed
@@ -71,7 +81,11 @@ export {
   ciFixAttempts as ciFixAttemptsTable,
   issueAssignments as issueAssignmentsTable,
   commentMentions as commentMentionsTable,
-  agentMessages as agentMessagesTable,
+  channels as channelsTable,
+  channelMembers as channelMembersTable,
+  channelMessages as channelMessagesTable,
+  channelReadState as channelReadStateTable,
+  messageReactions as messageReactionsTable,
 } from './schema.js';
 
 // Import query modules
@@ -92,18 +106,24 @@ import {
   ciFixAttemptQueries,
   issueAssignmentQueries,
   commentMentionQueries,
-  agentMessageQueries,
+  channelQueries,
+  channelMemberQueries,
+  channelMessageQueries,
+  channelReadStateQueries,
+  messageReactionQueries,
+  STANDARD_REACTIONS,
 } from './drizzle.js';
 
-// Import bulk ingest utilities
-import {
-  bulkInsertMessages,
-  streamingBulkInsert,
-  optimizedBulkInsert,
-  getPoolStats,
-  checkPoolHealth,
-  type BulkInsertResult,
-} from './bulk-ingest.js';
+// TODO: Bulk ingest utilities deferred - waiting for NewAgentMessage schema (beads-bulk-ingest-1)
+// See: docs/CHANNELS_V1_BEADS_TASKS.md for agent messaging implementation plan
+// import {
+//   bulkInsertMessages,
+//   streamingBulkInsert,
+//   optimizedBulkInsert,
+//   getPoolStats,
+//   checkPoolHealth,
+//   type BulkInsertResult,
+// } from './bulk-ingest.js';
 
 // Legacy type aliases for backwards compatibility
 export type PlanType = 'free' | 'pro' | 'team' | 'enterprise';
@@ -133,16 +153,21 @@ export const db = {
   // Issue and comment tracking
   issueAssignments: issueAssignmentQueries,
   commentMentions: commentMentionQueries,
-  // Agent messages (cloud-synced relay messages)
-  agentMessages: agentMessageQueries,
-  // Bulk ingest utilities (optimized high-volume operations)
-  bulk: {
-    insertMessages: bulkInsertMessages,
-    streamingInsert: streamingBulkInsert,
-    optimizedInsert: optimizedBulkInsert,
-    getPoolStats: () => getPoolStats(getRawPool()),
-    checkHealth: () => checkPoolHealth(getRawPool()),
-  },
+  // Channels
+  channels: channelQueries,
+  channelMembers: channelMemberQueries,
+  channelMessages: channelMessageQueries,
+  channelReadState: channelReadStateQueries,
+  // Message reactions
+  messageReactions: messageReactionQueries,
+  // TODO: Bulk ingest utilities deferred - waiting for NewAgentMessage schema
+  // bulk: {
+  //   insertMessages: bulkInsertMessages,
+  //   streamingInsert: streamingBulkInsert,
+  //   optimizedInsert: optimizedBulkInsert,
+  //   getPoolStats: () => getPoolStats(getRawPool()),
+  //   checkHealth: () => checkPoolHealth(getRawPool()),
+  // },
   // Database utilities
   getDb,
   getRawPool,
@@ -164,21 +189,32 @@ export {
   ciFixAttemptQueries,
   issueAssignmentQueries,
   commentMentionQueries,
-  agentMessageQueries,
+  channelQueries,
+  channelMemberQueries,
+  channelMessageQueries,
+  channelReadStateQueries,
+  messageReactionQueries,
+  STANDARD_REACTIONS,
 };
+
+// Export search types
+export type { SearchResult, SearchOptions } from './drizzle.js';
+
+// Export reaction types
+export type { ReactionSummary, StandardEmoji } from './drizzle.js';
 
 // Export database utilities
 export { getDb, closeDb, runMigrations, getRawPool };
 
-// Export bulk ingest utilities
-export {
-  bulkInsertMessages,
-  streamingBulkInsert,
-  optimizedBulkInsert,
-  getPoolStats,
-  checkPoolHealth,
-  type BulkInsertResult,
-};
+// TODO: Bulk ingest utilities deferred - waiting for NewAgentMessage schema
+// export {
+//   bulkInsertMessages,
+//   streamingBulkInsert,
+//   optimizedBulkInsert,
+//   getPoolStats,
+//   checkPoolHealth,
+//   type BulkInsertResult,
+// };
 
 // Legacy function - use runMigrations instead
 export async function initializeDatabase(): Promise<void> {
