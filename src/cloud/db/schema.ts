@@ -191,6 +191,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   members: many(workspaceMembers),
   repositories: many(repositories),
   linkedDaemons: many(linkedDaemons),
+  messages: many(agentMessages),
 }));
 
 // ============================================================================
@@ -343,7 +344,7 @@ export const linkedDaemons = pgTable('linked_daemons', {
   statusIdx: index('idx_linked_daemons_status').on(table.status),
 }));
 
-export const linkedDaemonsRelations = relations(linkedDaemons, ({ one }) => ({
+export const linkedDaemonsRelations = relations(linkedDaemons, ({ one, many }) => ({
   user: one(users, {
     fields: [linkedDaemons.userId],
     references: [users.id],
@@ -352,6 +353,7 @@ export const linkedDaemonsRelations = relations(linkedDaemons, ({ one }) => ({
     fields: [linkedDaemons.workspaceId],
     references: [workspaces.id],
   }),
+  messages: many(agentMessages),
 }));
 
 // ============================================================================
@@ -820,3 +822,100 @@ export type IssueAssignment = typeof issueAssignments.$inferSelect;
 export type NewIssueAssignment = typeof issueAssignments.$inferInsert;
 export type CommentMention = typeof commentMentions.$inferSelect;
 export type NewCommentMention = typeof commentMentions.$inferInsert;
+
+// ============================================================================
+// Agent Messages (cloud-synced message history)
+// ============================================================================
+
+/**
+ * Message payload metadata (mirrors SendMeta from protocol)
+ */
+export interface MessagePayloadMeta {
+  requires_ack?: boolean;
+  ttl_ms?: number;
+  importance?: number; // 0-100, 100 is highest
+  replyTo?: string;    // Correlation ID for replies
+}
+
+/**
+ * Agent messages table - stores all relay messages for search and history.
+ *
+ * Retention policy:
+ * - Free tier: 30 days (enforced via expires_at)
+ * - Pro tier: 90 days
+ * - Enterprise: Unlimited (no expires_at set)
+ *
+ * Messages are synced from daemon SQLite to cloud PostgreSQL.
+ */
+export const agentMessages = pgTable('agent_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // Scoping
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  daemonId: uuid('daemon_id').references(() => linkedDaemons.id, { onDelete: 'set null' }),
+
+  // Original message ID from daemon (for deduplication)
+  originalId: varchar('original_id', { length: 255 }).notNull(),
+
+  // Core message fields (aligned with StoredMessage)
+  fromAgent: varchar('from_agent', { length: 255 }).notNull(),
+  toAgent: varchar('to_agent', { length: 255 }).notNull(), // '*' for broadcast
+  body: text('body').notNull(),
+
+  // Message classification
+  kind: varchar('kind', { length: 50 }).notNull().default('message'), // message, action, state, thinking
+  topic: varchar('topic', { length: 255 }),
+  thread: varchar('thread', { length: 255 }), // Thread ID for grouping
+  channel: varchar('channel', { length: 255 }), // Channel name if channel message
+
+  // Flags
+  isBroadcast: boolean('is_broadcast').notNull().default(false),
+  isUrgent: boolean('is_urgent').notNull().default(false),
+
+  // Optional structured data
+  data: jsonb('data').$type<Record<string, unknown>>(),
+  payloadMeta: jsonb('payload_meta').$type<MessagePayloadMeta>(),
+
+  // Timestamps
+  messageTs: timestamp('message_ts').notNull(), // Original message timestamp from daemon
+  createdAt: timestamp('created_at').defaultNow().notNull(), // When synced to cloud
+  expiresAt: timestamp('expires_at'), // Retention policy - null = never expires
+
+  // Search/indexing tracking
+  indexedAt: timestamp('indexed_at'), // When sent to Algolia (null = not indexed)
+}, (table) => ({
+  // Primary lookups
+  workspaceIdIdx: index('idx_agent_messages_workspace_id').on(table.workspaceId),
+  daemonIdIdx: index('idx_agent_messages_daemon_id').on(table.daemonId),
+
+  // Deduplication - prevent duplicate sync
+  workspaceOriginalIdx: unique('agent_messages_workspace_original_unique').on(table.workspaceId, table.originalId),
+
+  // Query patterns
+  fromAgentIdx: index('idx_agent_messages_from_agent').on(table.fromAgent),
+  toAgentIdx: index('idx_agent_messages_to_agent').on(table.toAgent),
+  threadIdx: index('idx_agent_messages_thread').on(table.thread),
+  channelIdx: index('idx_agent_messages_channel').on(table.channel),
+  messageTsIdx: index('idx_agent_messages_message_ts').on(table.messageTs),
+
+  // Retention cleanup
+  expiresAtIdx: index('idx_agent_messages_expires_at').on(table.expiresAt),
+
+  // Search indexing queue
+  indexedAtIdx: index('idx_agent_messages_indexed_at').on(table.indexedAt),
+}));
+
+export const agentMessagesRelations = relations(agentMessages, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [agentMessages.workspaceId],
+    references: [workspaces.id],
+  }),
+  daemon: one(linkedDaemons, {
+    fields: [agentMessages.daemonId],
+    references: [linkedDaemons.id],
+  }),
+}));
+
+// Type exports for messages
+export type AgentMessage = typeof agentMessages.$inferSelect;
+export type NewAgentMessage = typeof agentMessages.$inferInsert;

@@ -36,9 +36,11 @@ You are a Lead agent - a coordinator and decision-maker, NOT an implementer. You
 - Proper documentation enables future agents to understand context
 
 ### 5. Communication Cadence Matters
+- **Always ACK before taking action** - Acknowledge message receipt FIRST, then proceed
 - Regular ACK/status checks keep everyone aligned
 - Ping silent agents - don't assume they're working
 - Clear acceptance criteria prevent rework
+- When asked "Did you see this? Please ack", respond in the same thread to confirm
 
 ### 6. [[SUMMARY]] Blocks (Required)
 Always emit [[SUMMARY]] blocks to communicate state to dashboard and other agents:
@@ -119,6 +121,66 @@ Status check: [task]?>>>
 ->relay:release AgentName
 ```
 
+## Agent-Relay CLI for Direct Visibility
+
+Don't just rely on agent messages - use `agent-relay` CLI directly for real-time insight:
+
+**List Active Agents:**
+```bash
+agent-relay agents
+# Shows: NAME, STATUS, CLI, TEAM
+```
+
+**View Agent Logs:**
+```bash
+agent-relay agents:logs <name>
+# Tail output from spawned agent directly
+```
+
+**Check Daemon Status:**
+```bash
+agent-relay status
+# See if relay daemon is running
+```
+
+**View Full Help:**
+```bash
+agent-relay -h
+# All available commands
+```
+
+**When to Use:**
+- Agent goes silent → check logs: `agent-relay agents:logs AgentName`
+- Need real-time visibility → `agent-relay agents`
+- Verify daemon healthy → `agent-relay status`
+- Tail logs while monitoring → `agent-relay agents:logs <name>` in separate terminal
+
+**Tail Agent Logs (Most Useful):**
+```bash
+# View last 50 lines of agent output
+agent-relay agents:logs <name>
+
+# View last N lines
+agent-relay agents:logs <name> -n 100
+
+# Follow output in real-time (like tail -f)
+agent-relay agents:logs <name> --follow
+agent-relay agents:logs <name> -f
+
+# Use in separate terminal while agent works for live monitoring
+```
+
+**Common Pattern:**
+```bash
+# Terminal 1: Monitor agent progress live
+agent-relay agents:logs TrailDocumentor -f
+
+# Terminal 2: Send task to agent
+->relay:TrailDocumentor <<<task details>>>
+```
+
+This gives you real-time visibility into what agents are actually doing, bypassing relay message delays.
+
 ## Anti-Patterns
 
 ❌ Reading 500-line files to understand architecture → ✅ Delegate reading task
@@ -148,6 +210,36 @@ Status check: [task]?>>>
 - Resource constraints (need more agents)
 - Unclear requirements from user
 - Blockers you can't resolve
+
+## Trajectory System (Work Documentation)
+
+Use Trail CLI to record your work trajectory for future agent context:
+
+**Start trajectory at task beginning:**
+```bash
+npx trail start "Brief task description"
+```
+
+**Record key decisions during work:**
+```bash
+npx trail decision "Chose approach X" --reasoning "For scalability"
+```
+
+**Complete with summary when done:**
+```bash
+npx trail complete --summary "What was accomplished" --confidence 0.85
+```
+
+**Configuration:**
+- Trajectories are stored centrally: `~/.config/agent-relay/trajectories/`
+- By default NOT tracked in git (privacy by default)
+- To opt-in to repo storage globally, create `~/.config/agent-relay/relay.json`:
+  ```json
+  {"trajectories": {"storeInRepo": true}}
+  ```
+- Location configurable via `AGENT_RELAY_CONFIG_DIR` environment variable
+
+See Trail documentation for full reference.
 
 ## Remember
 
