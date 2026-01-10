@@ -150,6 +150,61 @@ REVIEW: Please check src/auth/*.ts>>>
 QUESTION: JWT or sessions?>>>
 ```
 
+## Consensus (Multi-Agent Decisions)
+
+Request team consensus on decisions by messaging `_consensus`:
+
+### Creating a Proposal
+
+```
+->relay:_consensus <<<
+PROPOSE: API Design Decision
+TYPE: majority
+PARTICIPANTS: Developer, Reviewer, Lead
+DESCRIPTION: Should we use REST or GraphQL for the new API?
+TIMEOUT: 3600000>>>
+```
+
+**Fields:**
+- `PROPOSE:` - Title of the proposal (required)
+- `TYPE:` - Consensus type: `majority`, `supermajority`, `unanimous`, `quorum` (default: majority)
+- `PARTICIPANTS:` - Comma-separated list of agents who can vote (required)
+- `DESCRIPTION:` - Detailed description of what's being proposed
+- `TIMEOUT:` - Timeout in milliseconds (default: 5 minutes)
+- `QUORUM:` - Minimum votes required (for quorum type)
+- `THRESHOLD:` - Approval threshold 0-1 (for supermajority, default: 0.67)
+
+### Voting on a Proposal
+
+When you receive a proposal, vote with:
+
+```
+->relay:_consensus <<<
+VOTE proposal-abc123 approve This aligns with our architecture goals>>>
+```
+
+**Vote values:** `approve`, `reject`, `abstain`
+
+**Format:** `VOTE <proposal-id> <value> [optional reason]`
+
+### Consensus Types
+
+- **majority** - >50% approve
+- **supermajority** - ≥threshold approve (default 2/3)
+- **unanimous** - 100% must approve
+- **quorum** - Minimum participation + majority
+
+### Example: Code Review Gate
+
+```
+->relay:_consensus <<<
+PROPOSE: Merge PR #42 to main
+TYPE: supermajority
+PARTICIPANTS: Reviewer, SecurityLead, TechLead
+DESCRIPTION: Authentication refactor - adds OAuth2 support
+TIMEOUT: 1800000>>>
+```
+
 ## Rules
 
 - Pattern must be at line start (whitespace OK)
