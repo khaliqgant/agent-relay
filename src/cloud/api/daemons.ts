@@ -496,7 +496,7 @@ interface SyncMessageInput {
  */
 daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Request, res: Response) => {
   const daemon = (req as any).daemon;
-  const { messages } = req.body as { messages: SyncMessageInput[] };
+  const { messages, repoFullName } = req.body as { messages: SyncMessageInput[]; repoFullName?: string };
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array is required' });
@@ -511,11 +511,25 @@ daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Reque
     return res.status(400).json({ error: 'Maximum batch size is 500 messages' });
   }
 
+  // Resolve workspace from git remote if not already linked
+  let workspaceId = daemon.workspaceId;
+  if (!workspaceId && repoFullName) {
+    // Try to find workspace by repository
+    const workspace = await db.workspaces.findByRepoFullName(repoFullName);
+    if (workspace) {
+      // Auto-link daemon to workspace
+      await db.linkedDaemons.update(daemon.id, { workspaceId: workspace.id });
+      workspaceId = workspace.id;
+      console.log(`[message-sync] Auto-linked daemon ${daemon.id} to workspace ${workspace.id} via repo ${repoFullName}`);
+    }
+  }
+
   // Require workspace to be linked
-  if (!daemon.workspaceId) {
-    return res.status(400).json({
-      error: 'Daemon must be linked to a workspace to sync messages. Re-link with a workspace ID.',
-    });
+  if (!workspaceId) {
+    const hint = repoFullName
+      ? `Repository '${repoFullName}' not found in any workspace. Link the repo in the dashboard first.`
+      : 'Daemon must be linked to a workspace to sync messages. Re-link with a workspace ID.';
+    return res.status(400).json({ error: hint });
   }
 
   try {
@@ -534,7 +548,7 @@ daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Reque
 
     // Transform to NewAgentMessage format
     const dbMessages = messages.map((msg) => ({
-      workspaceId: daemon.workspaceId,
+      workspaceId,
       daemonId: daemon.id,
       originalId: msg.id,
       fromAgent: msg.from,
@@ -552,13 +566,16 @@ daemonsRouter.post('/messages/sync', requireDaemonAuth as any, async (req: Reque
       expiresAt,
     }));
 
-    // Insert with onConflictDoNothing for deduplication
-    const inserted = await db.agentMessages.createMany(dbMessages);
+    // Use optimized bulk insert for high-volume message sync
+    // - Batches < 100: multi-row INSERT
+    // - Batches 100-1000: chunked multi-row INSERT
+    // - Batches > 1000: streaming COPY with staging table
+    const result = await db.bulk.optimizedInsert(db.getRawPool(), dbMessages);
 
-    const synced = inserted.length;
-    const duplicates = messages.length - synced;
+    const synced = result.inserted;
+    const duplicates = result.duplicates;
 
-    console.log(`[message-sync] Synced ${synced} messages for daemon ${daemon.id}, ${duplicates} duplicates skipped`);
+    console.log(`[message-sync] Synced ${synced} messages for daemon ${daemon.id}, ${duplicates} duplicates skipped (${result.durationMs}ms)`);
 
     res.json({
       success: true,
@@ -583,11 +600,21 @@ daemonsRouter.get('/messages/stats', requireDaemonAuth as any, async (req: Reque
   }
 
   try {
-    const count = await db.agentMessages.countByWorkspace(daemon.workspaceId);
+    // Get message count and pool health in parallel
+    const [count, poolHealth, poolStats] = await Promise.all([
+      db.agentMessages.countByWorkspace(daemon.workspaceId),
+      db.bulk.checkHealth(),
+      Promise.resolve(db.bulk.getPoolStats()),
+    ]);
 
     res.json({
       workspaceId: daemon.workspaceId,
       messageCount: count,
+      database: {
+        healthy: poolHealth.healthy,
+        latencyMs: poolHealth.latencyMs,
+        pool: poolStats,
+      },
     });
   } catch (error) {
     console.error('Error fetching message stats:', error);

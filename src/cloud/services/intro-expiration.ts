@@ -6,7 +6,7 @@
  * then get automatically downsized to standard free tier (1 CPU / 2GB).
  */
 
-import { db, PlanType } from '../db/index.js';
+import { db } from '../db/index.js';
 import { getProvisioner } from '../provisioner/index.js';
 
 export const INTRO_PERIOD_DAYS = 14;

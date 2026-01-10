@@ -347,6 +347,43 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
+   * Interrupt an agent by sending Ctrl+C (SIGINT equivalent).
+   * This breaks the agent out of their current task to allow refocusing.
+   */
+  interrupt(agentId: string): boolean {
+    const agent = this.agents.get(agentId);
+    if (!agent?.pty) return false;
+
+    logger.info('Interrupting agent', { id: agentId, name: agent.name });
+
+    // Send Ctrl+C (ASCII 0x03) to interrupt current operation
+    agent.pty.write('\x03');
+    return true;
+  }
+
+  /**
+   * Find agent by name (global search across all workspaces)
+   */
+  findAgentByName(name: string): ManagedAgent | undefined {
+    return Array.from(this.agents.values()).find((a) => a.name === name);
+  }
+
+  /**
+   * Interrupt an agent by name (searches across all workspaces).
+   * Useful for dashboard where only agent name is available.
+   */
+  interruptByName(name: string): boolean {
+    const agent = this.findAgentByName(name);
+    if (!agent?.pty) return false;
+
+    logger.info('Interrupting agent by name', { name, id: agent.id });
+
+    // Send Ctrl+C (ASCII 0x03) to interrupt current operation
+    agent.pty.write('\x03');
+    return true;
+  }
+
+  /**
    * Restart an agent
    */
   private async restartAgent(agentId: string, workspacePath: string): Promise<void> {

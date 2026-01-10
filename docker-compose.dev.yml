@@ -116,7 +116,7 @@ services:
     ports:
       - "3888:3888"
       - "3889:3889"
-      - "2222:2222"  # SSH for port forwarding (e.g., Codex OAuth)
+      - "3022:3022"  # SSH for port forwarding (e.g., Codex OAuth)
       - "1455:1455"  # Codex OAuth callback port
     environment:
       WORKSPACE_ID: local-dev-workspace

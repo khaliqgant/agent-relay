@@ -38,6 +38,14 @@ export interface ConnectionConfig {
   } | null>;
   /** Optional callback to check if agent is currently processing (exempts from heartbeat timeout) */
   isProcessing?: (agentName: string) => boolean;
+
+  // Write queue configuration
+  /** Maximum messages in write queue before dropping (default: 2000) */
+  maxWriteQueueSize?: number;
+  /** High water mark - emit backpressure signal when queue exceeds this (default: 1500) */
+  writeQueueHighWaterMark?: number;
+  /** Low water mark - release backpressure when queue drops below this (default: 500) */
+  writeQueueLowWaterMark?: number;
 }
 
 export const DEFAULT_CONFIG: ConnectionConfig = {
@@ -45,6 +53,10 @@ export const DEFAULT_CONFIG: ConnectionConfig = {
   heartbeatMs: 5000,
   // 6x multiplier = 30 second timeout, more tolerant for AI agents processing long responses
   heartbeatTimeoutMultiplier: 6,
+  // Write queue defaults - generous to avoid dropping messages
+  maxWriteQueueSize: 2000,
+  writeQueueHighWaterMark: 1500,
+  writeQueueLowWaterMark: 500,
 };
 
 export class Connection {
@@ -73,6 +85,12 @@ export class Connection {
   // Sequence numbers per (topic, peer) stream
   private sequences: Map<string, number> = new Map();
 
+  // Write queue for backpressure handling
+  private writeQueue: Buffer[] = [];
+  private draining = false;
+  private _backpressured = false;
+  private socketDrainHandler?: () => void;
+
   // Event handlers
   onMessage?: (envelope: Envelope) => void;
   onClose?: () => void;
@@ -80,6 +98,8 @@ export class Connection {
   onActive?: () => void; // Fires when connection transitions to ACTIVE state
   onAck?: (envelope: Envelope<AckPayload>) => void;
   onPong?: () => void; // Fires on successful heartbeat response
+  /** Fires when write queue crosses high/low water marks */
+  onBackpressure?: (backpressured: boolean) => void;
 
   constructor(socket: net.Socket, config: Partial<ConnectionConfig> = {}) {
     this.id = uuid();
@@ -143,6 +163,16 @@ export class Connection {
 
   get isResumed(): boolean {
     return this._isResumed;
+  }
+
+  /** Whether this connection is currently backpressured (write queue above high water mark) */
+  get backpressured(): boolean {
+    return this._backpressured;
+  }
+
+  /** Current number of messages queued for writing */
+  get writeQueueLength(): number {
+    return this.writeQueue.length;
   }
 
   private setupSocketHandlers(): void {
@@ -347,19 +377,88 @@ export class Connection {
 
   /**
    * Send an envelope to this connection.
+   *
+   * Uses a write queue to prevent blocking on slow consumers.
+   * Returns false if the connection is closed or the queue is full.
    */
   send(envelope: Envelope): boolean {
     if (this._state === 'CLOSED' || this._state === 'ERROR') {
       return false;
     }
 
+    const maxQueueSize = this.config.maxWriteQueueSize ?? 2000;
+    const highWaterMark = this.config.writeQueueHighWaterMark ?? 1500;
+
+    // Check queue capacity
+    if (this.writeQueue.length >= maxQueueSize) {
+      // Queue full - this is a serious condition, log it
+      console.warn(`[connection] Write queue full for ${this._agentName ?? this.id}, dropping message`);
+      return false;
+    }
+
     try {
       const frame = encodeFrame(envelope);
-      this.socket.write(frame);
+      this.writeQueue.push(frame);
+
+      // Check if we should signal backpressure
+      if (!this._backpressured && this.writeQueue.length >= highWaterMark) {
+        this._backpressured = true;
+        this.onBackpressure?.(true);
+      }
+
+      // Schedule drain if not already draining
+      this.scheduleDrain();
       return true;
     } catch (err) {
       this.handleError(err as Error);
       return false;
+    }
+  }
+
+  /**
+   * Schedule the drain loop to run on next tick if not already running.
+   */
+  private scheduleDrain(): void {
+    if (this.draining) return;
+    this.draining = true;
+    setImmediate(() => this.drain());
+  }
+
+  /**
+   * Drain the write queue to the socket.
+   * Respects socket backpressure by waiting for 'drain' events.
+   */
+  private drain(): void {
+    while (this.writeQueue.length > 0) {
+      if (this._state === 'CLOSED' || this._state === 'ERROR') {
+        this.draining = false;
+        return;
+      }
+
+      const frame = this.writeQueue[0];
+      const canWrite = this.socket.write(frame);
+      this.writeQueue.shift();
+
+      if (!canWrite) {
+        // Socket buffer full - wait for drain event
+        if (!this.socketDrainHandler) {
+          this.socketDrainHandler = () => {
+            this.socketDrainHandler = undefined;
+            this.drain();
+          };
+          this.socket.once('drain', this.socketDrainHandler);
+        }
+        return;
+      }
+    }
+
+    this.draining = false;
+
+    // Check if we should release backpressure
+    const lowWaterMark = this.config.writeQueueLowWaterMark ?? 500;
+    if (this._backpressured && this.writeQueue.length <= lowWaterMark) {
+      this._backpressured = false;
+      this.onBackpressure?.(false);
     }
   }
 
@@ -400,6 +499,15 @@ export class Connection {
 
   private cleanup(): void {
     this.parser.reset();
+    // Clear write queue
+    this.writeQueue = [];
+    this.draining = false;
+    this._backpressured = false;
+    // Remove drain handler if registered
+    if (this.socketDrainHandler) {
+      this.socket.removeListener('drain', this.socketDrainHandler);
+      this.socketDrainHandler = undefined;
+    }
   }
 
   close(): void {

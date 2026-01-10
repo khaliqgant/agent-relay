@@ -17,6 +17,8 @@ import {
 import { deriveSshPassword } from '../services/ssh-security.js';
 
 const WORKSPACE_PORT = 3888;
+const WORKSPACE_HEALTH_PORT = 3889; // Health check on separate thread - always responsive
+const WORKSPACE_SSH_PORT = 3022;
 const CODEX_OAUTH_PORT = 1455; // Codex CLI OAuth callback port - must be mapped for local dev
 const FETCH_TIMEOUT_MS = 10_000;
 const WORKSPACE_IMAGE = process.env.WORKSPACE_IMAGE || 'ghcr.io/agentworkforce/relay-workspace:latest';
@@ -721,6 +723,7 @@ class FlyProvisioner implements ComputeProvisioner {
               // Each workspace gets a unique password derived from its ID + secret salt
               ENABLE_SSH: 'true',
               SSH_PASSWORD: deriveSshPassword(workspace.id),
+              SSH_PORT: String(WORKSPACE_SSH_PORT),
             },
             services: [
               {
@@ -752,16 +755,16 @@ class FlyProvisioner implements ComputeProvisioner {
                 },
               },
               // SSH service for CLI tunneling (Codex OAuth callback forwarding)
-              // Exposes port 2222 publicly for SSH connections from user's machine
+              // Exposes port 3022 publicly for SSH connections from user's machine
               {
                 ports: [
                   {
-                    port: 2222,
+                    port: WORKSPACE_SSH_PORT,
                     handlers: [], // Empty handlers = raw TCP passthrough
                   },
                 ],
                 protocol: 'tcp',
-                internal_port: 2222,
+                internal_port: WORKSPACE_SSH_PORT,
                 // SSH connections should also wake the machine
                 auto_stop_machines: 'stop',
                 auto_start_machines: true,
@@ -771,11 +774,11 @@ class FlyProvisioner implements ComputeProvisioner {
             checks: {
               health: {
                 type: 'http',
-                port: WORKSPACE_PORT,
+                port: WORKSPACE_HEALTH_PORT, // Health worker thread - responds even when main loop blocked
                 path: '/health',
                 interval: '30s',
-                timeout: '5s',
-                grace_period: '10s',
+                timeout: '10s', // Increased timeout for safety
+                grace_period: '30s', // Longer grace period for startup
               },
             },
             // Instance size based on plan - free tier gets smaller instance
@@ -1586,14 +1589,15 @@ class DockerProvisioner implements ComputeProvisioner {
       // SSH is used by CLI to forward localhost:1455 to workspace container for Codex OAuth
       // Set CODEX_DIRECT_PORT=true to also map port 1455 directly (for debugging only)
       const directCodexPort = process.env.CODEX_DIRECT_PORT === 'true';
-      const portMappings = directCodexPort
-        ? `-p ${hostPort}:${WORKSPACE_PORT} -p ${sshHostPort}:2222 -p ${CODEX_OAUTH_PORT}:${CODEX_OAUTH_PORT}`
-        : `-p ${hostPort}:${WORKSPACE_PORT} -p ${sshHostPort}:2222`;
+    const portMappings = directCodexPort
+        ? `-p ${hostPort}:${WORKSPACE_PORT} -p ${sshHostPort}:${WORKSPACE_SSH_PORT} -p ${CODEX_OAUTH_PORT}:${CODEX_OAUTH_PORT}`
+        : `-p ${hostPort}:${WORKSPACE_PORT} -p ${sshHostPort}:${WORKSPACE_SSH_PORT}`;
 
       // Enable SSH in the container for tunneling
       // Each workspace gets a unique password derived from its ID + secret salt
       envArgs.push('-e ENABLE_SSH=true');
       envArgs.push(`-e SSH_PASSWORD=${deriveSshPassword(workspace.id)}`);
+      envArgs.push(`-e SSH_PORT=${WORKSPACE_SSH_PORT}`);
 
       execSync(
         `docker run -d --user root --name ${containerName} ${networkArg} ${volumeArgs} ${portMappings} ${envArgs.join(' ')} ${WORKSPACE_IMAGE}`,

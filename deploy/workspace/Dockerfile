@@ -70,8 +70,8 @@ ENV AGENT_RELAY_DASHBOARD_PORT=3888
 ENV PATH="/home/workspace/.local/bin:$PATH"
 
 # Expose ports
-# 3888: Dashboard/API, 3889: Daemon, 1455: Codex OAuth callback, 2222: SSH (for tunneling)
-EXPOSE 3888 3889 1455 2222
+# 3888: Dashboard/API, 3889: Daemon, 1455: Codex OAuth callback, 3022: SSH (for tunneling)
+EXPOSE 3888 3889 1455 3022
 
 # Volume for persistent data
 VOLUME ["/data", "/workspace"]

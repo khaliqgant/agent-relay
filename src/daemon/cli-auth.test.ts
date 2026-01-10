@@ -2,7 +2,7 @@
  * Tests for CLI authentication code handling
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // We test the code cleaning logic directly since submitAuthCode requires complex mocking
 describe('CLI Auth Code Cleaning', () => {

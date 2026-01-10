@@ -73,7 +73,7 @@ let configCache: { path: string; config: RelayConfig; mtime: number } | null = n
  * NOTE: projectRoot parameter is kept for backwards compatibility but ignored.
  * Config is always loaded from the central location.
  */
-export function getRelayConfigPath(projectRoot?: string): string {
+export function getRelayConfigPath(_projectRoot?: string): string {
   return join(getAgentRelayConfigDir(), 'relay.json');
 }
 

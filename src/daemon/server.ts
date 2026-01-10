@@ -206,10 +206,14 @@ export class Daemon {
     try {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
+      // Get project root for workspace detection via git remote
+      const projectPaths = getProjectPaths();
+
       this.cloudSync = getCloudSync({
         apiKey: config.apiKey,
         cloudUrl: config.cloudUrl || this.config.cloudUrl,
         enabled: this.config.cloudSync !== false,
+        projectDirectory: projectPaths.projectRoot,
       });
 
       // Listen for remote agent updates

@@ -6,6 +6,7 @@ import { PROTOCOL_VERSION, type Envelope, type HelloPayload, type WelcomePayload
 
 class MockSocket {
   private handlers: Map<string, Array<(...args: any[]) => void>> = new Map();
+  private onceHandlers: Map<string, Array<(...args: any[]) => void>> = new Map();
   public written: Buffer[] = [];
   public destroyed = false;
 
@@ -13,6 +14,29 @@ class MockSocket {
     const list = this.handlers.get(event) ?? [];
     list.push(handler);
     this.handlers.set(event, list);
+    return this;
+  }
+
+  once(event: string, handler: (...args: any[]) => void): this {
+    const list = this.onceHandlers.get(event) ?? [];
+    list.push(handler);
+    this.onceHandlers.set(event, list);
+    return this;
+  }
+
+  removeListener(event: string, handler: (...args: any[]) => void): this {
+    const list = this.handlers.get(event) ?? [];
+    const index = list.indexOf(handler);
+    if (index >= 0) {
+      list.splice(index, 1);
+    }
+
+    const onceList = this.onceHandlers.get(event) ?? [];
+    const onceIndex = onceList.indexOf(handler);
+    if (onceIndex >= 0) {
+      onceList.splice(onceIndex, 1);
+    }
+
     return this;
   }
 
@@ -30,7 +54,14 @@ class MockSocket {
   }
 
   emit(event: string, ...args: any[]): void {
+    // Fire regular handlers
     for (const handler of this.handlers.get(event) ?? []) {
+      handler(...args);
+    }
+    // Fire and clear once handlers
+    const onceList = this.onceHandlers.get(event) ?? [];
+    this.onceHandlers.set(event, []);
+    for (const handler of onceList) {
       handler(...args);
     }
   }
@@ -55,7 +86,7 @@ function makeHello(agent: string): Envelope<HelloPayload> {
 }
 
 describe('Connection', () => {
-  it('transitions to ACTIVE after HELLO and fires onActive', () => {
+  it('transitions to ACTIVE after HELLO and fires onActive', async () => {
     const socket = new MockSocket();
     const connection = new Connection(socket as unknown as Socket, { heartbeatMs: 50 });
     const onActive = vi.fn();
@@ -65,6 +96,8 @@ describe('Connection', () => {
 
     expect(connection.state).toBe('ACTIVE');
     expect(onActive).toHaveBeenCalledTimes(1);
+    // Wait for write queue to drain (uses setImmediate)
+    await new Promise((r) => setImmediate(r));
     expect(socket.written.length).toBeGreaterThan(0);
   });
 
@@ -245,6 +278,218 @@ describe('Connection', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('write queue and backpressure', () => {
+    it('uses write queue for sending messages', async () => {
+      const socket = new MockSocket();
+      const connection = new Connection(socket as unknown as Socket, { heartbeatMs: 50 });
+
+      socket.emit('data', encodeFrame(makeHello('agent-a')));
+      expect(connection.state).toBe('ACTIVE');
+
+      // Wait for write queue to drain
+      await new Promise((r) => setImmediate(r));
+
+      // Should have sent WELCOME
+      expect(socket.written.length).toBeGreaterThan(0);
+    });
+
+    it('drops messages when queue is full', async () => {
+      const socket = new MockSocket();
+      const connection = new Connection(socket as unknown as Socket, {
+        heartbeatMs: 50,
+        maxWriteQueueSize: 5,
+      });
+
+      socket.emit('data', encodeFrame(makeHello('agent-a')));
+
+      // Block the drain loop by making socket always return false
+      socket.write = () => false;
+
+      // Fill the queue
+      for (let i = 0; i < 10; i++) {
+        connection.send({
+          v: PROTOCOL_VERSION,
+          type: 'PING',
+          id: `ping-${i}`,
+          ts: Date.now(),
+          payload: { nonce: 'test' },
+        });
+      }
+
+      // Queue should be at max size, some should have been dropped
+      expect(connection.writeQueueLength).toBeLessThanOrEqual(5);
+    });
+
+    it('signals backpressure when queue exceeds high water mark', async () => {
+      const socket = new MockSocket();
+      socket.write = () => false; // Block writes
+
+      const connection = new Connection(socket as unknown as Socket, {
+        heartbeatMs: 50,
+        maxWriteQueueSize: 2000,
+        writeQueueHighWaterMark: 5,
+        writeQueueLowWaterMark: 2,
+      });
+
+      const onBackpressure = vi.fn();
+      connection.onBackpressure = onBackpressure;
+
+      socket.emit('data', encodeFrame(makeHello('agent-a')));
+
+      // Send enough to exceed high water mark
+      for (let i = 0; i < 10; i++) {
+        connection.send({
+          v: PROTOCOL_VERSION,
+          type: 'PING',
+          id: `pressure-${i}`,
+          ts: Date.now(),
+          payload: { nonce: 'test' },
+        });
+      }
+
+      // Wait for drain scheduling
+      await new Promise((r) => setImmediate(r));
+
+      expect(connection.backpressured).toBe(true);
+      expect(onBackpressure).toHaveBeenCalledWith(true);
+    });
+
+    it('releases backpressure when queue drains below low water mark', async () => {
+      const socket = new MockSocket();
+      let blockWrites = true;
+      socket.write = () => !blockWrites;
+
+      const connection = new Connection(socket as unknown as Socket, {
+        heartbeatMs: 50,
+        maxWriteQueueSize: 2000,
+        writeQueueHighWaterMark: 5,
+        writeQueueLowWaterMark: 2,
+      });
+
+      const onBackpressure = vi.fn();
+      connection.onBackpressure = onBackpressure;
+
+      socket.emit('data', encodeFrame(makeHello('agent-a')));
+
+      // Fill queue to trigger backpressure
+      for (let i = 0; i < 10; i++) {
+        connection.send({
+          v: PROTOCOL_VERSION,
+          type: 'PING',
+          id: `drain-${i}`,
+          ts: Date.now(),
+          payload: { nonce: 'test' },
+        });
+      }
+
+      await new Promise((r) => setImmediate(r));
+      expect(connection.backpressured).toBe(true);
+
+      // Allow writes
+      blockWrites = false;
+
+      // Trigger drain by simulating socket drain event
+      socket.emit('drain');
+
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+
+      // Queue should be empty, backpressure released
+      expect(connection.writeQueueLength).toBe(0);
+      expect(connection.backpressured).toBe(false);
+      expect(onBackpressure).toHaveBeenCalledWith(false);
+    });
+
+    it('waits for socket drain event when buffer is full', async () => {
+      const socket = new MockSocket();
+      let writeCount = 0;
+
+      // First write returns true, subsequent return false
+      socket.write = () => {
+        writeCount++;
+        return writeCount <= 1;
+      };
+
+      const connection = new Connection(socket as unknown as Socket, { heartbeatMs: 50 });
+
+      socket.emit('data', encodeFrame(makeHello('agent-a')));
+
+      // Queue multiple messages
+      for (let i = 0; i < 5; i++) {
+        connection.send({
+          v: PROTOCOL_VERSION,
+          type: 'PING',
+          id: `wait-${i}`,
+          ts: Date.now(),
+          payload: { nonce: 'test' },
+        });
+      }
+
+      await new Promise((r) => setImmediate(r));
+
+      // Not all messages written yet (waiting for drain)
+      expect(connection.writeQueueLength).toBeGreaterThan(0);
+
+      // Allow all writes
+      socket.write = () => true;
+      socket.emit('drain');
+
+      await new Promise((r) => setImmediate(r));
+
+      // All messages should now be drained
+      expect(connection.writeQueueLength).toBe(0);
+    });
+
+    it('clears write queue on close', async () => {
+      const socket = new MockSocket();
+      socket.write = () => false; // Block writes
+
+      const connection = new Connection(socket as unknown as Socket, { heartbeatMs: 50 });
+
+      socket.emit('data', encodeFrame(makeHello('agent-a')));
+
+      // Queue some messages
+      for (let i = 0; i < 5; i++) {
+        connection.send({
+          v: PROTOCOL_VERSION,
+          type: 'PING',
+          id: `close-queue-${i}`,
+          ts: Date.now(),
+          payload: { nonce: 'test' },
+        });
+      }
+
+      await new Promise((r) => setImmediate(r));
+      expect(connection.writeQueueLength).toBeGreaterThan(0);
+
+      // Trigger close
+      socket.emit('close');
+
+      expect(connection.writeQueueLength).toBe(0);
+      expect(connection.backpressured).toBe(false);
+    });
+
+    it('does not send to closed connection', async () => {
+      const socket = new MockSocket();
+      const connection = new Connection(socket as unknown as Socket, { heartbeatMs: 50 });
+
+      socket.emit('data', encodeFrame(makeHello('agent-a')));
+      socket.emit('close');
+
+      expect(connection.state).toBe('CLOSED');
+
+      const result = connection.send({
+        v: PROTOCOL_VERSION,
+        type: 'PING',
+        id: 'after-close',
+        ts: Date.now(),
+        payload: { nonce: 'test' },
+      });
+
+      expect(result).toBe(false);
     });
   });
 });

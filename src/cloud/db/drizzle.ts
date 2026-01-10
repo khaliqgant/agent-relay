@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import { eq, and, sql, desc, lt, isNull, isNotNull, inArray } from 'drizzle-orm';
 import * as schema from './schema.js';
 import { getConfig } from '../config.js';
+import { DEFAULT_POOL_CONFIG } from './bulk-ingest.js';
 
 // Types
 export type {
@@ -49,12 +50,39 @@ export * from './schema.js';
 let pool: Pool | null = null;
 let drizzleDb: ReturnType<typeof drizzle> | null = null;
 
+/**
+ * Get or create the connection pool with optimized settings.
+ * Pool configuration:
+ * - max: 20 connections (up from default 10)
+ * - idleTimeoutMillis: 30s (close idle connections)
+ * - connectionTimeoutMillis: 10s (fail fast on connection issues)
+ */
 function getPool(): Pool {
   if (!pool) {
     const config = getConfig();
-    pool = new Pool({ connectionString: config.databaseUrl });
+    pool = new Pool({
+      connectionString: config.databaseUrl,
+      ...DEFAULT_POOL_CONFIG,
+      // Allow SSL for cloud databases
+      ssl: config.databaseUrl?.includes('sslmode=require')
+        ? { rejectUnauthorized: false }
+        : undefined,
+    });
+
+    // Log pool errors (connection issues, etc.)
+    pool.on('error', (err) => {
+      console.error('[db] Pool error:', err.message);
+    });
   }
   return pool;
+}
+
+/**
+ * Get the raw connection pool for bulk operations.
+ * Use this for optimized bulk inserts that bypass the ORM.
+ */
+export function getRawPool(): Pool {
+  return getPool();
 }
 
 export function getDb() {
@@ -355,6 +383,7 @@ export interface WorkspaceQueries {
   findById(id: string): Promise<schema.Workspace | null>;
   findByUserId(userId: string): Promise<schema.Workspace[]>;
   findByCustomDomain(domain: string): Promise<schema.Workspace | null>;
+  findByRepoFullName(repoFullName: string): Promise<schema.Workspace | null>;
   findAll(): Promise<schema.Workspace[]>;
   create(data: schema.NewWorkspace): Promise<schema.Workspace>;
   update(id: string, data: Partial<Pick<schema.Workspace, 'name' | 'config'>>): Promise<void>;
@@ -397,6 +426,18 @@ export const workspaceQueries: WorkspaceQueries = {
       .from(schema.workspaces)
       .where(eq(schema.workspaces.customDomain, domain));
     return result[0] ?? null;
+  },
+
+  async findByRepoFullName(repoFullName: string): Promise<schema.Workspace | null> {
+    const db = getDb();
+    // Find repository by full name (case-insensitive), then get its workspace
+    const result = await db
+      .select({ workspace: schema.workspaces })
+      .from(schema.repositories)
+      .innerJoin(schema.workspaces, eq(schema.repositories.workspaceId, schema.workspaces.id))
+      .where(sql`LOWER(${schema.repositories.githubFullName}) = LOWER(${repoFullName})`)
+      .limit(1);
+    return result[0]?.workspace ?? null;
   },
 
   async findAll(): Promise<schema.Workspace[]> {

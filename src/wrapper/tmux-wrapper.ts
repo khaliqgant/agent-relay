@@ -38,7 +38,7 @@ import {
   type PDEROPhase,
 } from '../trajectory/integration.js';
 import { escapeForShell } from '../bridge/utils.js';
-import { detectProviderAuthRevocation, type AuthRevocationResult } from './auth-detection.js';
+import { detectProviderAuthRevocation } from './auth-detection.js';
 import {
   type CliType,
   type InjectionCallbacks,
