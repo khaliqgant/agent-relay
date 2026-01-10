@@ -28,6 +28,7 @@ import {
   completeAuthSession,
   getSupportedProviders,
 } from '../daemon/cli-auth.js';
+import { HealthWorkerManager, getHealthPort } from '../health-worker-manager.js';
 
 /**
  * Initialize cloud persistence for session tracking.
@@ -4363,13 +4364,42 @@ Start by greeting the project leads and asking for status updates.`;
   }
 
   return new Promise((resolve, reject) => {
-    server.listen(availablePort, () => {
+    server.listen(availablePort, async () => {
       console.log(`Dashboard running at http://localhost:${availablePort}`);
       console.log(`Monitoring: ${dataDir}`);
 
       // Set the dashboard port on spawner so spawned agents can use the API for nested spawns
       if (spawner) {
         spawner.setDashboardPort(availablePort);
+      }
+
+      // Start health worker on separate thread for reliable health checks
+      // This ensures health checks respond even when main event loop is blocked
+      const healthPort = getHealthPort(availablePort);
+      const healthWorker = new HealthWorkerManager(
+        { port: healthPort },
+        {
+          getUptime: () => process.uptime(),
+          getMemoryMB: () => Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+          getRelayConnected: () => {
+            const defaultClient = relayClients.get('Dashboard');
+            return defaultClient?.state === 'READY';
+          },
+          getAgentCount: () => relayClients.size,
+          getStatus: () => {
+            const socketExists = fs.existsSync(socketPath);
+            if (!socketExists) return 'degraded';
+            const defaultClient = relayClients.get('Dashboard');
+            return defaultClient?.state === 'READY' ? 'healthy' : 'busy';
+          },
+        }
+      );
+
+      try {
+        await healthWorker.start();
+        console.log(`Health check worker running at http://localhost:${healthPort}/health`);
+      } catch (err) {
+        console.warn('[dashboard] Failed to start health worker, using main thread health check:', err);
       }
 
       resolve(availablePort);

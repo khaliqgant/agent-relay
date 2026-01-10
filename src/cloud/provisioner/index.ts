@@ -17,6 +17,7 @@ import {
 import { deriveSshPassword } from '../services/ssh-security.js';
 
 const WORKSPACE_PORT = 3888;
+const WORKSPACE_HEALTH_PORT = 3889; // Health check on separate thread - always responsive
 const WORKSPACE_SSH_PORT = 3022;
 const CODEX_OAUTH_PORT = 1455; // Codex CLI OAuth callback port - must be mapped for local dev
 const FETCH_TIMEOUT_MS = 10_000;
@@ -773,11 +774,11 @@ class FlyProvisioner implements ComputeProvisioner {
             checks: {
               health: {
                 type: 'http',
-                port: WORKSPACE_PORT,
+                port: WORKSPACE_HEALTH_PORT, // Health worker thread - responds even when main loop blocked
                 path: '/health',
                 interval: '30s',
-                timeout: '5s',
-                grace_period: '10s',
+                timeout: '10s', // Increased timeout for safety
+                grace_period: '30s', // Longer grace period for startup
               },
             },
             // Instance size based on plan - free tier gets smaller instance
