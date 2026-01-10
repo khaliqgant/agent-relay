@@ -7,9 +7,10 @@
 
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { eq, and, sql, desc, lt, isNull, isNotNull } from 'drizzle-orm';
+import { eq, and, sql, desc, lt, isNull, isNotNull, inArray } from 'drizzle-orm';
 import * as schema from './schema.js';
 import { getConfig } from '../config.js';
+import { DEFAULT_POOL_CONFIG } from './bulk-ingest.js';
 
 // Types
 export type {
@@ -49,12 +50,39 @@ export * from './schema.js';
 let pool: Pool | null = null;
 let drizzleDb: ReturnType<typeof drizzle> | null = null;
 
+/**
+ * Get or create the connection pool with optimized settings.
+ * Pool configuration:
+ * - max: 20 connections (up from default 10)
+ * - idleTimeoutMillis: 30s (close idle connections)
+ * - connectionTimeoutMillis: 10s (fail fast on connection issues)
+ */
 function getPool(): Pool {
   if (!pool) {
     const config = getConfig();
-    pool = new Pool({ connectionString: config.databaseUrl });
+    pool = new Pool({
+      connectionString: config.databaseUrl,
+      ...DEFAULT_POOL_CONFIG,
+      // Allow SSL for cloud databases
+      ssl: config.databaseUrl?.includes('sslmode=require')
+        ? { rejectUnauthorized: false }
+        : undefined,
+    });
+
+    // Log pool errors (connection issues, etc.)
+    pool.on('error', (err) => {
+      console.error('[db] Pool error:', err.message);
+    });
   }
   return pool;
+}
+
+/**
+ * Get the raw connection pool for bulk operations.
+ * Use this for optimized bulk inserts that bypass the ORM.
+ */
+export function getRawPool(): Pool {
+  return getPool();
 }
 
 export function getDb() {
@@ -355,6 +383,7 @@ export interface WorkspaceQueries {
   findById(id: string): Promise<schema.Workspace | null>;
   findByUserId(userId: string): Promise<schema.Workspace[]>;
   findByCustomDomain(domain: string): Promise<schema.Workspace | null>;
+  findByRepoFullName(repoFullName: string): Promise<schema.Workspace | null>;
   findAll(): Promise<schema.Workspace[]>;
   create(data: schema.NewWorkspace): Promise<schema.Workspace>;
   update(id: string, data: Partial<Pick<schema.Workspace, 'name' | 'config'>>): Promise<void>;
@@ -397,6 +426,18 @@ export const workspaceQueries: WorkspaceQueries = {
       .from(schema.workspaces)
       .where(eq(schema.workspaces.customDomain, domain));
     return result[0] ?? null;
+  },
+
+  async findByRepoFullName(repoFullName: string): Promise<schema.Workspace | null> {
+    const db = getDb();
+    // Find repository by full name (case-insensitive), then get its workspace
+    const result = await db
+      .select({ workspace: schema.workspaces })
+      .from(schema.repositories)
+      .innerJoin(schema.workspaces, eq(schema.repositories.workspaceId, schema.workspaces.id))
+      .where(sql`LOWER(${schema.repositories.githubFullName}) = LOWER(${repoFullName})`)
+      .limit(1);
+    return result[0]?.workspace ?? null;
   },
 
   async findAll(): Promise<schema.Workspace[]> {
@@ -1580,6 +1621,186 @@ export const commentMentionQueries: CommentMentionQueries = {
       .update(schema.commentMentions)
       .set({ status: 'ignored' })
       .where(eq(schema.commentMentions.id, id));
+  },
+};
+
+// ============================================================================
+// Agent Message Queries
+// ============================================================================
+
+export interface MessageQuery {
+  workspaceId: string;
+  limit?: number;
+  offset?: number;
+  fromAgent?: string;
+  toAgent?: string;
+  thread?: string;
+  channel?: string;
+  sinceTs?: Date;
+  beforeTs?: Date;
+  includeExpired?: boolean;
+}
+
+export interface AgentMessageQueries {
+  create(data: schema.NewAgentMessage): Promise<schema.AgentMessage>;
+  createMany(data: schema.NewAgentMessage[]): Promise<schema.AgentMessage[]>;
+  findById(id: string): Promise<schema.AgentMessage | null>;
+  findByOriginalId(workspaceId: string, originalId: string): Promise<schema.AgentMessage | null>;
+  query(params: MessageQuery): Promise<schema.AgentMessage[]>;
+  getUnindexed(workspaceId: string, limit?: number): Promise<schema.AgentMessage[]>;
+  markIndexed(ids: string[]): Promise<void>;
+  deleteExpired(): Promise<number>;
+  countByWorkspace(workspaceId: string): Promise<number>;
+  getThreadMessages(workspaceId: string, thread: string, limit?: number): Promise<schema.AgentMessage[]>;
+}
+
+export const agentMessageQueries: AgentMessageQueries = {
+  async create(data: schema.NewAgentMessage): Promise<schema.AgentMessage> {
+    const db = getDb();
+    const result = await db.insert(schema.agentMessages).values(data).returning();
+    return result[0];
+  },
+
+  async createMany(data: schema.NewAgentMessage[]): Promise<schema.AgentMessage[]> {
+    if (data.length === 0) return [];
+    const db = getDb();
+    const result = await db
+      .insert(schema.agentMessages)
+      .values(data)
+      .onConflictDoNothing() // Skip duplicates based on workspace_original_unique constraint
+      .returning();
+    return result;
+  },
+
+  async findById(id: string): Promise<schema.AgentMessage | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.agentMessages)
+      .where(eq(schema.agentMessages.id, id));
+    return result[0] ?? null;
+  },
+
+  async findByOriginalId(workspaceId: string, originalId: string): Promise<schema.AgentMessage | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(schema.agentMessages)
+      .where(
+        and(
+          eq(schema.agentMessages.workspaceId, workspaceId),
+          eq(schema.agentMessages.originalId, originalId)
+        )
+      );
+    return result[0] ?? null;
+  },
+
+  async query(params: MessageQuery): Promise<schema.AgentMessage[]> {
+    const db = getDb();
+    const conditions = [eq(schema.agentMessages.workspaceId, params.workspaceId)];
+
+    if (params.fromAgent) {
+      conditions.push(eq(schema.agentMessages.fromAgent, params.fromAgent));
+    }
+    if (params.toAgent) {
+      conditions.push(eq(schema.agentMessages.toAgent, params.toAgent));
+    }
+    if (params.thread) {
+      conditions.push(eq(schema.agentMessages.thread, params.thread));
+    }
+    if (params.channel) {
+      conditions.push(eq(schema.agentMessages.channel, params.channel));
+    }
+    if (params.sinceTs) {
+      conditions.push(sql`${schema.agentMessages.messageTs} >= ${params.sinceTs}`);
+    }
+    if (params.beforeTs) {
+      conditions.push(sql`${schema.agentMessages.messageTs} < ${params.beforeTs}`);
+    }
+    if (!params.includeExpired) {
+      conditions.push(
+        sql`(${schema.agentMessages.expiresAt} IS NULL OR ${schema.agentMessages.expiresAt} > NOW())`
+      );
+    }
+
+    let query = db
+      .select()
+      .from(schema.agentMessages)
+      .where(and(...conditions))
+      .orderBy(desc(schema.agentMessages.messageTs));
+
+    if (params.limit) {
+      query = query.limit(params.limit) as typeof query;
+    }
+    if (params.offset) {
+      query = query.offset(params.offset) as typeof query;
+    }
+
+    return query;
+  },
+
+  async getUnindexed(workspaceId: string, limit = 100): Promise<schema.AgentMessage[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.agentMessages)
+      .where(
+        and(
+          eq(schema.agentMessages.workspaceId, workspaceId),
+          isNull(schema.agentMessages.indexedAt),
+          sql`(${schema.agentMessages.expiresAt} IS NULL OR ${schema.agentMessages.expiresAt} > NOW())`
+        )
+      )
+      .orderBy(schema.agentMessages.messageTs)
+      .limit(limit);
+  },
+
+  async markIndexed(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const db = getDb();
+    await db
+      .update(schema.agentMessages)
+      .set({ indexedAt: new Date() })
+      .where(inArray(schema.agentMessages.id, ids));
+  },
+
+  async deleteExpired(): Promise<number> {
+    const db = getDb();
+    const result = await db
+      .delete(schema.agentMessages)
+      .where(
+        and(
+          isNotNull(schema.agentMessages.expiresAt),
+          lt(schema.agentMessages.expiresAt, new Date())
+        )
+      )
+      .returning({ id: schema.agentMessages.id });
+    return result.length;
+  },
+
+  async countByWorkspace(workspaceId: string): Promise<number> {
+    const db = getDb();
+    const result = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.agentMessages)
+      .where(eq(schema.agentMessages.workspaceId, workspaceId));
+    return Number(result[0]?.count ?? 0);
+  },
+
+  async getThreadMessages(workspaceId: string, thread: string, limit = 50): Promise<schema.AgentMessage[]> {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.agentMessages)
+      .where(
+        and(
+          eq(schema.agentMessages.workspaceId, workspaceId),
+          eq(schema.agentMessages.thread, thread),
+          sql`(${schema.agentMessages.expiresAt} IS NULL OR ${schema.agentMessages.expiresAt} > NOW())`
+        )
+      )
+      .orderBy(schema.agentMessages.messageTs)
+      .limit(limit);
   },
 };
 

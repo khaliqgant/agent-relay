@@ -336,7 +336,7 @@ describe('CloudSyncService', () => {
     });
 
     it('should throw when sending message while not connected', async () => {
-      service.stop();
+      await service.stop();
 
       await expect(
         service.sendCrossMachineMessage('daemon-2', 'Bob', 'Alice', 'Hello!')
@@ -451,7 +451,7 @@ describe('CloudSyncService', () => {
     });
 
     it('should throw when syncing credentials while not connected', async () => {
-      service.stop();
+      await service.stop();
 
       await expect(service.syncCredentials()).rejects.toThrow('Not connected to cloud');
     });

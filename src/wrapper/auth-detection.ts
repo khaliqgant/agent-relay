@@ -133,7 +133,7 @@ export function detectAuthRevocation(
  */
 function getConfidenceLevel(
   pattern: RegExp,
-  matchedText: string
+  _matchedText: string
 ): 'high' | 'medium' | 'low' {
   const patternStr = pattern.source.toLowerCase();
 

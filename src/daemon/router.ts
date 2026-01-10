@@ -22,6 +22,7 @@ import type {
 import type { StorageAdapter } from '../storage/adapter.js';
 import type { AgentRegistry } from './agent-registry.js';
 import { routerLog } from '../utils/logger.js';
+import { RateLimiter, NoOpRateLimiter, type RateLimitConfig } from './rate-limiter.js';
 
 export interface RoutableConnection {
   id: string;
@@ -121,18 +122,27 @@ export class Router {
   /** Callback when processing state changes (for real-time dashboard updates) */
   private onProcessingStateChange?: () => void;
 
+  /** Rate limiter for per-agent throttling */
+  private rateLimiter: RateLimiter;
+
   constructor(options: {
     storage?: StorageAdapter;
     delivery?: Partial<DeliveryReliabilityOptions>;
     registry?: AgentRegistry;
     onProcessingStateChange?: () => void;
     crossMachineHandler?: CrossMachineHandler;
+    /** Rate limit configuration. Set to null to disable rate limiting. */
+    rateLimit?: Partial<RateLimitConfig> | null;
   } = {}) {
     this.storage = options.storage;
     this.deliveryOptions = { ...DEFAULT_DELIVERY_OPTIONS, ...options.delivery };
     this.registry = options.registry;
     this.onProcessingStateChange = options.onProcessingStateChange;
     this.crossMachineHandler = options.crossMachineHandler;
+    // Initialize rate limiter (null = disabled)
+    this.rateLimiter = options.rateLimit === null
+      ? new NoOpRateLimiter()
+      : new RateLimiter(options.rateLimit);
   }
 
   /**
@@ -421,6 +431,12 @@ export class Router {
     const senderName = from.agentName;
     if (!senderName) {
       routerLog.warn('Dropping message - sender has no name');
+      return;
+    }
+
+    // Check rate limit
+    if (!this.rateLimiter.tryAcquire(senderName)) {
+      routerLog.warn(`Rate limited: ${senderName}`);
       return;
     }
 
@@ -721,6 +737,20 @@ export class Router {
 
   get pendingDeliveryCount(): number {
     return this.pendingDeliveries.size;
+  }
+
+  /**
+   * Get rate limiter statistics.
+   */
+  getRateLimiterStats(): { agentCount: number; config: RateLimitConfig } {
+    return this.rateLimiter.getStats();
+  }
+
+  /**
+   * Reset rate limit for a specific agent (admin operation).
+   */
+  resetRateLimit(agentName: string): void {
+    this.rateLimiter.reset(agentName);
   }
 
   /**

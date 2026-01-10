@@ -22,6 +22,8 @@ import { deriveSshPassword } from '../services/ssh-security.js';
 
 export const codexAuthHelperRouter = Router();
 
+const WORKSPACE_SSH_PORT = 3022;
+
 // Store pending auth sessions (sessionId -> session data mapping)
 interface PendingAuthSession {
   userId: string;
@@ -252,7 +254,7 @@ codexAuthHelperRouter.get('/tunnel-info/:workspaceId', async (req: Request, res:
     const apiPort = parseInt(url.port, 10) || 80;
 
     // SSH connection info varies by environment:
-    // - Fly.io: Use public fly.dev hostname with port 2222 (exposed via TCP service)
+    // - Fly.io: Use public fly.dev hostname with port 3022 (exposed via TCP service)
     // - Local Docker: Use localhost with derived SSH port (22000 + apiPort - 3000)
     const isOnFly = !!process.env.FLY_APP_NAME;
     const isLocalDocker = (host === 'localhost' || host === '127.0.0.1') && apiPort >= 3000;
@@ -261,11 +263,11 @@ codexAuthHelperRouter.get('/tunnel-info/:workspaceId', async (req: Request, res:
     let sshPort: number;
 
     if (isOnFly) {
-      // Fly.io public hostname - SSH is exposed as a public TCP service on port 2222
-      // Users can SSH directly from their machine to {app}.fly.dev:2222
+      // Fly.io public hostname - SSH is exposed as a public TCP service on port 3022
+      // Users can SSH directly from their machine to {app}.fly.dev:3022
       const appName = `ar-${workspace.id.substring(0, 8)}`;
       sshHost = `${appName}.fly.dev`;
-      sshPort = 2222;
+      sshPort = WORKSPACE_SSH_PORT;
     } else if (isLocalDocker) {
       // Local Docker: SSH port is derived from API port
       // API port 3500 -> SSH port 22500 (formula: 22000 + apiPort - 3000)
@@ -274,7 +276,7 @@ codexAuthHelperRouter.get('/tunnel-info/:workspaceId', async (req: Request, res:
     } else {
       // Default fallback
       sshHost = host;
-      sshPort = 2222;
+      sshPort = WORKSPACE_SSH_PORT;
     }
 
     // SSH password is derived per-workspace for security
@@ -358,7 +360,7 @@ codexAuthHelperRouter.get('/auth-status/:workspaceId', async (req: Request, res:
     }
 
     res.json({ authenticated: false });
-  } catch (error) {
+  } catch (_error) {
     // Workspace might not be reachable, return false
     res.json({ authenticated: false });
   }

@@ -15,10 +15,11 @@ if [[ "$(id -u)" == "0" ]]; then
 
   # ============================================================================
   # SSH Server Setup (for CLI tunneling - Codex OAuth callback forwarding)
-  # When ENABLE_SSH=true, start SSH server on port 2222 for secure tunneling
+  # When ENABLE_SSH=true, start SSH server on port 3022 for secure tunneling
   # ============================================================================
   if [[ "${ENABLE_SSH:-false}" == "true" ]]; then
-    log "Starting SSH server on port 2222..."
+    SSH_PORT="${SSH_PORT:-3022}"
+    log "Starting SSH server on port ${SSH_PORT}..."
 
     # Set SSH password for workspace user
     SSH_PASS="${SSH_PASSWORD:-devpassword}"
@@ -26,10 +27,10 @@ if [[ "$(id -u)" == "0" ]]; then
 
     # Configure SSH server for tunneling
     # - Allow password auth (for CLI simplicity)
-    # - Listen on port 2222 (non-privileged)
+    # - Listen on port 3022 (non-privileged)
     # - Allow TCP forwarding (for port tunneling)
     cat > /etc/ssh/sshd_config.d/workspace.conf <<SSHEOF
-Port 2222
+Port ${SSH_PORT}
 PasswordAuthentication yes
 PermitRootLogin no
 AllowUsers workspace
@@ -39,8 +40,8 @@ X11Forwarding no
 SSHEOF
 
     # Start SSH server in background
-    /usr/sbin/sshd -e
-    log "SSH server started (port 2222, user: workspace)"
+    /usr/sbin/sshd -e -p "${SSH_PORT}"
+    log "SSH server started (port ${SSH_PORT}, user: workspace)"
   fi
 
   # ============================================================================

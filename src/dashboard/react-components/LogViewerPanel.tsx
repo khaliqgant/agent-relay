@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { LogViewer } from './LogViewer';
 import { getAgentColor, getAgentInitials } from '../lib/colors';
+import { api } from '../lib/api';
 import type { Agent } from '../types';
 
 export type PanelPosition = 'right' | 'bottom' | 'fullscreen';
@@ -37,6 +38,25 @@ export function LogViewerPanel({
 }: LogViewerPanelProps) {
   const colors = getAgentColor(agent.name);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(true); // Default to collapsed
+  const [isInterrupting, setIsInterrupting] = useState(false);
+
+  // Handle interrupt button click
+  const handleInterrupt = useCallback(async () => {
+    if (isInterrupting) return;
+
+    setIsInterrupting(true);
+    try {
+      const result = await api.interruptAgent(agent.name);
+      if (!result.success) {
+        console.error('Failed to interrupt agent:', result.error);
+      }
+    } catch (err) {
+      console.error('Error interrupting agent:', err);
+    } finally {
+      // Brief delay to show the button was pressed
+      setTimeout(() => setIsInterrupting(false), 500);
+    }
+  }, [agent.name, isInterrupting]);
 
   // Close on Escape
   useEffect(() => {
@@ -264,6 +284,20 @@ export function LogViewerPanel({
               </button>
             </div>
 
+            {/* Interrupt button - break agent out of stuck loops */}
+            <button
+              className={`p-2 rounded-lg transition-all duration-200 ${
+                isInterrupting
+                  ? 'bg-[#d29922]/20 text-[#d29922] animate-pulse'
+                  : 'text-[#8b949e] hover:text-[#d29922] hover:bg-[#d29922]/10 hover:shadow-[0_0_8px_rgba(210,153,34,0.2)]'
+              }`}
+              onClick={handleInterrupt}
+              disabled={isInterrupting}
+              title="Interrupt agent (Ctrl+C) - break out of current task"
+            >
+              <InterruptIcon />
+            </button>
+
             {/* Close button */}
             <button
               className="p-2 rounded-lg text-[#8b949e] hover:text-[#f85149] hover:bg-[#f85149]/10 transition-all duration-200 hover:shadow-[0_0_8px_rgba(248,81,73,0.2)]"
@@ -404,6 +438,15 @@ function AgentSwitcher({ agents, currentAgent, onSelect }: AgentSwitcherProps) {
 }
 
 // Icons
+function InterruptIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {/* Stop/pause hand icon */}
+      <rect x="6" y="6" width="12" height="12" rx="1" />
+    </svg>
+  );
+}
+
 function CloseIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

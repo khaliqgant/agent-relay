@@ -107,12 +107,19 @@ export interface StorageAdapter {
  * Can be set via CLI options or environment variables.
  */
 export interface StorageConfig {
-  /** Storage type: 'sqlite', 'none', or 'postgres' (future) */
+  /** Storage type: 'sqlite', 'sqlite-batched', 'none', or 'postgres' (future) */
   type?: string;
   /** Path for SQLite database */
   path?: string;
   /** Connection URL for database (postgres://..., mysql://...) */
   url?: string;
+  /** Batch configuration for batched adapters */
+  batch?: {
+    maxBatchSize?: number;
+    maxBatchDelayMs?: number;
+    maxBatchBytes?: number;
+    logBatches?: boolean;
+  };
 }
 
 /**
@@ -283,6 +290,18 @@ export async function createStorageAdapter(
       throw new Error(
         'PostgreSQL storage is not yet implemented. Use sqlite or none.'
       );
+    }
+
+    case 'sqlite-batched':
+    case 'batched': {
+      console.log('[storage] Using batched SQLite storage');
+      const { BatchedSqliteAdapter } = await import('./batched-sqlite-adapter.js');
+      const adapter = new BatchedSqliteAdapter({
+        dbPath: finalConfig.path!,
+        batch: finalConfig.batch,
+      });
+      await adapter.init();
+      return adapter;
     }
 
     case 'sqlite':

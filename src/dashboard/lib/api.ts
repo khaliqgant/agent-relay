@@ -483,6 +483,29 @@ export const api = {
   },
 
   /**
+   * Interrupt an agent by sending Ctrl+C (SIGINT equivalent).
+   * Use this to break an agent out of a stuck loop for refocusing.
+   * @param agentName - The agent's name
+   */
+  async interruptAgent(agentName: string): Promise<ApiResponse<void>> {
+    try {
+      const response = await apiFetch(getApiUrl(`/api/agents/by-name/${encodeURIComponent(agentName)}/interrupt`), {
+        method: 'POST',
+      });
+
+      const result = await response.json() as { success?: boolean; error?: string };
+
+      if (response.ok && result.success) {
+        return { success: true };
+      }
+
+      return { success: false, error: result.error || 'Failed to interrupt agent' };
+    } catch (_error) {
+      return { success: false, error: 'Network error' };
+    }
+  },
+
+  /**
    * Get dashboard data (fallback for REST polling)
    */
   async getData(): Promise<ApiResponse<DashboardData>> {

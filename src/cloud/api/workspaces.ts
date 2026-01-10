@@ -1796,7 +1796,7 @@ workspacesRouter.all('/:id/proxy/{*proxyPath}', async (req: Request, res: Respon
 workspacesRouter.post('/:id/agents', async (req: Request, res: Response) => {
   const userId = req.session.userId;
   const { id } = req.params;
-  const { name, provider, task, temporary, interactive } = req.body;
+  const { name, provider, task, temporary: _temporary, interactive } = req.body;
 
   if (!userId) {
     return res.status(401).json({ error: 'Not authenticated' });

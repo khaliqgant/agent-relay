@@ -30,7 +30,7 @@ import {
   injectWithRetry as sharedInjectWithRetry,
   CLI_QUIRKS,
 } from './shared.js';
-import { detectProviderAuthRevocation, type AuthRevocationResult } from './auth-detection.js';
+import { detectProviderAuthRevocation } from './auth-detection.js';
 
 /** Maximum lines to keep in output buffer */
 const MAX_BUFFER_LINES = 10000;
