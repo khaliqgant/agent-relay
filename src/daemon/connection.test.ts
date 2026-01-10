@@ -55,7 +55,7 @@ function makeHello(agent: string): Envelope<HelloPayload> {
 }
 
 describe('Connection', () => {
-  it('transitions to ACTIVE after HELLO and fires onActive', () => {
+  it('transitions to ACTIVE after HELLO and fires onActive', async () => {
     const socket = new MockSocket();
     const connection = new Connection(socket as unknown as Socket, { heartbeatMs: 50 });
     const onActive = vi.fn();
@@ -65,6 +65,8 @@ describe('Connection', () => {
 
     expect(connection.state).toBe('ACTIVE');
     expect(onActive).toHaveBeenCalledTimes(1);
+    // Wait for write queue to drain (uses setImmediate)
+    await new Promise((r) => setImmediate(r));
     expect(socket.written.length).toBeGreaterThan(0);
   });
 
